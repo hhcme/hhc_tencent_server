@@ -5997,6 +5997,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudSnapshots,
         .cloudBilling,
         .securityGroups,
+        .securityGroupActions,
         .snapshotActions,
         .diskAttachmentActions,
         .powerActions,
@@ -6152,6 +6153,31 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             egress: Self.mapAlibabaSecurityGroupPermissions(permissions, direction: .egress),
             capturedAt: capturedAt
         )
+    }
+
+    func applySecurityGroupRuleChange(
+        credential: CloudProviderCredential,
+        preview: CloudSecurityGroupRuleChangePreview
+    ) async throws -> String? {
+        let action: String
+        switch (preview.action, preview.proposedRule.direction) {
+        case (.add, .ingress):
+            action = "AuthorizeSecurityGroup"
+        case (.add, .egress):
+            action = "AuthorizeSecurityGroupEgress"
+        case (.remove, .ingress):
+            action = "RevokeSecurityGroup"
+        case (.remove, .egress):
+            action = "RevokeSecurityGroupEgress"
+        }
+
+        let response: AlibabaSecurityGroupActionResponse = try await request(
+            credential: credential,
+            host: "ecs.\(preview.group.regionId).aliyuncs.com",
+            action: action,
+            queryItems: Self.alibabaSecurityGroupRuleQueryItems(preview)
+        )
+        return response.requestId
     }
 
     func fetchDisks(
@@ -6557,6 +6583,60 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
                 modifiedTime: permission.createTime
             )
         }
+    }
+
+    private static func alibabaSecurityGroupRuleQueryItems(
+        _ preview: CloudSecurityGroupRuleChangePreview
+    ) -> [URLQueryItem] {
+        let rule = preview.proposedRule
+        var items = [
+            URLQueryItem(name: "RegionId", value: preview.group.regionId),
+            URLQueryItem(name: "SecurityGroupId", value: preview.group.securityGroupId),
+            URLQueryItem(name: "IpProtocol", value: normalizedAlibabaProtocol(rule.protocolName)),
+            URLQueryItem(name: "PortRange", value: normalizedAlibabaPortRange(rule.port)),
+            URLQueryItem(name: "Policy", value: normalizedAlibabaPolicy(rule.action)),
+            URLQueryItem(name: "Priority", value: "\(rule.policyIndex ?? 1)"),
+        ]
+        switch rule.direction {
+        case .ingress:
+            appendQueryItem(name: "SourceCidrIp", value: rule.cidrBlock, to: &items)
+            appendQueryItem(name: "Ipv6SourceCidrIp", value: rule.ipv6CidrBlock, to: &items)
+            appendQueryItem(name: "SourceGroupId", value: rule.referencedSecurityGroupId, to: &items)
+        case .egress:
+            appendQueryItem(name: "DestCidrIp", value: rule.cidrBlock, to: &items)
+            appendQueryItem(name: "Ipv6DestCidrIp", value: rule.ipv6CidrBlock, to: &items)
+            appendQueryItem(name: "DestGroupId", value: rule.referencedSecurityGroupId, to: &items)
+        }
+        appendQueryItem(name: "Description", value: rule.description, to: &items)
+        return items
+    }
+
+    private static func appendQueryItem(name: String, value: String?, to items: inout [URLQueryItem]) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return }
+        items.append(URLQueryItem(name: name, value: trimmed))
+    }
+
+    private static func normalizedAlibabaProtocol(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "all" : trimmed.lowercased()
+    }
+
+    private static func normalizedAlibabaPolicy(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "accept" : trimmed.lowercased()
+    }
+
+    private static func normalizedAlibabaPortRange(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "-1/-1" }
+        if trimmed.uppercased() == "ALL" || trimmed == "-1" {
+            return "-1/-1"
+        }
+        if trimmed.contains("/") {
+            return trimmed
+        }
+        return "\(trimmed)/\(trimmed)"
     }
 }
 
@@ -7380,6 +7460,14 @@ private struct AlibabaDiskActionResponse: Decodable {
 }
 
 private struct AlibabaInstanceActionResponse: Decodable {
+    var requestId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case requestId = "RequestId"
+    }
+}
+
+private struct AlibabaSecurityGroupActionResponse: Decodable {
     var requestId: String?
 
     enum CodingKeys: String, CodingKey {

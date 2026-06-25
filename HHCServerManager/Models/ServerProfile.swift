@@ -1344,9 +1344,22 @@ struct CloudSecurityGroupRuleChangePreview: Identifiable, Equatable, Hashable, S
     }
 
     var commandPreview: String {
-        let operation = action == .add ? "Authorize" : "Revoke"
-        let suffix = proposedRule.direction == .ingress ? "Ingress" : "Egress"
-        return "Tencent Cloud \(operation)SecurityGroup\(suffix) \(proposedRule.summary)"
+        let actionName: String
+        switch (group.providerId, action, proposedRule.direction) {
+        case (.alibabaCloud, .add, .ingress):
+            actionName = "AuthorizeSecurityGroup"
+        case (.alibabaCloud, .add, .egress):
+            actionName = "AuthorizeSecurityGroupEgress"
+        case (.alibabaCloud, .remove, .ingress):
+            actionName = "RevokeSecurityGroup"
+        case (.alibabaCloud, .remove, .egress):
+            actionName = "RevokeSecurityGroupEgress"
+        default:
+            let operation = action == .add ? "Authorize" : "Revoke"
+            let suffix = proposedRule.direction == .ingress ? "Ingress" : "Egress"
+            actionName = "\(operation)SecurityGroup\(suffix)"
+        }
+        return "\(group.providerId.displayName) \(actionName) \(proposedRule.summary)"
     }
 
     static func adding(

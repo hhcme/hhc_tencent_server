@@ -4217,6 +4217,102 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].queryValue("SecurityGroupId"), "sg-1")
     }
 
+    func testAlibabaCloudAdapterAppliesSecurityGroupRuleChangesUsesSignedECSAPI() async throws {
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockAlibabaCloudTransport(responses: [
+            """
+            {
+              "RequestId": "request-authorize"
+            }
+            """,
+            """
+            {
+              "RequestId": "request-revoke"
+            }
+            """,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            nonce: { "nonce-sg-action" },
+            timeout: 1
+        )
+        let group = CloudSecurityGroup(
+            accountId: UUID(),
+            providerId: .alibabaCloud,
+            regionId: "ap-southeast-1",
+            securityGroupId: "sg-1",
+            name: "web",
+            description: nil,
+            projectId: "rg-1",
+            isDefault: nil,
+            createdTime: nil,
+            updatedTime: nil
+        )
+        let addPreview = CloudSecurityGroupRuleChangePreview.adding(
+            draft: CloudSecurityGroupRuleDraft(
+                direction: .ingress,
+                protocolName: "TCP",
+                port: "443",
+                cidrBlock: "203.0.113.0/24",
+                action: "ACCEPT",
+                description: "HTTPS"
+            ),
+            to: CloudSecurityGroupPolicySnapshot(group: group, version: nil, ingress: [], egress: [], capturedAt: capturedAt)
+        )
+        let removePreview = CloudSecurityGroupRuleChangePreview.removing(
+            rule: CloudSecurityGroupRule(
+                direction: .egress,
+                policyIndex: 2,
+                protocolName: "udp",
+                port: "53/53",
+                cidrBlock: "198.51.100.0/24",
+                ipv6CidrBlock: nil,
+                referencedSecurityGroupId: nil,
+                action: "drop",
+                description: "DNS deny",
+                modifiedTime: nil
+            ),
+            from: CloudSecurityGroupPolicySnapshot(group: group, version: nil, ingress: [], egress: [], capturedAt: capturedAt)
+        )
+        let credential = CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK")
+
+        XCTAssertTrue(addPreview.commandPreview.hasPrefix("Alibaba Cloud AuthorizeSecurityGroup "))
+        let authorizeRequestId = try await adapter.applySecurityGroupRuleChange(
+            credential: credential,
+            preview: addPreview
+        )
+        let revokeRequestId = try await adapter.applySecurityGroupRuleChange(
+            credential: credential,
+            preview: removePreview
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.securityGroupActions))
+        XCTAssertEqual(authorizeRequestId, "request-authorize")
+        XCTAssertEqual(revokeRequestId, "request-revoke")
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-action"), "AuthorizeSecurityGroup")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-signature-nonce"), "nonce-sg-action")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("ACS3-HMAC-SHA256 Credential=ALIYUNAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("RegionId"), "ap-southeast-1")
+        XCTAssertEqual(transport.requests[0].queryValue("SecurityGroupId"), "sg-1")
+        XCTAssertEqual(transport.requests[0].queryValue("IpProtocol"), "tcp")
+        XCTAssertEqual(transport.requests[0].queryValue("PortRange"), "443/443")
+        XCTAssertEqual(transport.requests[0].queryValue("SourceCidrIp"), "203.0.113.0/24")
+        XCTAssertEqual(transport.requests[0].queryValue("Policy"), "accept")
+        XCTAssertEqual(transport.requests[0].queryValue("Priority"), "1")
+        XCTAssertEqual(transport.requests[0].queryValue("Description"), "HTTPS")
+        XCTAssertEqual(transport.requests[1].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "x-acs-action"), "RevokeSecurityGroupEgress")
+        XCTAssertEqual(transport.requests[1].queryValue("IpProtocol"), "udp")
+        XCTAssertEqual(transport.requests[1].queryValue("PortRange"), "53/53")
+        XCTAssertEqual(transport.requests[1].queryValue("DestCidrIp"), "198.51.100.0/24")
+        XCTAssertEqual(transport.requests[1].queryValue("Policy"), "drop")
+        XCTAssertEqual(transport.requests[1].queryValue("Priority"), "2")
+        XCTAssertEqual(transport.requests[1].queryValue("Description"), "DNS deny")
+    }
+
     func testHuaweiCloudAdapterFetchRegionsAndInstancesUsesSignedECSAPI() async throws {
         let transport = MockHuaweiCloudTransport(responses: [
             """
