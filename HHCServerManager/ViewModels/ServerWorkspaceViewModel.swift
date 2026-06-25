@@ -98,6 +98,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var verdaccioProxyDraft = VerdaccioNginxProxyDraft(serverName: "_")
     @Published var verdaccioProxyUpsertResult: NginxConfigUpsertResult?
     @Published var verdaccioNpmSmokeTestResult: VerdaccioNpmSmokeTestResult?
+    @Published var verdaccioServiceActionResult: VerdaccioServiceActionResult?
+    @Published var verdaccioUpgradeResult: VerdaccioUpgradeResult?
     @Published var verdaccioUsernameDraft = ""
     @Published var verdaccioPasswordDraft = ""
     @Published var verdaccioEmailDraft = "smoke@example.com"
@@ -112,6 +114,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isWritingVerdaccioProxy = false
     @Published var isReloadingVerdaccioProxy = false
     @Published var isRunningVerdaccioNpmSmokeTest = false
+    @Published var isControllingVerdaccioService = false
+    @Published var isUpgradingVerdaccio = false
     @Published var registryErrorMessage: String?
     @Published var registryActionMessage: String?
     @Published var commandResult: CommandResult?
@@ -2080,6 +2084,118 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isRunningVerdaccioNpmSmokeTest = false
+                }
+            }
+        }
+    }
+
+    func performVerdaccioServiceAction(
+        _ action: VerdaccioServiceAction,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager,
+        repository: ServerRepository
+    ) {
+        guard !isControllingVerdaccioService else { return }
+        isControllingVerdaccioService = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+
+        Task {
+            do {
+                let result = try await verdaccioManager.performServiceAction(
+                    action,
+                    draft: registryDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: result.serviceName,
+                    action: "verdaccio-\(action.rawValue)",
+                    beforeSnapshot: nil,
+                    afterSnapshot: "active=\(result.snapshot.activeState), sub=\(result.snapshot.subState)",
+                    status: "success",
+                    message: "Verdaccio \(action.rawValue) completed."
+                )
+                await MainActor.run {
+                    self.verdaccioServiceActionResult = result
+                    self.verdaccioStatusSnapshot = result.snapshot
+                    self.registryActionMessage = "\(action.displayName) requested for \(result.serviceName)."
+                    self.isControllingVerdaccioService = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: "\(registryDraft.serviceName.trimmingCharacters(in: .whitespacesAndNewlines)).service",
+                    action: "verdaccio-\(action.rawValue)",
+                    beforeSnapshot: nil,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isControllingVerdaccioService = false
+                }
+            }
+        }
+    }
+
+    func upgradeVerdaccio(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager,
+        repository: ServerRepository
+    ) {
+        guard !isUpgradingVerdaccio else { return }
+        isUpgradingVerdaccio = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+
+        Task {
+            do {
+                let result = try await verdaccioManager.upgrade(
+                    draft: registryDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: result.servicePath,
+                    action: "verdaccio-upgrade",
+                    beforeSnapshot: "backup=\(result.backupPath)",
+                    afterSnapshot: "version=\(result.version), active=\(result.snapshot.activeState), sub=\(result.snapshot.subState)",
+                    status: "success",
+                    message: "Upgraded Verdaccio systemd unit to \(result.version)."
+                )
+                await MainActor.run {
+                    self.verdaccioUpgradeResult = result
+                    self.verdaccioStatusSnapshot = result.snapshot
+                    self.registryActionMessage = "Upgraded Verdaccio to \(result.version). Health check: \(result.healthCheckOutput)."
+                    self.isUpgradingVerdaccio = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: "/etc/systemd/system/\(registryDraft.serviceName.trimmingCharacters(in: .whitespacesAndNewlines)).service",
+                    action: "verdaccio-upgrade",
+                    beforeSnapshot: nil,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isUpgradingVerdaccio = false
                 }
             }
         }

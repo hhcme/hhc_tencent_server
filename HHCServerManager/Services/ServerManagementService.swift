@@ -1343,6 +1343,42 @@ struct VerdaccioNpmSmokeTestResult: Equatable, Sendable {
     var requireOutput: String
 }
 
+enum VerdaccioServiceAction: String, CaseIterable, Identifiable, Equatable, Sendable {
+    case start
+    case stop
+    case restart
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .start:
+            "Start"
+        case .stop:
+            "Stop"
+        case .restart:
+            "Restart"
+        }
+    }
+}
+
+struct VerdaccioServiceActionResult: Equatable, Sendable {
+    var action: VerdaccioServiceAction
+    var serviceName: String
+    var commandOutput: String
+    var healthCheckOutput: String?
+    var snapshot: VerdaccioStatusSnapshot
+}
+
+struct VerdaccioUpgradeResult: Equatable, Sendable {
+    var version: String
+    var servicePath: String
+    var backupPath: String
+    var healthCheckURL: String
+    var healthCheckOutput: String
+    var snapshot: VerdaccioStatusSnapshot
+}
+
 enum RegistryConfigurationError: LocalizedError, Equatable {
     case invalidName
     case invalidPath(String)
@@ -1925,6 +1961,74 @@ final class VerdaccioManager: @unchecked Sendable {
         )
     }
 
+    func performServiceAction(
+        _ action: VerdaccioServiceAction,
+        draft: VerdaccioInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioServiceActionResult {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(15) {
+            try await sshClient.execute(Self.serviceActionCommand(action, for: draft), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not \(action.rawValue) Verdaccio."))
+        }
+
+        var healthCheckOutput: String?
+        if action != .stop {
+            let healthResult = try await CloudProviderRequestRunner.withTimeout(10) {
+                try await sshClient.execute("curl -fsS --max-time 5 \(Self.shellQuote(Self.healthCheckURL(for: draft)))", profile: profile)
+            }
+            guard healthResult.exitCode == 0 else {
+                throw SSHClientError.processFailed(Self.redactedOutput(from: healthResult, fallback: "Verdaccio health check failed after \(action.rawValue)."))
+            }
+            healthCheckOutput = DeploymentLogRedactor.redact(healthResult.stdout.trimmed.nilIfEmpty ?? "ok")
+        }
+
+        let snapshot = try await loadStatus(draft: draft, profile: profile, sshClient: sshClient)
+        return VerdaccioServiceActionResult(
+            action: action,
+            serviceName: "\(draft.serviceName.trimmed).service",
+            commandOutput: DeploymentLogRedactor.redact(result.stdout.trimmed.nilIfEmpty ?? "ok"),
+            healthCheckOutput: healthCheckOutput,
+            snapshot: snapshot
+        )
+    }
+
+    func upgrade(
+        draft: VerdaccioInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioUpgradeResult {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let servicePath = "/etc/systemd/system/\(draft.serviceName.trimmed).service"
+        let backupPath = "\(draft.installPath.trimmed)/backups/\(draft.serviceName.trimmed).service.hhc-backup-\(Self.timestamp(for: now()))"
+        let result = try await CloudProviderRequestRunner.withTimeout(30) {
+            try await sshClient.execute(Self.upgradeCommand(for: draft, backupPath: backupPath), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not upgrade Verdaccio."))
+        }
+
+        let healthCheckURL = Self.healthCheckURL(for: draft)
+        let healthResult = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute("curl -fsS --max-time 5 \(Self.shellQuote(healthCheckURL))", profile: profile)
+        }
+        guard healthResult.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: healthResult, fallback: "Verdaccio health check failed after upgrade."))
+        }
+        let snapshot = try await loadStatus(draft: draft, profile: profile, sshClient: sshClient)
+        return VerdaccioUpgradeResult(
+            version: draft.version.trimmed,
+            servicePath: servicePath,
+            backupPath: backupPath,
+            healthCheckURL: healthCheckURL,
+            healthCheckOutput: DeploymentLogRedactor.redact(healthResult.stdout.trimmed.nilIfEmpty ?? "ok"),
+            snapshot: snapshot
+        )
+    }
+
     func createBackup(
         draft: VerdaccioInstallDraft,
         profile: ServerProfile,
@@ -2346,6 +2450,31 @@ final class VerdaccioManager: @unchecked Sendable {
         printf '__HHC_VERDACCIO_NPM_PUBLISH__%s\\n' "$(tail -n 3 "$publish_log" | tr '\\n' ' ' | sed 's/[[:space:]]\\{1,\\}/ /g')"; \
         printf '__HHC_VERDACCIO_NPM_INSTALL__%s\\n' "$(tail -n 3 "$install_log" | tr '\\n' ' ' | sed 's/[[:space:]]\\{1,\\}/ /g')"; \
         printf '__HHC_VERDACCIO_NPM_REQUIRE__%s\\n' "$require_output"
+        """
+    }
+
+    static func serviceActionCommand(_ action: VerdaccioServiceAction, for draft: VerdaccioInstallDraft) -> String {
+        let service = shellQuote("\(draft.serviceName.trimmed).service")
+        return "set -e; service=\(service); systemctl \(action.rawValue) \"$service\"; systemctl show \"$service\" --property=ActiveState --property=SubState --no-pager"
+    }
+
+    static func upgradeCommand(for draft: VerdaccioInstallDraft, backupPath: String) throws -> String {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let servicePath = "/etc/systemd/system/\(draft.serviceName.trimmed).service"
+        let serviceData = Data(try VerdaccioConfigurationBuilder.systemdService(for: draft).utf8).base64EncodedString()
+        return """
+        set -e; \
+        service_path=\(shellQuote(servicePath)); backup_path=\(shellQuote(backupPath)); service=\(shellQuote("\(draft.serviceName.trimmed).service")); \
+        backup_dir=$(dirname -- "$backup_path"); install -d -m 0750 "$backup_dir"; \
+        test -f "$service_path"; \
+        cp -p -- "$service_path" "$backup_path"; \
+        base64 -d > "$service_path" <<'__HHC_VERDACCIO_SERVICE_UPGRADE__'
+        \(serviceData)
+        __HHC_VERDACCIO_SERVICE_UPGRADE__
+        chmod 0644 "$service_path"; \
+        systemctl daemon-reload; \
+        systemctl restart "$service"; \
+        printf '__HHC_VERDACCIO_SERVICE_BACKUP__%s\\n' "$backup_path"
         """
     }
 

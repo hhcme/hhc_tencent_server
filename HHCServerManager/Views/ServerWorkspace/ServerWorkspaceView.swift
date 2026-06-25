@@ -800,6 +800,7 @@ struct ServerWorkspaceView: View {
 
                 registryPreflightSection
                 verdaccioStatusSection
+                verdaccioServiceSection
                 verdaccioUsersSection
                 verdaccioBackupSection
                 verdaccioProxySection
@@ -868,6 +869,68 @@ struct ServerWorkspaceView: View {
                     .frame(maxWidth: .infinity, minHeight: 140)
             }
         }
+    }
+
+    private var verdaccioServiceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Service")
+                .font(.headline)
+
+            HStack(spacing: 8) {
+                ForEach(VerdaccioServiceAction.allCases) { action in
+                    Button(role: action == .stop ? .destructive : nil) {
+                        performVerdaccioServiceAction(action)
+                    } label: {
+                        if viewModel.isControllingVerdaccioService {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label(action.displayName, systemImage: verdaccioServiceActionIcon(action))
+                        }
+                    }
+                    .disabled(isRegistryBusy)
+                }
+
+                Divider()
+                    .frame(height: 20)
+
+                Button(role: .destructive) {
+                    viewModel.upgradeVerdaccio(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        verdaccioManager: appState.verdaccioManager,
+                        repository: appState.repository
+                    )
+                } label: {
+                    if viewModel.isUpgradingVerdaccio {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Upgrade", systemImage: "arrow.up.circle")
+                    }
+                }
+                .disabled(isRegistryBusy)
+            }
+
+            if let result = viewModel.verdaccioServiceActionResult {
+                Label(
+                    "\(result.action.displayName) completed · \(result.snapshot.activeState)/\(result.snapshot.subState)",
+                    systemImage: "checkmark.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if let result = viewModel.verdaccioUpgradeResult {
+                Label(
+                    "Unit updated to \(result.version) · backup \(result.backupPath)",
+                    systemImage: "arrow.up.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var verdaccioProxySection: some View {
@@ -3094,7 +3157,9 @@ struct ServerWorkspaceView: View {
             viewModel.isMutatingVerdaccioUser ||
             viewModel.isWritingVerdaccioProxy ||
             viewModel.isReloadingVerdaccioProxy ||
-            viewModel.isRunningVerdaccioNpmSmokeTest
+            viewModel.isRunningVerdaccioNpmSmokeTest ||
+            viewModel.isControllingVerdaccioService ||
+            viewModel.isUpgradingVerdaccio
     }
 
     private var isRegistryPreflightReady: Bool {
@@ -3153,6 +3218,27 @@ struct ServerWorkspaceView: View {
         case .delete:
             "Deleted"
         }
+    }
+
+    private func verdaccioServiceActionIcon(_ action: VerdaccioServiceAction) -> String {
+        switch action {
+        case .start:
+            "play"
+        case .stop:
+            "stop"
+        case .restart:
+            "arrow.clockwise"
+        }
+    }
+
+    private func performVerdaccioServiceAction(_ action: VerdaccioServiceAction) {
+        viewModel.performVerdaccioServiceAction(
+            action,
+            profile: profile,
+            sshClient: appState.sshClient,
+            verdaccioManager: appState.verdaccioManager,
+            repository: appState.repository
+        )
     }
 
     private var isNginxDraftDirty: Bool {

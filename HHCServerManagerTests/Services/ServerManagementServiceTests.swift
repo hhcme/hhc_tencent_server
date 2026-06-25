@@ -833,6 +833,24 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertFalse(command.contains("Correct-Horse-Secret-123"))
     }
 
+    func testVerdaccioServiceActionAndUpgradeCommandsAreControlled() throws {
+        let draft = VerdaccioInstallDraft(version: "5.31.2")
+        let restartCommand = VerdaccioManager.serviceActionCommand(.restart, for: draft)
+        let upgradeCommand = try VerdaccioManager.upgradeCommand(
+            for: draft,
+            backupPath: "/srv/verdaccio/backups/verdaccio.service.hhc-backup-2026"
+        )
+
+        XCTAssertTrue(restartCommand.contains("systemctl restart \"$service\""))
+        XCTAssertTrue(restartCommand.contains("systemctl show \"$service\""))
+        XCTAssertFalse(restartCommand.contains(";rm"))
+        XCTAssertTrue(upgradeCommand.contains("cp -p -- \"$service_path\" \"$backup_path\""))
+        XCTAssertTrue(upgradeCommand.contains("__HHC_VERDACCIO_SERVICE_UPGRADE__"))
+        XCTAssertTrue(try VerdaccioConfigurationBuilder.systemdService(for: draft).contains("verdaccio@5.31.2"))
+        XCTAssertTrue(upgradeCommand.contains("systemctl daemon-reload"))
+        XCTAssertTrue(upgradeCommand.contains("systemctl restart \"$service\""))
+    }
+
     func testVerdaccioManagerCreatesUpdatesAndDeletesUsersWithBackups() async throws {
         let profile = makeServiceTestProfile()
         let client = RecordingSSHClient(responses: [
@@ -906,6 +924,55 @@ final class ServerManagementServiceTests: XCTestCase {
         }
 
         XCTAssertTrue(client.commands.isEmpty)
+    }
+
+    func testVerdaccioManagerControlsServiceAndUpgradesWithHealthCheck() async throws {
+        let profile = makeServiceTestProfile()
+        let logs = Data("Verdaccio restarted\n".utf8).base64EncodedString()
+        let status = CommandResult(
+            command: "",
+            stdout: """
+            __HHC_VERDACCIO_ACTIVE_STATE__active
+            __HHC_VERDACCIO_SUB_STATE__running
+            __HHC_VERDACCIO_VERSION__5.31.2
+            __HHC_VERDACCIO_STORAGE_BYTES__2048
+            __HHC_VERDACCIO_LOGS__\(logs)
+            """,
+            stderr: "",
+            exitCode: 0,
+            duration: 0
+        )
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "ActiveState=active\nSubState=running\n", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: #"{"ok":"verdaccio"}"#, stderr: "", exitCode: 0, duration: 0),
+            status,
+            CommandResult(command: "", stdout: "__HHC_VERDACCIO_SERVICE_BACKUP__/srv/verdaccio/backups/verdaccio.service.hhc-backup-2026\n", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: #"{"ok":"verdaccio"}"#, stderr: "", exitCode: 0, duration: 0),
+            status,
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let restarted = try await manager.performServiceAction(
+            .restart,
+            draft: VerdaccioInstallDraft(version: "5.31.2"),
+            profile: profile,
+            sshClient: client
+        )
+        let upgraded = try await manager.upgrade(
+            draft: VerdaccioInstallDraft(version: "5.31.2"),
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(restarted.action, .restart)
+        XCTAssertEqual(restarted.healthCheckOutput, #"{"ok":"verdaccio"}"#)
+        XCTAssertTrue(restarted.snapshot.isRunning)
+        XCTAssertEqual(upgraded.version, "5.31.2")
+        XCTAssertTrue(upgraded.backupPath.contains("/srv/verdaccio/backups/verdaccio.service.hhc-backup-"))
+        XCTAssertEqual(upgraded.healthCheckOutput, #"{"ok":"verdaccio"}"#)
+        XCTAssertTrue(client.commands.contains { $0.contains("systemctl restart \"$service\"") })
+        XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_SERVICE_UPGRADE__") })
+        XCTAssertTrue(client.commands.contains { $0.contains("curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'") })
     }
 
     func testVerdaccioManagerRunsNpmSmokeTestAndRejectsInvalidEmail() async throws {

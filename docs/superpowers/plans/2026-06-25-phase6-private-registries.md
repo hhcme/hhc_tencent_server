@@ -75,7 +75,7 @@ CREATE TABLE registry_backups (
 - Verdaccio 状态卡：版本、运行状态、端口、storage 占用、最近日志。
 - 用户和权限配置入口：已接入 htpasswd 用户创建、改密、确认删除和 npm publish/install smoke test；包权限策略仍由配置生成层控制，后续再开放高级 UI。
 - 包列表和搜索：当前已接入基于 Verdaccio storage metadata 的包摘要列表。
-- 备份、恢复、升级按钮：已接入备份创建和带危险确认的恢复入口；升级仍保留后续。
+- 备份、恢复、升级按钮：已接入备份创建、带危险确认的恢复入口，以及固定版本 systemd unit 升级入口。
 - Dart/Flutter pub 区域先展示技术验证状态，验证完成后再开放安装：当前已展示外部 Hosted Pub Repository 配置辅助方向。
 
 ## 7. 实施任务
@@ -96,10 +96,12 @@ CREATE TABLE registry_backups (
 - [x] 生成配置文件：已生成基础 `config.yaml` 模板，包含 storage、listen、npmjs uplink、package access/publish 和日志配置。
 - [x] 创建 systemd service：已生成 systemd unit 模板，包含固定 Verdaccio 版本、工作目录、重启策略和基础 hardening。
 - [x] 启动并验证健康检查：已生成 `systemctl daemon-reload`、`enable --now`、`restart` 和 `/-/ping` health check 流程，mock/contract 测试已覆盖；真实服务器手动验收仍未执行。
+- [x] 固定版本升级：已支持备份当前 systemd unit、写入新固定版本 unit、`daemon-reload`、重启、health check、状态刷新和远程变更审计；真实服务器升级验收仍待执行。
 
 ### Task 3：Verdaccio 管理
 
 - [x] 查看运行状态和日志：已通过 systemd state、Verdaccio version、storage size 和 journal tail 生成状态快照，日志会脱敏。
+- [x] 启动、停止、重启服务：已通过受控 `systemctl` action 枚举接入 start/stop/restart，start/restart 后执行 health check，操作后刷新状态并写入远程变更审计。
 - [x] 管理用户和权限配置：已支持生成 `htpasswd` auth 配置、包访问/发布策略切换，以及基于远端 `htpasswd -B -i` / `htpasswd -D` 的用户创建、改密和删除命令层；macOS 工作台已接入用户创建、改密和确认删除，真实服务器验收仍待完成。
 - [x] 列出私有包：已基于 Verdaccio storage 下 package metadata 生成包名、版本数量、latest version、大小和更新时间摘要。
 - [x] npm publish/install smoke test：已提供受控临时 scoped package 发布、安装回读、`require` 验证和退出清理流程；明文密码不进入 shell 命令字符串，真实服务器验收仍待执行。
@@ -137,6 +139,7 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 上游 registry 和权限策略配置生成/保存测试。
 - [x] Verdaccio 用户创建、改密、删除命令层测试，覆盖 htpasswd 依赖、备份、重启和明文密码不进入命令字符串。
 - [x] Verdaccio npm smoke test harness 测试，覆盖临时包发布、安装、`require` marker 解析、非法 email 拒绝和明文密码不进入命令字符串。
+- [x] Verdaccio 服务控制和升级测试，覆盖受控 systemd action、unit 备份、固定版本 unit 写入、health check、状态刷新和审计日志。
 - [x] macOS Registries 工作台 ViewModel 测试，覆盖 preflight、安装、状态、用户管理、npm smoke test、包列表、备份/恢复入口和 Nginx proxy 写入/reload。
 - [x] Verdaccio Nginx proxy 生成、写入、`nginx -t` 和 reload contract 测试。
 - [x] 备份归档命令测试。

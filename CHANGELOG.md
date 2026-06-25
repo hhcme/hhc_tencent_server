@@ -89,6 +89,7 @@ All notable changes to this project will be documented in this file.
 - Added Verdaccio backup restore controls to the macOS Registries workspace with restore-path capture, destructive confirmation, health-check handling, and status refresh.
 - Added Verdaccio Nginx proxy controls to the macOS Registries workspace with generated vhost writing, nginx test reporting, and confirmed reload.
 - Added a Verdaccio npm smoke test harness and workspace action that publishes a temporary package, installs it back, verifies `require`, and cleans up without placing the plaintext password in the shell command.
+- Added Verdaccio service controls and pinned-version upgrade support with systemd unit backup, restart, health check, status refresh, and remote change audit logs.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -173,3 +174,4 @@ All notable changes to this project will be documented in this file.
 - 在 macOS Registries 工作台加入 Verdaccio 备份恢复控件，支持恢复路径回填、危险确认、health check 处理和状态刷新。
 - 在 macOS Registries 工作台加入 Verdaccio Nginx proxy 控件，支持生成 vhost 写入、nginx 测试结果展示和确认 reload。
 - 添加 Verdaccio npm smoke test harness 和工作台入口，可临时发布包、安装回读、验证 `require` 并清理，且明文密码不进入 shell 命令。
+- 添加 Verdaccio 服务控制和固定版本升级能力，支持 systemd unit 备份、重启、health check、状态刷新和远程变更审计日志。

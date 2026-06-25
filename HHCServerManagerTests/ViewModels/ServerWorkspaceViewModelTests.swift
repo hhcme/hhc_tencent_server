@@ -1224,6 +1224,47 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_ACTIVE_STATE__") })
     }
 
+    func testPrivateRegistriesWorkspaceControlsAndUpgradesVerdaccioService() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = RegistryViewModelMockSSHClient()
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.registryDraft.version = "5.31.2"
+        viewModel.performVerdaccioServiceAction(
+            .restart,
+            profile: profile,
+            sshClient: client,
+            verdaccioManager: manager,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isControllingVerdaccioService == false && viewModel.verdaccioServiceActionResult != nil }
+
+        XCTAssertEqual(viewModel.verdaccioServiceActionResult?.action, .restart)
+        XCTAssertTrue(viewModel.verdaccioStatusSnapshot?.isRunning == true)
+        XCTAssertEqual(viewModel.registryActionMessage, "Restart requested for verdaccio.service.")
+
+        viewModel.upgradeVerdaccio(
+            profile: profile,
+            sshClient: client,
+            verdaccioManager: manager,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isUpgradingVerdaccio == false && viewModel.verdaccioUpgradeResult != nil }
+
+        XCTAssertEqual(viewModel.verdaccioUpgradeResult?.version, "5.31.2")
+        XCTAssertTrue(viewModel.verdaccioUpgradeResult?.backupPath.contains("/srv/verdaccio/backups/verdaccio.service.hhc-backup-") == true)
+        XCTAssertTrue(viewModel.registryActionMessage?.contains("Upgraded Verdaccio to 5.31.2") == true)
+        XCTAssertTrue(client.commands.contains { $0.contains("systemctl restart \"$service\"") })
+        XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_SERVICE_UPGRADE__") })
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.map(\.action), ["verdaccio-upgrade", "verdaccio-restart"])
+        XCTAssertEqual(logs.map(\.targetType), ["registry", "registry"])
+        XCTAssertTrue(logs.allSatisfy { $0.status == "success" })
+    }
+
     func testPrivateRegistriesWorkspaceManagesVerdaccioUsers() async throws {
         let profile = makeProfile()
         let viewModel = ServerWorkspaceViewModel()
@@ -2097,6 +2138,21 @@ private final class RegistryViewModelMockSSHClient: SSHClient, @unchecked Sendab
         }
         if command == "systemctl reload nginx 2>/dev/null || nginx -s reload" {
             return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("__HHC_VERDACCIO_SERVICE_UPGRADE__") {
+            return CommandResult(
+                command: command,
+                stdout: "__HHC_VERDACCIO_SERVICE_BACKUP__/srv/verdaccio/backups/verdaccio.service.hhc-backup-2026\n",
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("systemctl start \"$service\"") ||
+            command.contains("systemctl stop \"$service\"") ||
+            command.contains("systemctl restart \"$service\"")
+        {
+            return CommandResult(command: command, stdout: "ActiveState=active\nSubState=running\n", stderr: "", exitCode: 0, duration: 0)
         }
         if command.contains("npm publish") && command.contains("__HHC_VERDACCIO_NPM_REQUIRE__") {
             return CommandResult(
