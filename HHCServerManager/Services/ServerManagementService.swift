@@ -1334,6 +1334,15 @@ struct VerdaccioRegistryRestoreResult: Equatable, Sendable {
     var historyRecord: RegistryBackupRecord?
 }
 
+struct VerdaccioNpmSmokeTestResult: Equatable, Sendable {
+    var packageName: String
+    var version: String
+    var registryURL: String
+    var publishOutput: String
+    var installOutput: String
+    var requireOutput: String
+}
+
 enum RegistryConfigurationError: LocalizedError, Equatable {
     case invalidName
     case invalidPath(String)
@@ -1346,6 +1355,7 @@ enum RegistryConfigurationError: LocalizedError, Equatable {
     case invalidProxyBodySize
     case invalidRegistryUsername
     case invalidRegistryPassword
+    case invalidRegistryEmail
 
     var errorDescription: String? {
         switch self {
@@ -1371,6 +1381,8 @@ enum RegistryConfigurationError: LocalizedError, Equatable {
             "Registry username must be 1-64 characters and can only contain letters, numbers, dot, underscore, at sign, and dash."
         case .invalidRegistryPassword:
             "Registry password must be 8-4096 characters and cannot contain line breaks or null bytes."
+        case .invalidRegistryEmail:
+            "Registry email must be a simple email address without line breaks or null bytes."
         }
     }
 }
@@ -1868,6 +1880,51 @@ final class VerdaccioManager: @unchecked Sendable {
         return Self.parsePackageList(result.stdout)
     }
 
+    func runNpmSmokeTest(
+        draft: VerdaccioInstallDraft,
+        username: String,
+        password: String,
+        email: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioNpmSmokeTestResult {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        try validateUsername(username)
+        try validatePassword(password)
+        try validateEmail(email)
+        let timestamp = Self.timestamp(for: now())
+            .lowercased()
+            .replacingOccurrences(of: ".", with: "-")
+        let packageName = "@hhc-smoke/pkg-\(timestamp)"
+        let version = "0.0.1"
+        let registryURL = Self.registryURL(for: draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(45) {
+            try await sshClient.execute(
+                Self.npmSmokeTestCommand(
+                    packageName: packageName,
+                    version: version,
+                    registryURL: registryURL,
+                    username: username.trimmed,
+                    password: password,
+                    email: email.trimmed
+                ),
+                profile: profile
+            )
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Verdaccio npm smoke test failed."))
+        }
+        let markers = Self.parseMarkers(result.stdout)
+        return VerdaccioNpmSmokeTestResult(
+            packageName: packageName,
+            version: version,
+            registryURL: registryURL,
+            publishOutput: markers["PUBLISH"] ?? "",
+            installOutput: markers["INSTALL"] ?? "",
+            requireOutput: markers["REQUIRE"] ?? ""
+        )
+    }
+
     func createBackup(
         draft: VerdaccioInstallDraft,
         profile: ServerProfile,
@@ -2095,6 +2152,19 @@ final class VerdaccioManager: @unchecked Sendable {
         }
     }
 
+    private func validateEmail(_ email: String) throws {
+        let email = email.trimmed
+        guard !email.isEmpty,
+              email.count <= 254,
+              email.range(of: #"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"#, options: .regularExpression) != nil,
+              !email.contains("\n"),
+              !email.contains("\r"),
+              !email.contains("\0")
+        else {
+            throw RegistryConfigurationError.invalidRegistryEmail
+        }
+    }
+
     private func htpasswdBackupPath(for draft: VerdaccioInstallDraft) -> String {
         "\(Self.htpasswdPath(for: draft)).hhc-backup-\(Self.timestamp(for: now()))"
     }
@@ -2232,6 +2302,50 @@ final class VerdaccioManager: @unchecked Sendable {
           modified=$(stat -c %Y "$package_dir" 2>/dev/null || echo 0); \
           printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$rel" "$versions" "$latest" "$size" "$modified"; \
         done
+        """
+    }
+
+    static func npmSmokeTestCommand(
+        packageName: String,
+        version: String,
+        registryURL: String,
+        username: String,
+        password: String,
+        email: String
+    ) -> String {
+        let encodedPassword = Data(password.utf8).base64EncodedString()
+        let packageJSON = Data("""
+        {"name":"\(packageName)","version":"\(version)","description":"HHC Verdaccio smoke test package","main":"index.js"}
+        """.utf8).base64EncodedString()
+        let indexJS = Data("""
+        module.exports = "hhc-verdaccio-smoke-ok";
+        """.utf8).base64EncodedString()
+        return """
+        set -e; \
+        command -v npm >/dev/null 2>&1 || { echo 'npm command is required for Verdaccio smoke test.' >&2; exit 127; }; \
+        registry_url=\(shellQuote(registryURL)); package_name=\(shellQuote(packageName)); package_version=\(shellQuote(version)); username=\(shellQuote(username.trimmed)); email=\(shellQuote(email.trimmed)); \
+        work_dir=$(mktemp -d); password_file=$(mktemp); publish_log="$work_dir/publish.log"; install_log="$work_dir/install.log"; \
+        cleanup() { npm unpublish "$package_name@$package_version" --registry "$registry_url" --force >/dev/null 2>&1 || true; rm -rf -- "$work_dir" "$password_file"; }; \
+        trap cleanup EXIT; \
+        base64 -d > "$password_file" <<'__HHC_VERDACCIO_SMOKE_PASSWORD__'
+        \(encodedPassword)
+        __HHC_VERDACCIO_SMOKE_PASSWORD__
+        cd "$work_dir"; \
+        mkdir package install; \
+        base64 -d > package/package.json <<'__HHC_VERDACCIO_SMOKE_PACKAGE__'
+        \(packageJSON)
+        __HHC_VERDACCIO_SMOKE_PACKAGE__
+        base64 -d > package/index.js <<'__HHC_VERDACCIO_SMOKE_INDEX__'
+        \(indexJS)
+        __HHC_VERDACCIO_SMOKE_INDEX__
+        { printf '%s\\n' "$username"; cat "$password_file"; printf '%s\\n' "$email"; } | npm adduser --registry "$registry_url" --auth-type=legacy >/dev/null; \
+        cd "$work_dir/package"; npm publish --registry "$registry_url" --access public > "$publish_log"; \
+        cd "$work_dir/install"; npm init -y >/dev/null; npm install "$package_name@$package_version" --registry "$registry_url" > "$install_log"; \
+        require_output=$(node -e "process.stdout.write(require('$package_name'))"); \
+        printf '__HHC_VERDACCIO_NPM_PACKAGE__%s\\n' "$package_name"; \
+        printf '__HHC_VERDACCIO_NPM_PUBLISH__%s\\n' "$(tail -n 3 "$publish_log" | tr '\\n' ' ' | sed 's/[[:space:]]\\{1,\\}/ /g')"; \
+        printf '__HHC_VERDACCIO_NPM_INSTALL__%s\\n' "$(tail -n 3 "$install_log" | tr '\\n' ' ' | sed 's/[[:space:]]\\{1,\\}/ /g')"; \
+        printf '__HHC_VERDACCIO_NPM_REQUIRE__%s\\n' "$require_output"
         """
     }
 
@@ -2386,6 +2500,24 @@ final class VerdaccioManager: @unchecked Sendable {
     private static func healthCheckURL(for draft: VerdaccioInstallDraft) -> String {
         let host = draft.listenHost.trimmed == "0.0.0.0" ? "127.0.0.1" : draft.listenHost.trimmed
         return "http://\(host):\(draft.listenPort)/-/ping"
+    }
+
+    private static func registryURL(for draft: VerdaccioInstallDraft) -> String {
+        let host = draft.listenHost.trimmed == "0.0.0.0" ? "127.0.0.1" : draft.listenHost.trimmed
+        return "http://\(host):\(draft.listenPort)"
+    }
+
+    private static func parseMarkers(_ output: String) -> [String: String] {
+        var markers: [String: String] = [:]
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            guard line.hasPrefix("__HHC_VERDACCIO_NPM_"),
+                  let range = line.range(of: "__", range: line.index(line.startIndex, offsetBy: 20)..<line.endIndex)
+            else { continue }
+            let key = String(line[line.index(line.startIndex, offsetBy: 20)..<range.lowerBound])
+            let value = String(line[range.upperBound...])
+            markers[key] = value
+        }
+        return markers
     }
 
     private static func shellQuote(_ value: String) -> String {

@@ -1045,6 +1045,13 @@ struct ServerWorkspaceView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 280)
                 }
+                GridRow {
+                    Text("Email")
+                        .foregroundStyle(.secondary)
+                    TextField("smoke@example.com", text: $viewModel.verdaccioEmailDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 280)
+                }
             }
 
             HStack(spacing: 8) {
@@ -1080,6 +1087,21 @@ struct ServerWorkspaceView: View {
                     Label("Delete", systemImage: "person.crop.circle.badge.minus")
                 }
                 .disabled(isRegistryBusy || !isVerdaccioUserReady)
+
+                Button {
+                    viewModel.runVerdaccioNpmSmokeTest(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        verdaccioManager: appState.verdaccioManager
+                    )
+                } label: {
+                    if viewModel.isRunningVerdaccioNpmSmokeTest {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Run npm Test", systemImage: "checkmark.seal")
+                    }
+                }
+                .disabled(isRegistryBusy || !isVerdaccioUserPasswordReady || !isVerdaccioEmailReady)
             }
 
             if let result = viewModel.verdaccioUserMutationResult {
@@ -1090,6 +1112,30 @@ struct ServerWorkspaceView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+            }
+
+            if let result = viewModel.verdaccioNpmSmokeTestResult {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("\(result.packageName)@\(result.version) verified via \(result.registryURL)", systemImage: "checkmark.seal")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
+                        GridRow {
+                            Text("Publish").foregroundStyle(.secondary)
+                            Text(result.publishOutput.isEmpty ? "ok" : result.publishOutput)
+                        }
+                        GridRow {
+                            Text("Install").foregroundStyle(.secondary)
+                            Text(result.installOutput.isEmpty ? "ok" : result.installOutput)
+                        }
+                        GridRow {
+                            Text("Require").foregroundStyle(.secondary)
+                            Text(result.requireOutput.isEmpty ? "ok" : result.requireOutput)
+                        }
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                }
             }
         }
         .padding(12)
@@ -3047,7 +3093,8 @@ struct ServerWorkspaceView: View {
             viewModel.isRestoringVerdaccioBackup ||
             viewModel.isMutatingVerdaccioUser ||
             viewModel.isWritingVerdaccioProxy ||
-            viewModel.isReloadingVerdaccioProxy
+            viewModel.isReloadingVerdaccioProxy ||
+            viewModel.isRunningVerdaccioNpmSmokeTest
     }
 
     private var isRegistryPreflightReady: Bool {
@@ -3060,6 +3107,11 @@ struct ServerWorkspaceView: View {
 
     private var isVerdaccioUserPasswordReady: Bool {
         isVerdaccioUserReady && viewModel.verdaccioPasswordDraft.count >= 8
+    }
+
+    private var isVerdaccioEmailReady: Bool {
+        let email = viewModel.verdaccioEmailDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return email.contains("@") && email.contains(".")
     }
 
     private var isVerdaccioRestorePathReady: Bool {

@@ -73,8 +73,8 @@ CREATE TABLE registry_backups (
 - 工作台新增“包仓库”页：已接入 macOS Registries section，支持 Verdaccio preflight、安装、状态、用户管理、包列表、备份/恢复入口和 Nginx proxy 写入/reload 入口。
 - 安装向导：类型、路径、端口、访问范围、服务名；当前 UI 先接入默认 Verdaccio 草稿和安装确认，后续再开放高级表单编辑。
 - Verdaccio 状态卡：版本、运行状态、端口、storage 占用、最近日志。
-- 用户和权限配置入口：已接入 htpasswd 用户创建、改密和确认删除；包权限策略仍由配置生成层控制，后续再开放高级 UI。
-- 包列表和搜索。
+- 用户和权限配置入口：已接入 htpasswd 用户创建、改密、确认删除和 npm publish/install smoke test；包权限策略仍由配置生成层控制，后续再开放高级 UI。
+- 包列表和搜索：当前已接入基于 Verdaccio storage metadata 的包摘要列表。
 - 备份、恢复、升级按钮：已接入备份创建和带危险确认的恢复入口；升级仍保留后续。
 - Dart/Flutter pub 区域先展示技术验证状态，验证完成后再开放安装：当前已展示外部 Hosted Pub Repository 配置辅助方向。
 
@@ -100,8 +100,9 @@ CREATE TABLE registry_backups (
 ### Task 3：Verdaccio 管理
 
 - [x] 查看运行状态和日志：已通过 systemd state、Verdaccio version、storage size 和 journal tail 生成状态快照，日志会脱敏。
-- [x] 管理用户和权限配置：已支持生成 `htpasswd` auth 配置、包访问/发布策略切换，以及基于远端 `htpasswd -B -i` / `htpasswd -D` 的用户创建、改密和删除命令层；UI 接入和真实服务器验收仍待完成。
+- [x] 管理用户和权限配置：已支持生成 `htpasswd` auth 配置、包访问/发布策略切换，以及基于远端 `htpasswd -B -i` / `htpasswd -D` 的用户创建、改密和删除命令层；macOS 工作台已接入用户创建、改密和确认删除，真实服务器验收仍待完成。
 - [x] 列出私有包：已基于 Verdaccio storage 下 package metadata 生成包名、版本数量、latest version、大小和更新时间摘要。
+- [x] npm publish/install smoke test：已提供受控临时 scoped package 发布、安装回读、`require` 验证和退出清理流程；明文密码不进入 shell 命令字符串，真实服务器验收仍待执行。
 - [x] 修改上游 registry 配置：已支持通过 `VerdaccioConfigPolicy` 生成受控 uplink URL，并复用保存前备份和重启流程。
 - [x] 保存配置前备份：已支持读取/保存 `config.yaml`，保存前创建 `.hhc-backup-*` 备份并重启服务；真实服务器写操作仍需谨慎验收。
 
@@ -135,7 +136,8 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 状态、日志脱敏和配置保存前备份测试。
 - [x] Verdaccio 上游 registry 和权限策略配置生成/保存测试。
 - [x] Verdaccio 用户创建、改密、删除命令层测试，覆盖 htpasswd 依赖、备份、重启和明文密码不进入命令字符串。
-- [x] macOS Registries 工作台 ViewModel 测试，覆盖 preflight、安装、状态、用户管理、包列表、备份/恢复入口和 Nginx proxy 写入/reload。
+- [x] Verdaccio npm smoke test harness 测试，覆盖临时包发布、安装、`require` marker 解析、非法 email 拒绝和明文密码不进入命令字符串。
+- [x] macOS Registries 工作台 ViewModel 测试，覆盖 preflight、安装、状态、用户管理、npm smoke test、包列表、备份/恢复入口和 Nginx proxy 写入/reload。
 - [x] Verdaccio Nginx proxy 生成、写入、`nginx -t` 和 reload contract 测试。
 - [x] 备份归档命令测试。
 - [x] 恢复状态机测试：已覆盖恢复成功、health check 失败回滚、恢复命令失败回滚和非法备份路径拒绝。

@@ -97,8 +97,10 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var verdaccioUserMutationResult: VerdaccioUserMutationResult?
     @Published var verdaccioProxyDraft = VerdaccioNginxProxyDraft(serverName: "_")
     @Published var verdaccioProxyUpsertResult: NginxConfigUpsertResult?
+    @Published var verdaccioNpmSmokeTestResult: VerdaccioNpmSmokeTestResult?
     @Published var verdaccioUsernameDraft = ""
     @Published var verdaccioPasswordDraft = ""
+    @Published var verdaccioEmailDraft = "smoke@example.com"
     @Published var verdaccioRestorePathDraft = ""
     @Published var isRunningRegistryPreflight = false
     @Published var isInstallingVerdaccio = false
@@ -109,6 +111,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isMutatingVerdaccioUser = false
     @Published var isWritingVerdaccioProxy = false
     @Published var isReloadingVerdaccioProxy = false
+    @Published var isRunningVerdaccioNpmSmokeTest = false
     @Published var registryErrorMessage: String?
     @Published var registryActionMessage: String?
     @Published var commandResult: CommandResult?
@@ -2039,6 +2042,44 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isReloadingVerdaccioProxy = false
+                }
+            }
+        }
+    }
+
+    func runVerdaccioNpmSmokeTest(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager
+    ) {
+        guard !isRunningVerdaccioNpmSmokeTest else { return }
+        isRunningVerdaccioNpmSmokeTest = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+        let username = verdaccioUsernameDraft
+        let password = verdaccioPasswordDraft
+        let email = verdaccioEmailDraft
+
+        Task {
+            do {
+                let result = try await verdaccioManager.runNpmSmokeTest(
+                    draft: registryDraft,
+                    username: username,
+                    password: password,
+                    email: email,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.verdaccioNpmSmokeTestResult = result
+                    self.verdaccioPasswordDraft = ""
+                    self.registryActionMessage = "Verified npm publish/install using \(result.packageName)."
+                    self.isRunningVerdaccioNpmSmokeTest = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isRunningVerdaccioNpmSmokeTest = false
                 }
             }
         }

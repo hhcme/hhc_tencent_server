@@ -815,6 +815,24 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(deleteCommand.contains("systemctl restart \"$service\""))
     }
 
+    func testVerdaccioNpmSmokeTestCommandPublishesInstallsAndHidesPassword() {
+        let command = VerdaccioManager.npmSmokeTestCommand(
+            packageName: "@hhc-smoke/pkg-test",
+            version: "0.0.1",
+            registryURL: "http://127.0.0.1:4873",
+            username: "team.dev",
+            password: "Correct-Horse-Secret-123",
+            email: "team@example.com"
+        )
+
+        XCTAssertTrue(command.contains("npm adduser --registry \"$registry_url\" --auth-type=legacy"))
+        XCTAssertTrue(command.contains("npm publish --registry \"$registry_url\" --access public"))
+        XCTAssertTrue(command.contains("npm install \"$package_name@$package_version\" --registry \"$registry_url\""))
+        XCTAssertTrue(command.contains("npm unpublish \"$package_name@$package_version\" --registry \"$registry_url\" --force"))
+        XCTAssertTrue(command.contains("__HHC_VERDACCIO_NPM_REQUIRE__"))
+        XCTAssertFalse(command.contains("Correct-Horse-Secret-123"))
+    }
+
     func testVerdaccioManagerCreatesUpdatesAndDeletesUsersWithBackups() async throws {
         let profile = makeServiceTestProfile()
         let client = RecordingSSHClient(responses: [
@@ -888,6 +906,55 @@ final class ServerManagementServiceTests: XCTestCase {
         }
 
         XCTAssertTrue(client.commands.isEmpty)
+    }
+
+    func testVerdaccioManagerRunsNpmSmokeTestAndRejectsInvalidEmail() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(
+                command: "",
+                stdout: """
+                __HHC_VERDACCIO_NPM_PACKAGE__@hhc-smoke/pkg-2026
+                __HHC_VERDACCIO_NPM_PUBLISH__+ @hhc-smoke/pkg-2026@0.0.1
+                __HHC_VERDACCIO_NPM_INSTALL__added 1 package
+                __HHC_VERDACCIO_NPM_REQUIRE__hhc-verdaccio-smoke-ok
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await manager.runNpmSmokeTest(
+            draft: VerdaccioInstallDraft(),
+            username: "team.dev",
+            password: "Correct-Horse-Secret-123",
+            email: "team@example.com",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertTrue(result.packageName.hasPrefix("@hhc-smoke/pkg-"))
+        XCTAssertEqual(result.version, "0.0.1")
+        XCTAssertEqual(result.registryURL, "http://127.0.0.1:4873")
+        XCTAssertEqual(result.requireOutput, "hhc-verdaccio-smoke-ok")
+        XCTAssertTrue(client.commands[0].contains("npm publish"))
+        XCTAssertFalse(client.commands[0].contains("Correct-Horse-Secret-123"))
+
+        do {
+            _ = try await manager.runNpmSmokeTest(
+                draft: VerdaccioInstallDraft(),
+                username: "team.dev",
+                password: "Correct-Horse-Secret-123",
+                email: "not-an-email",
+                profile: profile,
+                sshClient: client
+            )
+            XCTFail("Expected invalid email to be rejected.")
+        } catch {
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidRegistryEmail)
+        }
     }
 
     func testRegistryPreflightCheckerParsesReadyReport() async throws {

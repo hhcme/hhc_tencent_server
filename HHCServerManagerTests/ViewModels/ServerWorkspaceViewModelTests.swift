@@ -1253,6 +1253,26 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertFalse(client.commands.joined(separator: "\n").contains("Correct-Horse-Secret"))
     }
 
+    func testPrivateRegistriesWorkspaceRunsNpmSmokeTest() async throws {
+        let profile = makeProfile()
+        let viewModel = ServerWorkspaceViewModel()
+        let client = RegistryViewModelMockSSHClient()
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.verdaccioUsernameDraft = "team.dev"
+        viewModel.verdaccioPasswordDraft = "Correct-Horse-Secret-123"
+        viewModel.verdaccioEmailDraft = "team@example.com"
+        viewModel.runVerdaccioNpmSmokeTest(profile: profile, sshClient: client, verdaccioManager: manager)
+        try await waitUntil { viewModel.isRunningVerdaccioNpmSmokeTest == false && viewModel.verdaccioNpmSmokeTestResult != nil }
+
+        XCTAssertTrue(viewModel.verdaccioNpmSmokeTestResult?.packageName.hasPrefix("@hhc-smoke/pkg-") == true)
+        XCTAssertEqual(viewModel.verdaccioNpmSmokeTestResult?.requireOutput, "hhc-verdaccio-smoke-ok")
+        XCTAssertEqual(viewModel.verdaccioPasswordDraft, "")
+        XCTAssertTrue(viewModel.registryActionMessage?.contains("Verified npm publish/install") == true)
+        XCTAssertTrue(client.commands.contains { $0.contains("npm publish") && $0.contains("npm install") })
+        XCTAssertFalse(client.commands.joined(separator: "\n").contains("Correct-Horse-Secret"))
+    }
+
     func testPrivateRegistriesWorkspaceWritesAndReloadsVerdaccioNginxProxy() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
@@ -2077,6 +2097,20 @@ private final class RegistryViewModelMockSSHClient: SSHClient, @unchecked Sendab
         }
         if command == "systemctl reload nginx 2>/dev/null || nginx -s reload" {
             return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("npm publish") && command.contains("__HHC_VERDACCIO_NPM_REQUIRE__") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                __HHC_VERDACCIO_NPM_PACKAGE__@hhc-smoke/pkg-2026
+                __HHC_VERDACCIO_NPM_PUBLISH__+ @hhc-smoke/pkg-2026@0.0.1
+                __HHC_VERDACCIO_NPM_INSTALL__added 1 package
+                __HHC_VERDACCIO_NPM_REQUIRE__hhc-verdaccio-smoke-ok
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
         }
         if command.contains("htpasswd -B -i") || command.contains("htpasswd -D") {
             return CommandResult(
