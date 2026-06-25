@@ -95,8 +95,8 @@ CREATE TABLE file_transfer_jobs (
 ### Task 1：能力探测
 
 - [x] 实现 OS 和能力探测命令。
-- [x] 缓存探测结果：Dashboard 刷新成功后写入 `dashboard_snapshots`，重新进入工作台会恢复最近快照。
-- [ ] 支持手动重新探测。
+- [x] 缓存探测结果：Dashboard 刷新成功后写入 `server_capabilities` 独立缓存和 `dashboard_snapshots`，重新进入工作台会恢复最近快照。
+- [x] 支持手动重新探测：手动刷新 Dashboard 会重新执行能力探测，并更新 `server_capabilities`。
 - [ ] 测试 Ubuntu/Debian/CentOS/AlmaLinux 常见输出解析。
 
 ### Task 2：SSH 指标采集

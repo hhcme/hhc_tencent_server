@@ -121,7 +121,46 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func saveServerCapabilities(_ capabilities: ServerCapabilities, serverId: UUID) throws {
+        try database.execute("""
+            INSERT INTO server_capabilities (
+                server_id, os_name, os_version, kernel_version, has_proc, has_systemd, has_sftp, detected_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(server_id) DO UPDATE SET
+                os_name = excluded.os_name,
+                os_version = excluded.os_version,
+                kernel_version = excluded.kernel_version,
+                has_proc = excluded.has_proc,
+                has_systemd = excluded.has_systemd,
+                has_sftp = excluded.has_sftp,
+                detected_at = excluded.detected_at
+        """, bindings: [
+            .text(serverId.uuidString),
+            capabilities.osName.map(SQLiteValue.text) ?? .null,
+            capabilities.osVersion.map(SQLiteValue.text) ?? .null,
+            capabilities.kernelVersion.map(SQLiteValue.text) ?? .null,
+            .int(capabilities.hasProc ? 1 : 0),
+            .int(capabilities.hasSystemd ? 1 : 0),
+            .int(capabilities.hasSFTP ? 1 : 0),
+            .text(AppDatabase.string(from: capabilities.detectedAt)),
+        ])
+    }
+
+    func fetchServerCapabilities(serverId: UUID) throws -> ServerCapabilities? {
+        try database.query("""
+            SELECT os_name, os_version, kernel_version, has_proc, has_systemd, has_sftp, detected_at
+            FROM server_capabilities
+            WHERE server_id = ?
+            LIMIT 1
+        """, bindings: [
+            .text(serverId.uuidString),
+        ]) { statement in
+            Self.mapServerCapabilities(statement)
+        }.first
+    }
+
     func saveDashboardSnapshot(_ snapshot: ServerDashboardSnapshot, serverId: UUID) throws {
+        try saveServerCapabilities(snapshot.capabilities, serverId: serverId)
         let capabilitiesJSON = try encodeJSON(snapshot.capabilities)
         let metricsJSON = try encodeJSON(snapshot.metrics)
         let warningsJSON = try encodeJSON(snapshot.warnings)
@@ -888,6 +927,18 @@ final class ServerRepository: @unchecked Sendable {
             status: string(statement, 4),
             message: optionalString(statement, 5),
             createdAt: date(statement, 6)
+        )
+    }
+
+    private static func mapServerCapabilities(_ statement: OpaquePointer) -> ServerCapabilities {
+        ServerCapabilities(
+            osName: optionalString(statement, 0),
+            osVersion: optionalString(statement, 1),
+            kernelVersion: optionalString(statement, 2),
+            hasProc: sqlite3_column_int(statement, 3) != 0,
+            hasSystemd: sqlite3_column_int(statement, 4) != 0,
+            hasSFTP: sqlite3_column_int(statement, 5) != 0,
+            detectedAt: date(statement, 6)
         )
     }
 

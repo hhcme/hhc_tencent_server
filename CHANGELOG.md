@@ -230,3 +230,4 @@ All notable changes to this project will be documented in this file.
 - 添加华为云安全组单条规则创建/删除动作，包含 provider rule id 保留、VPC v3 签名请求 fixture 和统一风险确认/审计流程。
 - 统一云资源操作状态门禁，云资源中心 UI 现在按腾讯云、阿里云、华为云各自状态启用实例电源、快照删除和云盘挂载/卸载按钮。
 - 扩展 Dashboard 云监控聚合，已关联腾讯云、阿里云、华为云实例时会拉取云侧 CPU、内存、磁盘读写和网络入出指标。
+- 添加 `server_capabilities` 独立缓存，Dashboard 手动或自动刷新成功后会持久化最新系统能力探测结果。

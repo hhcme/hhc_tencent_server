@@ -162,6 +162,18 @@ final class AppDatabase: @unchecked Sendable {
             ON command_history(server_id, created_at DESC)
         """)
         try execute("""
+            CREATE TABLE IF NOT EXISTS server_capabilities (
+                server_id TEXT PRIMARY KEY NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
+                os_name TEXT,
+                os_version TEXT,
+                kernel_version TEXT,
+                has_proc INTEGER NOT NULL DEFAULT 0,
+                has_systemd INTEGER NOT NULL DEFAULT 0,
+                has_sftp INTEGER NOT NULL DEFAULT 0,
+                detected_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
             CREATE TABLE IF NOT EXISTS dashboard_snapshots (
                 id TEXT PRIMARY KEY NOT NULL,
                 server_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,

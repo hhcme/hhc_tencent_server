@@ -608,6 +608,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(snapshot.warnings.isEmpty)
         XCTAssertNil(viewModel.dashboardErrorMessage)
         XCTAssertEqual(try repository.fetchLatestDashboardSnapshot(serverId: profile.id), snapshot)
+        XCTAssertEqual(try repository.fetchServerCapabilities(serverId: profile.id), snapshot.capabilities)
     }
 
     func testLoadCachedDashboardSnapshotRestoresPreviousSnapshot() throws {

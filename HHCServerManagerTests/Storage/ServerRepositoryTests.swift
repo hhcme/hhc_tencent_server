@@ -144,9 +144,23 @@ final class ServerRepositoryTests: XCTestCase {
 
         let latest = try XCTUnwrap(repository.fetchLatestDashboardSnapshot(serverId: server.id))
         XCTAssertEqual(latest, newer)
+        XCTAssertEqual(try repository.fetchServerCapabilities(serverId: server.id), newer.capabilities)
+
+        let manualCapabilities = ServerCapabilities(
+            osName: "AlmaLinux",
+            osVersion: "9.4",
+            kernelVersion: "5.14",
+            hasProc: true,
+            hasSystemd: true,
+            hasSFTP: true,
+            detectedAt: Date(timeIntervalSince1970: 1_700_000_020)
+        )
+        try repository.saveServerCapabilities(manualCapabilities, serverId: server.id)
+        XCTAssertEqual(try repository.fetchServerCapabilities(serverId: server.id), manualCapabilities)
 
         try repository.deleteServer(id: server.id)
         XCTAssertNil(try repository.fetchLatestDashboardSnapshot(serverId: server.id))
+        XCTAssertNil(try repository.fetchServerCapabilities(serverId: server.id))
     }
 
     func testRemoteFileTransferJobsPersistOrderAndCascadeWithServer() throws {
