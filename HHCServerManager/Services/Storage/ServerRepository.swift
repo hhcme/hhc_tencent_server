@@ -475,6 +475,141 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func fetchRegistryInstances(serverId: UUID? = nil) throws -> [RegistryInstance] {
+        if let serverId {
+            return try database.query("""
+                SELECT id, server_id, kind, name, install_path, data_path, listen_host,
+                       listen_port, service_name, version, status, created_at, updated_at
+                FROM registry_instances
+                WHERE server_id = ?
+                ORDER BY updated_at DESC
+            """, bindings: [.text(serverId.uuidString)]) { statement in
+                try Self.mapRegistryInstance(statement)
+            }
+        }
+
+        return try database.query("""
+            SELECT id, server_id, kind, name, install_path, data_path, listen_host,
+                   listen_port, service_name, version, status, created_at, updated_at
+            FROM registry_instances
+            ORDER BY updated_at DESC
+        """) { statement in
+            try Self.mapRegistryInstance(statement)
+        }
+    }
+
+    func fetchRegistryInstance(
+        serverId: UUID,
+        kind: PackageRegistryKind,
+        installPath: String,
+        serviceName: String
+    ) throws -> RegistryInstance? {
+        try database.query("""
+            SELECT id, server_id, kind, name, install_path, data_path, listen_host,
+                   listen_port, service_name, version, status, created_at, updated_at
+            FROM registry_instances
+            WHERE server_id = ? AND kind = ? AND install_path = ? AND service_name = ?
+            LIMIT 1
+        """, bindings: [
+            .text(serverId.uuidString),
+            .text(kind.rawValue),
+            .text(installPath),
+            .text(serviceName),
+        ]) { statement in
+            try Self.mapRegistryInstance(statement)
+        }.first
+    }
+
+    func upsertRegistryInstance(_ instance: RegistryInstance) throws {
+        try database.execute("""
+            INSERT INTO registry_instances (
+                id, server_id, kind, name, install_path, data_path, listen_host,
+                listen_port, service_name, version, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(server_id, kind, install_path, service_name) DO UPDATE SET
+                name = excluded.name,
+                data_path = excluded.data_path,
+                listen_host = excluded.listen_host,
+                listen_port = excluded.listen_port,
+                version = excluded.version,
+                status = excluded.status,
+                updated_at = excluded.updated_at
+        """, bindings: [
+            .text(instance.id.uuidString),
+            .text(instance.serverId.uuidString),
+            .text(instance.kind.rawValue),
+            .text(instance.name),
+            .text(instance.installPath),
+            .text(instance.dataPath),
+            .text(instance.listenHost),
+            .int(instance.listenPort),
+            .text(instance.serviceName),
+            .text(instance.version),
+            instance.status.map(SQLiteValue.text) ?? .null,
+            .text(AppDatabase.string(from: instance.createdAt)),
+            .text(AppDatabase.string(from: instance.updatedAt)),
+        ])
+    }
+
+    func deleteRegistryInstance(id: UUID) throws {
+        try database.execute("DELETE FROM registry_instances WHERE id = ?", bindings: [.text(id.uuidString)])
+    }
+
+    func upsertRegistryBackup(_ record: RegistryBackupRecord) throws {
+        try database.execute("""
+            INSERT INTO registry_backups (
+                id, registry_id, backup_path, status, size_bytes, created_at, restored_at, message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                backup_path = excluded.backup_path,
+                status = excluded.status,
+                size_bytes = excluded.size_bytes,
+                restored_at = excluded.restored_at,
+                message = excluded.message
+        """, bindings: [
+            .text(record.id.uuidString),
+            .text(record.registryId.uuidString),
+            .text(record.backupPath),
+            .text(record.status.rawValue),
+            record.sizeBytes.map { .int(Int($0)) } ?? .null,
+            .text(AppDatabase.string(from: record.createdAt)),
+            record.restoredAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+            record.message.map(SQLiteValue.text) ?? .null,
+        ])
+    }
+
+    func fetchRegistryBackups(registryId: UUID, limit: Int = 50) throws -> [RegistryBackupRecord] {
+        try database.query("""
+            SELECT id, registry_id, backup_path, status, size_bytes, created_at, restored_at, message
+            FROM registry_backups
+            WHERE registry_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, bindings: [
+            .text(registryId.uuidString),
+            .int(max(1, limit)),
+        ]) { statement in
+            try Self.mapRegistryBackupRecord(statement)
+        }
+    }
+
+    func fetchRegistryBackups(serverId: UUID, limit: Int = 50) throws -> [RegistryBackupRecord] {
+        try database.query("""
+            SELECT b.id, b.registry_id, b.backup_path, b.status, b.size_bytes,
+                   b.created_at, b.restored_at, b.message
+            FROM registry_backups b
+            INNER JOIN registry_instances r ON r.id = b.registry_id
+            WHERE r.server_id = ?
+            ORDER BY b.created_at DESC
+            LIMIT ?
+        """, bindings: [
+            .text(serverId.uuidString),
+            .int(max(1, limit)),
+        ]) { statement in
+            try Self.mapRegistryBackupRecord(statement)
+        }
+    }
+
     private static func mapServer(_ statement: OpaquePointer) throws -> ServerProfile {
         let id = UUID(uuidString: string(statement, 0)) ?? UUID()
         let authType = SSHAuthType(rawValue: string(statement, 5)) ?? .privateKey
@@ -620,6 +755,37 @@ final class ServerRepository: @unchecked Sendable {
         )
     }
 
+    private static func mapRegistryInstance(_ statement: OpaquePointer) throws -> RegistryInstance {
+        RegistryInstance(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            serverId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            kind: PackageRegistryKind(rawValue: string(statement, 2)) ?? .verdaccio,
+            name: string(statement, 3),
+            installPath: string(statement, 4),
+            dataPath: string(statement, 5),
+            listenHost: string(statement, 6),
+            listenPort: Int(sqlite3_column_int(statement, 7)),
+            serviceName: string(statement, 8),
+            version: string(statement, 9),
+            status: optionalString(statement, 10),
+            createdAt: date(statement, 11),
+            updatedAt: date(statement, 12)
+        )
+    }
+
+    private static func mapRegistryBackupRecord(_ statement: OpaquePointer) throws -> RegistryBackupRecord {
+        RegistryBackupRecord(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            registryId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            backupPath: string(statement, 2),
+            status: RegistryBackupStatus(rawValue: string(statement, 3)) ?? .created,
+            sizeBytes: optionalInt64(statement, 4),
+            createdAt: date(statement, 5),
+            restoredAt: optionalDate(statement, 6),
+            message: optionalString(statement, 7)
+        )
+    }
+
     private static func string(_ statement: OpaquePointer, _ index: Int32) -> String {
         guard let cString = sqlite3_column_text(statement, index) else { return "" }
         return String(cString: cString)
@@ -648,6 +814,11 @@ final class ServerRepository: @unchecked Sendable {
     private static func optionalInt32(_ statement: OpaquePointer, _ index: Int32) -> Int32? {
         guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
         return sqlite3_column_int(statement, index)
+    }
+
+    private static func optionalInt64(_ statement: OpaquePointer, _ index: Int32) -> Int64? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return sqlite3_column_int64(statement, index)
     }
 
     private static func optionalDuration(_ statement: OpaquePointer, _ index: Int32) -> TimeInterval? {

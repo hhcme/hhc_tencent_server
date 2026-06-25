@@ -954,6 +954,36 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(client.commands[0].contains("stat -c %s \"$backup_path\""))
     }
 
+    func testVerdaccioManagerRecordsBackupHistoryWhenRepositoryProvided() async throws {
+        let profile = makeServiceTestProfile()
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "8192\n", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await manager.createBackup(
+            draft: VerdaccioInstallDraft(),
+            profile: profile,
+            sshClient: client,
+            repository: repository
+        )
+
+        let registries = try repository.fetchRegistryInstances(serverId: profile.id)
+        XCTAssertEqual(registries.count, 1)
+        XCTAssertEqual(registries[0].kind, .verdaccio)
+        XCTAssertEqual(registries[0].installPath, "/srv/verdaccio")
+        XCTAssertEqual(registries[0].status, "active")
+
+        let backups = try repository.fetchRegistryBackups(registryId: registries[0].id)
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(backups[0].backupPath, result.backupPath)
+        XCTAssertEqual(backups[0].status, .created)
+        XCTAssertEqual(backups[0].sizeBytes, 8192)
+        XCTAssertEqual(result.historyRecord?.id, backups[0].id)
+    }
+
     func testVerdaccioManagerRestoresBackupAndChecksHealth() async throws {
         let profile = makeServiceTestProfile()
         let client = RecordingSSHClient(responses: [
@@ -983,6 +1013,33 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(client.commands[1], "curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'")
     }
 
+    func testVerdaccioManagerRecordsRestoreHistoryWhenRepositoryProvided() async throws {
+        let profile = makeServiceTestProfile()
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: "ok", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await manager.restoreBackup(
+            draft: VerdaccioInstallDraft(),
+            backupPath: "/srv/verdaccio/backups/verdaccio-2026-06-25T12-00-00.000Z.tar.gz",
+            profile: profile,
+            sshClient: client,
+            repository: repository
+        )
+
+        let registry = try XCTUnwrap(repository.fetchRegistryInstances(serverId: profile.id).first)
+        let backups = try repository.fetchRegistryBackups(registryId: registry.id)
+        XCTAssertEqual(backups.count, 1)
+        XCTAssertEqual(backups[0].status, .restored)
+        XCTAssertEqual(backups[0].backupPath, result.backupPath)
+        XCTAssertEqual(backups[0].restoredAt, Date(timeIntervalSince1970: 1_700_000_000))
+        XCTAssertEqual(result.historyRecord?.id, backups[0].id)
+    }
+
     func testVerdaccioManagerRollsBackWhenRestoreHealthCheckFails() async {
         let profile = makeServiceTestProfile()
         let client = RecordingSSHClient(responses: [
@@ -1008,6 +1065,37 @@ final class ServerManagementServiceTests: XCTestCase {
             XCTAssertTrue(client.commands[2].contains("archive_path='/srv/verdaccio/backups/restore-rollback-"))
             XCTAssertFalse(client.commands[2].contains("rollback_path="))
             XCTAssertTrue(client.commands[2].contains("tar -xzf \"$archive_path\" -C \"$restore_dir\""))
+        }
+    }
+
+    func testVerdaccioManagerRecordsRestoreFailureHistoryWhenRepositoryProvided() async throws {
+        let profile = makeServiceTestProfile()
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: "token=secret-value", stderr: "connection refused", exitCode: 7, duration: 0),
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        do {
+            _ = try await manager.restoreBackup(
+                draft: VerdaccioInstallDraft(),
+                backupPath: "/srv/verdaccio/backups/verdaccio-2026-06-25T12-00-00.000Z.tar.gz",
+                profile: profile,
+                sshClient: client,
+                repository: repository
+            )
+            XCTFail("Expected restore health check failure.")
+        } catch {
+            let registry = try XCTUnwrap(repository.fetchRegistryInstances(serverId: profile.id).first)
+            let backups = try repository.fetchRegistryBackups(registryId: registry.id)
+            XCTAssertEqual(backups.count, 1)
+            XCTAssertEqual(backups[0].status, .restoreFailed)
+            XCTAssertEqual(backups[0].backupPath, "/srv/verdaccio/backups/verdaccio-2026-06-25T12-00-00.000Z.tar.gz")
+            XCTAssertTrue(try XCTUnwrap(backups[0].message).contains("connection refused"))
+            XCTAssertFalse(try XCTUnwrap(backups[0].message).contains("secret-value"))
         }
     }
 

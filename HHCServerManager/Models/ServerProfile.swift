@@ -453,6 +453,48 @@ struct DeploymentLogEntry: Identifiable, Codable, Equatable, Hashable, Sendable 
     var createdAt: Date
 }
 
+enum PackageRegistryKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case verdaccio
+
+    var id: String { rawValue }
+}
+
+struct RegistryInstance: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var serverId: UUID
+    var kind: PackageRegistryKind
+    var name: String
+    var installPath: String
+    var dataPath: String
+    var listenHost: String
+    var listenPort: Int
+    var serviceName: String
+    var version: String
+    var status: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+enum RegistryBackupStatus: String, Codable, CaseIterable, Identifiable, Sendable {
+    case created
+    case failed
+    case restored
+    case restoreFailed
+
+    var id: String { rawValue }
+}
+
+struct RegistryBackupRecord: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var registryId: UUID
+    var backupPath: String
+    var status: RegistryBackupStatus
+    var sizeBytes: Int64?
+    var createdAt: Date
+    var restoredAt: Date?
+    var message: String?
+}
+
 struct DeploymentCommandStep: Identifiable, Codable, Equatable, Hashable, Sendable {
     var id: String { name }
     var name: String

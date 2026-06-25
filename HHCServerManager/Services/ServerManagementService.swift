@@ -1198,6 +1198,7 @@ struct VerdaccioPackageSummary: Identifiable, Equatable, Sendable {
 struct VerdaccioRegistryBackupResult: Equatable, Sendable {
     var backupPath: String
     var sizeBytes: Int64?
+    var historyRecord: RegistryBackupRecord?
 }
 
 struct VerdaccioRegistryRestoreResult: Equatable, Sendable {
@@ -1205,6 +1206,7 @@ struct VerdaccioRegistryRestoreResult: Equatable, Sendable {
     var rollbackBackupPath: String
     var healthCheckURL: String
     var healthCheckOutput: String
+    var historyRecord: RegistryBackupRecord?
 }
 
 enum RegistryConfigurationError: LocalizedError, Equatable {
@@ -1529,7 +1531,8 @@ final class VerdaccioManager: @unchecked Sendable {
     func createBackup(
         draft: VerdaccioInstallDraft,
         profile: ServerProfile,
-        sshClient: SSHClient
+        sshClient: SSHClient,
+        repository: ServerRepository? = nil
     ) async throws -> VerdaccioRegistryBackupResult {
         try VerdaccioConfigurationBuilder.validate(draft)
         let backupPath = "\(draft.installPath.trimmed)/backups/verdaccio-\(Self.timestamp(for: now())).tar.gz"
@@ -1537,11 +1540,33 @@ final class VerdaccioManager: @unchecked Sendable {
             try await sshClient.execute(Self.backupCommand(for: draft, backupPath: backupPath), profile: profile)
         }
         guard result.exitCode == 0 else {
+            try recordBackupHistory(
+                draft: draft,
+                profile: profile,
+                repository: repository,
+                backupPath: backupPath,
+                status: .failed,
+                sizeBytes: nil,
+                restoredAt: nil,
+                message: Self.redactedOutput(from: result, fallback: "Could not create Verdaccio backup.")
+            )
             throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not create Verdaccio backup."))
         }
+        let sizeBytes = Int64(result.stdout.trimmed.nilIfEmpty ?? "")
+        let historyRecord = try recordBackupHistory(
+            draft: draft,
+            profile: profile,
+            repository: repository,
+            backupPath: backupPath,
+            status: .created,
+            sizeBytes: sizeBytes,
+            restoredAt: nil,
+            message: nil
+        )
         return VerdaccioRegistryBackupResult(
             backupPath: backupPath,
-            sizeBytes: Int64(result.stdout.trimmed.nilIfEmpty ?? "")
+            sizeBytes: sizeBytes,
+            historyRecord: historyRecord
         )
     }
 
@@ -1549,7 +1574,8 @@ final class VerdaccioManager: @unchecked Sendable {
         draft: VerdaccioInstallDraft,
         backupPath: String,
         profile: ServerProfile,
-        sshClient: SSHClient
+        sshClient: SSHClient,
+        repository: ServerRepository? = nil
     ) async throws -> VerdaccioRegistryRestoreResult {
         try VerdaccioConfigurationBuilder.validate(draft)
         let backupPath = try Self.validatedBackupPath(backupPath, for: draft)
@@ -1561,6 +1587,16 @@ final class VerdaccioManager: @unchecked Sendable {
             )
         }
         guard restoreResult.exitCode == 0 else {
+            try recordBackupHistory(
+                draft: draft,
+                profile: profile,
+                repository: repository,
+                backupPath: backupPath,
+                status: .restoreFailed,
+                sizeBytes: nil,
+                restoredAt: now(),
+                message: Self.redactedOutput(from: restoreResult, fallback: "Could not restore Verdaccio backup.")
+            )
             throw try await restoreFailureWithRollback(
                 draft: draft,
                 rollbackPath: rollbackPath,
@@ -1584,18 +1620,99 @@ final class VerdaccioManager: @unchecked Sendable {
             }
             let healthMessage = Self.redactedOutput(from: healthResult, fallback: "Verdaccio restore health check failed.")
             if rollbackResult.exitCode == 0 {
+                try recordBackupHistory(
+                    draft: draft,
+                    profile: profile,
+                    repository: repository,
+                    backupPath: backupPath,
+                    status: .restoreFailed,
+                    sizeBytes: nil,
+                    restoredAt: now(),
+                    message: healthMessage
+                )
                 throw SSHClientError.processFailed("\(healthMessage)\nRollback attempted using \(rollbackPath).")
             }
             let rollbackMessage = Self.redactedOutput(from: rollbackResult, fallback: "Rollback failed.")
+            try recordBackupHistory(
+                draft: draft,
+                profile: profile,
+                repository: repository,
+                backupPath: backupPath,
+                status: .restoreFailed,
+                sizeBytes: nil,
+                restoredAt: now(),
+                message: "\(healthMessage)\nRollback failed: \(rollbackMessage)"
+            )
             throw SSHClientError.processFailed("\(healthMessage)\nRollback failed using \(rollbackPath): \(rollbackMessage)")
         }
+
+        let historyRecord = try recordBackupHistory(
+            draft: draft,
+            profile: profile,
+            repository: repository,
+            backupPath: backupPath,
+            status: .restored,
+            sizeBytes: nil,
+            restoredAt: now(),
+            message: nil
+        )
 
         return VerdaccioRegistryRestoreResult(
             backupPath: backupPath,
             rollbackBackupPath: rollbackPath,
             healthCheckURL: healthCheckURL,
-            healthCheckOutput: DeploymentLogRedactor.redact(healthResult.stdout.trimmed.nilIfEmpty ?? "ok")
+            healthCheckOutput: DeploymentLogRedactor.redact(healthResult.stdout.trimmed.nilIfEmpty ?? "ok"),
+            historyRecord: historyRecord
         )
+    }
+
+    @discardableResult
+    private func recordBackupHistory(
+        draft: VerdaccioInstallDraft,
+        profile: ServerProfile,
+        repository: ServerRepository?,
+        backupPath: String,
+        status: RegistryBackupStatus,
+        sizeBytes: Int64?,
+        restoredAt: Date?,
+        message: String?
+    ) throws -> RegistryBackupRecord? {
+        guard let repository else { return nil }
+        let capturedAt = now()
+        let existing = try repository.fetchRegistryInstance(
+            serverId: profile.id,
+            kind: .verdaccio,
+            installPath: draft.installPath.trimmed,
+            serviceName: draft.serviceName.trimmed
+        )
+        let registry = RegistryInstance(
+            id: existing?.id ?? UUID(),
+            serverId: profile.id,
+            kind: .verdaccio,
+            name: draft.name.trimmed,
+            installPath: draft.installPath.trimmed,
+            dataPath: draft.dataPath.trimmed,
+            listenHost: draft.listenHost.trimmed,
+            listenPort: draft.listenPort,
+            serviceName: draft.serviceName.trimmed,
+            version: draft.version.trimmed,
+            status: status == .failed ? "backup_failed" : "active",
+            createdAt: existing?.createdAt ?? capturedAt,
+            updatedAt: capturedAt
+        )
+        try repository.upsertRegistryInstance(registry)
+        let record = RegistryBackupRecord(
+            id: UUID(),
+            registryId: registry.id,
+            backupPath: backupPath,
+            status: status,
+            sizeBytes: sizeBytes,
+            createdAt: capturedAt,
+            restoredAt: restoredAt,
+            message: message
+        )
+        try repository.upsertRegistryBackup(record)
+        return record
     }
 
     private func restoreFailureWithRollback(

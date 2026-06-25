@@ -54,7 +54,9 @@ CREATE TABLE registry_backups (
     backup_path TEXT NOT NULL,
     status TEXT NOT NULL,
     size_bytes INTEGER,
-    created_at DATETIME NOT NULL
+    created_at DATETIME NOT NULL,
+    restored_at DATETIME,
+    message TEXT
 );
 ```
 
@@ -114,7 +116,7 @@ CREATE TABLE registry_backups (
 - [x] 备份 storage 和配置：已生成受控 tar.gz 备份命令，包含 `config.yaml` 和 storage 目录，并返回备份文件大小；真实服务器手动验收仍未执行。
 - [x] 恢复前停止服务并二次确认：恢复命令会先创建 rollback 归档并停止服务；UI 层仍必须在调用前做二次确认。
 - [x] 恢复失败时尝试回滚：恢复命令失败或恢复后 health check 失败时，会尝试使用恢复前 rollback 归档回滚。
-- [ ] 记录备份历史：当前返回备份路径和大小，持久化历史仍待接入。
+- [x] 记录备份历史：已接入 `registry_instances` / `registry_backups` SQLite 持久化，可记录备份成功/失败、恢复成功/失败、大小、恢复时间和脱敏错误信息。
 
 ### Task 6：Dart/Flutter pub 方案验证
 

@@ -363,6 +363,90 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertTrue(try repository.fetchDeploymentLogs(runId: run.id).isEmpty)
     }
 
+    func testRegistryInstancesAndBackupsPersistAndCascade() throws {
+        let repository = try makeRepository()
+        let server = makeServer()
+        try repository.upsert(server)
+
+        let registry = RegistryInstance(
+            id: UUID(),
+            serverId: server.id,
+            kind: .verdaccio,
+            name: "npm",
+            installPath: "/srv/verdaccio",
+            dataPath: "/srv/verdaccio/storage",
+            listenHost: "127.0.0.1",
+            listenPort: 4873,
+            serviceName: "verdaccio",
+            version: "5.31.1",
+            status: "active",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try repository.upsertRegistryInstance(registry)
+
+        var registries = try repository.fetchRegistryInstances(serverId: server.id)
+        XCTAssertEqual(registries.count, 1)
+        XCTAssertEqual(registries[0].kind, .verdaccio)
+        XCTAssertEqual(registries[0].serviceName, "verdaccio")
+
+        var updatedRegistry = registry
+        updatedRegistry.id = UUID()
+        updatedRegistry.name = "npm-private"
+        updatedRegistry.version = "5.31.2"
+        updatedRegistry.updatedAt = Date(timeIntervalSince1970: 1_700_000_010)
+        try repository.upsertRegistryInstance(updatedRegistry)
+
+        registries = try repository.fetchRegistryInstances(serverId: server.id)
+        XCTAssertEqual(registries.count, 1)
+        XCTAssertEqual(registries[0].id, registry.id)
+        XCTAssertEqual(registries[0].name, "npm-private")
+        XCTAssertEqual(registries[0].version, "5.31.2")
+
+        let existing = try repository.fetchRegistryInstance(
+            serverId: server.id,
+            kind: .verdaccio,
+            installPath: "/srv/verdaccio",
+            serviceName: "verdaccio"
+        )
+        XCTAssertEqual(existing?.id, registry.id)
+
+        let backup = RegistryBackupRecord(
+            id: UUID(),
+            registryId: registry.id,
+            backupPath: "/srv/verdaccio/backups/verdaccio.tar.gz",
+            status: .created,
+            sizeBytes: 8192,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_020),
+            restoredAt: nil,
+            message: nil
+        )
+        let restored = RegistryBackupRecord(
+            id: UUID(),
+            registryId: registry.id,
+            backupPath: "/srv/verdaccio/backups/verdaccio.tar.gz",
+            status: .restored,
+            sizeBytes: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_030),
+            restoredAt: Date(timeIntervalSince1970: 1_700_000_030),
+            message: "ok"
+        )
+        try repository.upsertRegistryBackup(backup)
+        try repository.upsertRegistryBackup(restored)
+
+        let backups = try repository.fetchRegistryBackups(registryId: registry.id)
+        XCTAssertEqual(backups.map(\.status), [.restored, .created])
+        XCTAssertEqual(backups[1].sizeBytes, 8192)
+        XCTAssertEqual(backups[0].message, "ok")
+
+        let serverBackups = try repository.fetchRegistryBackups(serverId: server.id)
+        XCTAssertEqual(serverBackups.map(\.id), backups.map(\.id))
+
+        try repository.deleteServer(id: server.id)
+        XCTAssertTrue(try repository.fetchRegistryInstances(serverId: server.id).isEmpty)
+        XCTAssertTrue(try repository.fetchRegistryBackups(registryId: registry.id).isEmpty)
+    }
+
     private func makeRepository() throws -> ServerRepository {
         ServerRepository(database: try AppDatabase.inMemory())
     }

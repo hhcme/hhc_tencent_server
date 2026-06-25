@@ -287,6 +287,47 @@ final class AppDatabase: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_deployment_logs_run_created_at
             ON deployment_logs(run_id, created_at ASC)
         """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS registry_instances (
+                id TEXT PRIMARY KEY NOT NULL,
+                server_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                name TEXT NOT NULL,
+                install_path TEXT NOT NULL,
+                data_path TEXT NOT NULL,
+                listen_host TEXT NOT NULL,
+                listen_port INTEGER NOT NULL,
+                service_name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                status TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_registry_instances_identity
+            ON registry_instances(server_id, kind, install_path, service_name)
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_registry_instances_server_updated_at
+            ON registry_instances(server_id, updated_at DESC)
+        """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS registry_backups (
+                id TEXT PRIMARY KEY NOT NULL,
+                registry_id TEXT NOT NULL REFERENCES registry_instances(id) ON DELETE CASCADE,
+                backup_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                size_bytes INTEGER,
+                created_at TEXT NOT NULL,
+                restored_at TEXT,
+                message TEXT
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_registry_backups_registry_created_at
+            ON registry_backups(registry_id, created_at DESC)
+        """)
     }
 
     private var lastErrorMessage: String {
