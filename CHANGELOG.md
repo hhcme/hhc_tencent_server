@@ -71,6 +71,7 @@ All notable changes to this project will be documented in this file.
 - Added macOS controls for starting/stopping the local GitLab webhook listener, displaying the listener URL and offline limitation, plus risk confirmation before deployment rollback.
 - Added live deployment run/log refresh in the macOS Deployments workspace while manual deploys and rollbacks are running.
 - Added workspace-level deployment acceptance coverage for deploy path allowlist rejection and health-check failure surfacing.
+- Added workspace-level deployment acceptance coverage for build failure stopping later restart and health-check steps.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -137,3 +138,4 @@ All notable changes to this project will be documented in this file.
 - 添加 macOS 本地 GitLab webhook listener 启停控件、监听 URL 和离线限制提示，并在部署回滚前接入风险确认。
 - 添加 macOS Deployments 工作台运行中部署 run/log 自动刷新，手动部署和回滚执行时可持续看到日志推进。
 - 添加部署工作台验收覆盖，验证部署目录白名单拒绝和 health check 失败状态/日志展示。
+- 添加部署工作台验收覆盖，验证 build 失败后不会继续执行 restart 和 health check 后续步骤。

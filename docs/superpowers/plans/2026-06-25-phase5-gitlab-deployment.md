@@ -146,7 +146,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] DeploymentRunner 状态机测试：已覆盖成功执行、日志持久化、commit 捕获、步骤失败停止和取消落库。
 - [x] Deployment workspace ViewModel 测试：已覆盖项目表单保存、命令预览和 UI 触发手动部署后读取运行日志。
 - [x] Deployment live log refresh 测试：已覆盖部署运行中自动读取 running run 和 plan 日志。
-- [x] Deployment workspace 验收测试：已覆盖不在白名单目录内的项目不会保存，以及 health check 失败会在工作台显示 failed 状态和 stderr 日志。
+- [x] Deployment workspace 验收测试：已覆盖不在白名单目录内的项目不会保存，build 失败会停止后续 restart/health check，以及 health check 失败会在工作台显示 failed 状态和 stderr 日志。
 - [x] Deployment rollback 风险确认测试：已覆盖统一风险模型的级别、审计类型、动作和命令预览。
 - [x] 命令构建和目录白名单测试：已覆盖受控 clone/fetch/checkout/build/restart/health check 命令预览、危险路径拒绝、非法 branch/URL/多行命令拒绝。
 - [x] rollback 测试：已覆盖回滚 run、previous/target commit 捕获和 `git reset --hard <commit>` 命令。
@@ -160,7 +160,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 
 - [ ] 添加部署项目。
 - [ ] 手动部署成功，日志完整。
-- [ ] 构建失败时状态正确，后续步骤不执行。
+- [x] 构建失败时状态正确，后续步骤不执行：runner 和工作台 ViewModel 测试已覆盖，真实服务器手动验收仍需谨慎执行。
 - [x] health check 失败时部署标记失败：mock/contract 测试和工作台 ViewModel 测试已覆盖，真实服务器手动验收仍需谨慎执行。
 - [x] 回滚能回到 previous commit：mock/contract 测试已覆盖，真实服务器手动回滚仍需谨慎验收。
 - [x] webhook secret 错误时拒绝触发：核心 service 测试已覆盖。

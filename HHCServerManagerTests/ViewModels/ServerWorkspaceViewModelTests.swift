@@ -367,6 +367,37 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("curl -fsS http://127.0.0.1:3000/health") })
     }
 
+    func testRunDeploymentStopsWorkspaceFlowAfterBuildFailure() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = DeploymentWorkspaceMockSSHClient(failingStep: "build")
+        let runner = DeploymentRunner(repository: repository)
+
+        viewModel.startNewDeploymentProject(serverId: profile.id)
+        viewModel.deploymentName = "API"
+        viewModel.deploymentRepositoryURL = "git@gitlab.com:hhc/api.git"
+        viewModel.deploymentBranch = "main"
+        viewModel.deploymentPath = "/srv/api"
+        viewModel.deploymentBuildCommand = "npm run build"
+        viewModel.deploymentRestartCommand = "systemctl restart api.service"
+        viewModel.deploymentHealthCheckCommand = "curl -fsS http://127.0.0.1:3000/health"
+
+        viewModel.runDeployment(
+            profile: profile,
+            sshClient: client,
+            deploymentRunner: runner,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isRunningDeployment == false && viewModel.selectedDeploymentRun != nil }
+
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.status, .failed)
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.summary, "build failed with exit code 1.")
+        XCTAssertTrue(viewModel.deploymentLogs.contains { $0.stepName == "build" && $0.stream == .stderr && $0.message == "build failed" })
+        XCTAssertFalse(client.commands.contains { $0.contains("systemctl restart api.service") })
+        XCTAssertFalse(client.commands.contains { $0.contains("curl -fsS http://127.0.0.1:3000/health") })
+    }
+
     func testRunDeploymentRefreshesLogsWhileRunning() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
@@ -1229,6 +1260,9 @@ private final class DeploymentWorkspaceMockSSHClient: SSHClient, @unchecked Send
         }
         if command.contains("git rev-parse HEAD") {
             return "target_commit"
+        }
+        if command.contains("npm run build") {
+            return "build"
         }
         if command.contains("curl -fsS") {
             return "health_check"
