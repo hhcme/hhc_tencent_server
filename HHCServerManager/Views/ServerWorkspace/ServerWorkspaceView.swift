@@ -341,7 +341,7 @@ struct ServerWorkspaceView: View {
             )
         }
         .onAppear {
-            viewModel.configure(initialState: appState.connectionState(for: profile))
+            viewModel.configure(profile: profile, initialState: appState.connectionState(for: profile))
             viewModel.loadCommandHistory(profile: profile, repository: appState.repository)
             viewModel.loadCachedDashboardSnapshot(profile: profile, repository: appState.repository)
             viewModel.loadRemoteFileTransferHistory(profile: profile, repository: appState.repository)

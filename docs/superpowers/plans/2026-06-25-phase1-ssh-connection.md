@@ -500,7 +500,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 - [ ] UI 状态更新没有跨线程警告。
 - [x] 连接中重复点击不会创建重复连接：`ServerWorkspaceViewModel.connect` 会在 connecting 或 smoke test 运行中忽略重复触发，并有 ViewModel 回归测试覆盖。
 - [x] 删除当前选中服务器会清空 selection 并断开连接：`AppState` 测试覆盖删除选中服务器后清空 selection、移除连接状态、删除 DB 记录和 Keychain 凭据。
-- [ ] 在工作台内切换服务器不会复用上一台服务器的连接状态或 smoke test 输出。
+- [x] 在工作台内切换服务器不会复用上一台服务器的连接状态或 smoke test 输出：`ServerWorkspaceViewModel.configure(profile:initialState:)` 在服务器上下文变化时清理命令输出、历史、错误和文件等服务器绑定状态，并有回归测试覆盖。
 
 ### Task 8: SwiftUI 界面
 

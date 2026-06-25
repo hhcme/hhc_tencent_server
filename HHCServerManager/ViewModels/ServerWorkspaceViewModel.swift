@@ -137,6 +137,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     private var transferQueue: [QueuedRemoteFileTransfer] = []
     private var transferTasksByJobId: [UUID: Task<Void, Never>] = [:]
     private var runningTransferRequestsByJobId: [UUID: QueuedRemoteFileTransfer] = [:]
+    private var configuredServerId: UUID?
     private let maximumConcurrentRemoteFileTransfers = 2
 
     deinit {
@@ -147,8 +148,140 @@ final class ServerWorkspaceViewModel: ObservableObject {
         transferTasksByJobId.values.forEach { $0.cancel() }
     }
 
+    func configure(profile: ServerProfile, initialState: SSHConnectionState) {
+        if configuredServerId != profile.id {
+            resetServerScopedState()
+            configuredServerId = profile.id
+        }
+        connectionState = initialState
+    }
+
     func configure(initialState: SSHConnectionState) {
         connectionState = initialState
+    }
+
+    private func resetServerScopedState() {
+        dashboardAutoRefreshTask?.cancel()
+        commandTask?.cancel()
+        deploymentTask?.cancel()
+        deploymentLogRefreshTask?.cancel()
+        transferTasksByJobId.values.forEach { $0.cancel() }
+        dashboardAutoRefreshTask = nil
+        commandTask = nil
+        deploymentTask = nil
+        deploymentLogRefreshTask = nil
+        transferTasksByJobId = [:]
+        runningTransferRequestsByJobId = [:]
+        transferQueue = []
+        runningCommand = nil
+
+        isRunningSmokeTest = false
+        isRunningCommand = false
+        isRefreshingDashboard = false
+        isDashboardAutoRefreshEnabled = false
+        isLoadingRemoteFiles = false
+        isMutatingRemoteFile = false
+        isTransferringRemoteFile = false
+        isLoadingSystemdUnits = false
+        isPerformingSystemdAction = false
+        isLoadingSystemdJournal = false
+        isLoadingCron = false
+        isMutatingCron = false
+        isLoadingNginxConfigs = false
+        isLoadingNginxConfigContent = false
+        isTestingNginxConfig = false
+        isSavingNginxConfig = false
+        isReloadingNginx = false
+        isLoadingFirewall = false
+        isMutatingFirewall = false
+        isLoadingEnvironmentFiles = false
+        isLoadingEnvironmentFileContent = false
+        isSavingEnvironmentFile = false
+        isLoadingCloudSecurityGroups = false
+        isLoadingCloudSecurityGroupPolicies = false
+        isMutatingCloudSecurityGroupRule = false
+        isLoadingDeployments = false
+        isSavingDeploymentProject = false
+        isRunningDeployment = false
+        isRunningRegistryPreflight = false
+        isInstallingVerdaccio = false
+        isLoadingVerdaccioStatus = false
+        isLoadingVerdaccioPackages = false
+        isCreatingVerdaccioBackup = false
+        isRestoringVerdaccioBackup = false
+        isMutatingVerdaccioUser = false
+        isWritingVerdaccioProxy = false
+        isReloadingVerdaccioProxy = false
+        isRunningVerdaccioNpmSmokeTest = false
+        isControllingVerdaccioService = false
+        isUpgradingVerdaccio = false
+
+        dashboardSnapshot = nil
+        dashboardErrorMessage = nil
+        remoteFilePath = "~"
+        remoteDirectoryListing = nil
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+        remoteTextFile = nil
+        remoteTextDraft = ""
+        remoteFileTransferJobs = []
+        systemdUnitList = nil
+        selectedSystemdUnit = nil
+        systemdJournalLog = nil
+        systemdErrorMessage = nil
+        systemdActionMessage = nil
+        cronSnapshot = nil
+        cronErrorMessage = nil
+        cronActionMessage = nil
+        nginxConfigList = nil
+        selectedNginxConfig = nil
+        nginxConfigContent = nil
+        nginxConfigDraft = ""
+        nginxTestResult = nil
+        nginxErrorMessage = nil
+        nginxActionMessage = nil
+        firewallSnapshot = nil
+        firewallErrorMessage = nil
+        firewallActionMessage = nil
+        environmentFileList = nil
+        selectedEnvironmentFile = nil
+        environmentFileContent = nil
+        environmentFileDraft = ""
+        environmentErrorMessage = nil
+        environmentActionMessage = nil
+        cloudSecurityGroupList = nil
+        selectedCloudSecurityGroup = nil
+        cloudSecurityGroupPolicySnapshot = nil
+        cloudSecurityGroupErrorMessage = nil
+        cloudSecurityGroupActionMessage = nil
+        deploymentProjects = []
+        selectedDeploymentProject = nil
+        deploymentRuns = []
+        selectedDeploymentRun = nil
+        deploymentLogs = []
+        deploymentCommandPlan = nil
+        deploymentErrorMessage = nil
+        deploymentActionMessage = nil
+        registryPreflightReport = nil
+        verdaccioInstallResult = nil
+        verdaccioStatusSnapshot = nil
+        verdaccioPackages = []
+        verdaccioBackupResult = nil
+        verdaccioRestoreResult = nil
+        verdaccioUserMutationResult = nil
+        verdaccioProxyUpsertResult = nil
+        verdaccioNpmSmokeTestResult = nil
+        verdaccioServiceActionResult = nil
+        verdaccioUpgradeResult = nil
+        registryErrorMessage = nil
+        registryActionMessage = nil
+        commandResult = nil
+        commandHistory = []
+        persistedCommandHistory = []
+        lastCommandFailure = nil
+        errorMessage = nil
+        pendingHostKey = nil
+        pendingHostKeyAction = nil
     }
 
     func connect(profile: ServerProfile, sshClient: SSHClient) {

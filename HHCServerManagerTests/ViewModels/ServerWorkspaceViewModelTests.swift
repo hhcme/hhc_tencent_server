@@ -304,6 +304,59 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.commandResult?.stdout, "hhc-ssh-ok")
     }
 
+    func testConfigureNewServerClearsServerScopedWorkspaceState() {
+        let firstProfile = makeProfile()
+        let secondProfile = makeProfile()
+        let viewModel = ServerWorkspaceViewModel()
+        let result = CommandResult(
+            command: "printf hhc-ssh-ok",
+            stdout: "hhc-ssh-ok",
+            stderr: "",
+            exitCode: 0,
+            duration: 0.1
+        )
+
+        viewModel.configure(profile: firstProfile, initialState: .connected)
+        viewModel.commandResult = result
+        viewModel.commandHistory = [result]
+        viewModel.persistedCommandHistory = [
+            CommandHistoryEntry(
+                id: UUID(),
+                serverId: firstProfile.id,
+                command: "printf hhc-ssh-ok",
+                exitCode: 0,
+                duration: 0.1,
+                createdAt: Date()
+            ),
+        ]
+        viewModel.errorMessage = "old error"
+        viewModel.remoteFilePath = "/srv/old"
+        viewModel.remoteDirectoryListing = RemoteDirectoryListing(
+            path: "/srv/old",
+            entries: [
+                RemoteFileEntry(
+                    name: "old.log",
+                    path: "/srv/old/old.log",
+                    kind: .file,
+                    size: 12,
+                    modifiedAt: nil,
+                    permissions: "-rw-r--r--"
+                ),
+            ],
+            capturedAt: Date()
+        )
+
+        viewModel.configure(profile: secondProfile, initialState: .disconnected)
+
+        XCTAssertEqual(viewModel.connectionState, .disconnected)
+        XCTAssertNil(viewModel.commandResult)
+        XCTAssertTrue(viewModel.commandHistory.isEmpty)
+        XCTAssertTrue(viewModel.persistedCommandHistory.isEmpty)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.remoteFilePath, "~")
+        XCTAssertNil(viewModel.remoteDirectoryListing)
+    }
+
     func testConnectFailureUpdatesFailedState() async throws {
         let profile = makeProfile()
         let client = MockSSHClient(error: SSHClientError.processFailed("boom"))
