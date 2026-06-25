@@ -5488,7 +5488,7 @@ actor CloudProviderRequestLimiter {
 
     private let maxConcurrentRequests: Int
     private var runningRequests = 0
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [CloudProviderRequestWaiter] = []
 
     init(maxConcurrentRequests: Int) {
         self.maxConcurrentRequests = max(1, maxConcurrentRequests)
@@ -5497,7 +5497,7 @@ actor CloudProviderRequestLimiter {
     func run<T: Sendable>(
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        await acquire()
+        try await acquire()
         do {
             let value = try await operation()
             release()
@@ -5508,25 +5508,56 @@ actor CloudProviderRequestLimiter {
         }
     }
 
-    private func acquire() async {
+    private func acquire() async throws {
+        try Task.checkCancellation()
         if runningRequests < maxConcurrentRequests {
             runningRequests += 1
             return
         }
 
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
+        let waiterId = UUID()
+        let acquired = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                waiters.append(CloudProviderRequestWaiter(id: waiterId, continuation: continuation))
+            }
+        } onCancel: {
+            Task {
+                await self.cancelWaiter(id: waiterId)
+            }
         }
+
+        if acquired {
+            if Task.isCancelled {
+                release()
+                throw CloudProviderError.cancelled
+            }
+            return
+        }
+
+        throw CloudProviderError.cancelled
     }
 
     private func release() {
         if waiters.isEmpty {
             runningRequests = max(0, runningRequests - 1)
         } else {
-            let continuation = waiters.removeFirst()
-            continuation.resume()
+            let waiter = waiters.removeFirst()
+            waiter.continuation.resume(returning: true)
         }
     }
+
+    private func cancelWaiter(id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let waiter = waiters.remove(at: index)
+        waiter.continuation.resume(returning: false)
+    }
+}
+
+private struct CloudProviderRequestWaiter {
+    let id: UUID
+    let continuation: CheckedContinuation<Bool, Never>
 }
 
 protocol TencentCloudHTTPTransport: Sendable {

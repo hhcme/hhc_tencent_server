@@ -28,7 +28,7 @@
 - provider adapter 必须吸收字段差异，UI 面向统一资源模型。
 - 计费和到期状态来自云 API，必须标注刷新时间和可能延迟。
 - 快照、云盘挂载、删除等操作必须二次确认。
-- 所有云 API 请求必须限流、可取消、可审计；当前三家云 adapter 的 HTTP 出口已统一通过 `CloudProviderRequestRunner` 执行超时和 `CloudProviderRequestLimiter` 并发节流，危险写操作通过 `remote_change_logs` 审计。
+- 所有云 API 请求必须限流、可取消、可审计；当前三家云 adapter 的 HTTP 出口已统一通过 `CloudProviderRequestRunner` 执行超时和 `CloudProviderRequestLimiter` 并发节流，等待中的请求取消时会从 limiter 队列移除，危险写操作通过 `remote_change_logs` 审计。
 
 ## 4. 数据模型
 
@@ -114,7 +114,7 @@ CREATE TABLE cloud_billing_states (
 - 已为华为云 VPC 接入安全组单条规则创建/删除操作，云资源中心会按 `securityGroupActions` capability 展示操作；规则读取会保留 `providerRuleId`，删除时使用华为云 rule id 精确定位，执行后刷新规则快照并复用远程变更审计。
 - 已将云资源中心危险操作的确认预览改为 provider-aware：腾讯云、阿里云、华为云分别展示对应 API/action 形态，避免跨云操作确认时误显示腾讯云命令名。
 - 已为云资源中心加入运行时能力降级：当可选资源同步或危险云操作遇到权限不足、unauthorized/forbidden/denied 类 provider failure 或 adapter capability 缺失时，当前会话内对应 provider capability 会标记为 disabled，能力矩阵显示黄色警告，相关操作入口禁用并展示原因；非权限类 provider failure 不会误降级。
-- 已为三家云 HTTP 请求统一加入共享并发节流器；默认最多 4 个云 API 请求同时进入 provider transport，测试可注入独立 limiter 覆盖并发上限。
+- 已为三家云 HTTP 请求统一加入共享并发节流器；默认最多 4 个云 API 请求同时进入 provider transport，测试可注入独立 limiter 覆盖并发上限，并覆盖等待中请求取消后不泄漏并发槽。
 
 ## 6. UI 范围
 
@@ -208,7 +208,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 三家云实例解析测试。
 - [x] 云盘/快照/计费解析测试。
 - [x] 跨云搜索测试。
-- [x] 云 API 请求超时和并发节流测试。
+- [x] 云 API 请求超时、并发节流和等待队列取消测试。
 - [x] 腾讯云快照危险操作确认和审计测试。
 - [x] 腾讯云云盘挂载/卸载请求、状态缓存和审计测试。
 - [x] 腾讯云实例电源操作请求、状态缓存和审计测试。

@@ -482,6 +482,45 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.running, 0)
     }
 
+    func testCloudProviderRequestLimiterCancelsWaitingOperationWithoutLeakingSlot() async throws {
+        let limiter = CloudProviderRequestLimiter(maxConcurrentRequests: 1)
+        let probe = CloudProviderRequestLimiterProbe()
+
+        let firstTask = Task {
+            try await CloudProviderRequestRunner.run(timeout: 1, limiter: limiter) {
+                await probe.enter()
+                try await Task.sleep(nanoseconds: 80_000_000)
+                await probe.leave()
+            }
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+
+        let waitingTask = Task {
+            try await CloudProviderRequestRunner.run(timeout: 1, limiter: limiter) {
+                await probe.enter()
+                await probe.leave()
+            }
+        }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        waitingTask.cancel()
+
+        do {
+            try await waitingTask.value
+            XCTFail("Expected queued cloud provider request to cancel.")
+        } catch {
+            XCTAssertTrue(error is CancellationError || error as? CloudProviderError == .cancelled)
+        }
+
+        try await firstTask.value
+        let value = try await CloudProviderRequestRunner.withTimeout(0.2) {
+            try await CloudProviderRequestRunner.run(timeout: 1, limiter: limiter) {
+                "ok"
+            }
+        }
+
+        XCTAssertEqual(value, "ok")
+    }
+
     func testDeploymentCommandBuilderBuildsControlledPlan() throws {
         let project = DeploymentProject(
             id: UUID(),
