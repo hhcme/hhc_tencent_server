@@ -159,6 +159,108 @@ final class CloudAccountService: @unchecked Sendable {
     }
 }
 
+final class CloudInstanceSyncService: @unchecked Sendable {
+    private let repository: ServerRepository
+    private let keychain: KeychainService
+    private let registry: CloudProviderRegistry
+    private let serverManagementService: ServerManagementService
+    private let now: @Sendable () -> Date
+
+    init(
+        repository: ServerRepository,
+        keychain: KeychainService,
+        registry: CloudProviderRegistry,
+        serverManagementService: ServerManagementService,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.repository = repository
+        self.keychain = keychain
+        self.registry = registry
+        self.serverManagementService = serverManagementService
+        self.now = now
+    }
+
+    func validateAccount(_ account: CloudProviderAccount) async throws {
+        let credential = try credential(for: account)
+        try await registry.adapter(for: account.providerId).validateCredential(credential)
+    }
+
+    func fetchRegions(account: CloudProviderAccount) async throws -> [CloudRegion] {
+        let credential = try credential(for: account)
+        return try await registry.adapter(for: account.providerId).fetchRegions(credential: credential)
+    }
+
+    func syncInstances(account: CloudProviderAccount, regionId: String) async throws -> [CloudInstanceLink] {
+        guard account.enabled else {
+            throw CloudProviderError.providerFailure("Cloud account is disabled.")
+        }
+
+        try registry.require(.instanceDiscovery, providerId: account.providerId)
+        let credential = try credential(for: account)
+        let instances = try await registry.adapter(for: account.providerId).fetchInstances(
+            credential: credential,
+            regionId: regionId
+        )
+
+        var links: [CloudInstanceLink] = []
+        let syncedAt = now()
+        for instance in instances {
+            var existing = try repository.fetchCloudInstanceLink(
+                accountId: account.id,
+                regionId: instance.regionId,
+                instanceId: instance.id
+            )
+            existing.apply(instance: instance, accountId: account.id, syncedAt: syncedAt)
+            try repository.upsertCloudInstanceLink(existing)
+            links.append(existing)
+        }
+        return links
+    }
+
+    func linkInstance(_ link: CloudInstanceLink, to server: ServerProfile) throws -> CloudInstanceLink {
+        var linked = link
+        linked.serverId = server.id
+        linked.lastSyncedAt = link.lastSyncedAt ?? now()
+        try repository.upsertCloudInstanceLink(linked)
+        return linked
+    }
+
+    func unlinkInstanceFromServer(server: ServerProfile) throws {
+        try repository.unlinkCloudInstanceFromServer(serverId: server.id)
+    }
+
+    func createServerFromInstance(
+        _ link: CloudInstanceLink,
+        username: String,
+        authType: SSHAuthType,
+        credential: CredentialInput
+    ) throws -> ServerProfile {
+        let host = link.publicIp ?? link.privateIp
+        guard let host, !host.isEmpty else {
+            throw CloudProviderError.providerFailure("Cloud instance does not expose an IP address.")
+        }
+
+        let profile = try serverManagementService.createServer(
+            name: link.displayName ?? link.instanceId,
+            host: host,
+            port: 22,
+            username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+            groupName: link.providerId.displayName,
+            authType: authType,
+            credential: credential
+        )
+        _ = try linkInstance(link, to: profile)
+        return profile
+    }
+
+    private func credential(for account: CloudProviderAccount) throws -> CloudProviderCredential {
+        guard let credential = try keychain.readCloudCredential(keychainRef: account.keychainRef) else {
+            throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
+        }
+        return credential
+    }
+}
+
 protocol CloudProviderAdapter: Sendable {
     var providerId: CloudProviderID { get }
     var displayName: String { get }

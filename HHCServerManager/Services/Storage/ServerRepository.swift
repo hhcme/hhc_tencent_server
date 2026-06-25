@@ -209,6 +209,40 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func fetchCloudInstanceLink(accountId: UUID, regionId: String, instanceId: String) throws -> CloudInstanceLink {
+        let links = try database.query("""
+            SELECT id, server_id, account_id, provider_id, region_id, instance_id, display_name,
+                   public_ip, private_ip, status, instance_type, zone_id, vpc_id, raw_json, last_synced_at
+            FROM cloud_instance_links
+            WHERE account_id = ? AND region_id = ? AND instance_id = ?
+            LIMIT 1
+        """, bindings: [
+            .text(accountId.uuidString),
+            .text(regionId),
+            .text(instanceId),
+        ]) { statement in
+            try Self.mapCloudInstanceLink(statement)
+        }
+
+        return links.first ?? CloudInstanceLink(
+            id: UUID(),
+            serverId: nil,
+            accountId: accountId,
+            providerId: .tencentCloud,
+            regionId: regionId,
+            instanceId: instanceId,
+            displayName: nil,
+            publicIp: nil,
+            privateIp: nil,
+            status: nil,
+            instanceType: nil,
+            zoneId: nil,
+            vpcId: nil,
+            rawJSON: nil,
+            lastSyncedAt: nil
+        )
+    }
+
     func upsertCloudInstanceLink(_ link: CloudInstanceLink) throws {
         try database.execute("""
             INSERT INTO cloud_instance_links (

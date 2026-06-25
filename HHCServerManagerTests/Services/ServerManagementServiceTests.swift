@@ -193,6 +193,104 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testCloudInstanceSyncUpsertsInstancesAndPreservesServerLink() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .tencentCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata]
+        )
+        let harness = try Harness(adapters: [adapter], now: { Date(timeIntervalSince1970: 1_700_000_100) })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        let server = try harness.service.createServer(
+            name: "Linked",
+            host: "203.0.113.1",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        try harness.repository.upsertCloudInstanceLink(CloudInstanceLink(
+            id: UUID(),
+            serverId: server.id,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "old-name",
+            publicIp: "198.51.100.10",
+            privateIp: nil,
+            status: "STOPPED",
+            instanceType: nil,
+            zoneId: nil,
+            vpcId: nil,
+            rawJSON: nil,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+
+        let links = try await harness.cloudInstanceSyncService.syncInstances(
+            account: account,
+            regionId: "ap-guangzhou"
+        )
+
+        XCTAssertEqual(links.count, 1)
+        let persisted = try XCTUnwrap(try harness.repository.fetchCloudInstanceLinks(accountId: account.id).first)
+        XCTAssertEqual(persisted.serverId, server.id)
+        XCTAssertEqual(persisted.displayName, "mock-instance")
+        XCTAssertEqual(persisted.publicIp, "203.0.113.1")
+        XCTAssertEqual(persisted.status, "RUNNING")
+        XCTAssertEqual(persisted.lastSyncedAt, Date(timeIntervalSince1970: 1_700_000_100))
+    }
+
+    func testCloudInstanceSyncCreatesServerFromInstanceAndLinksIt() throws {
+        let harness = try Harness()
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        let link = CloudInstanceLink(
+            id: UUID(),
+            serverId: nil,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "prod-1",
+            publicIp: "203.0.113.1",
+            privateIp: "10.0.0.2",
+            status: "RUNNING",
+            instanceType: "S5.SMALL1",
+            zoneId: "ap-guangzhou-3",
+            vpcId: "vpc-1",
+            rawJSON: nil,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+
+        let profile = try harness.cloudInstanceSyncService.createServerFromInstance(
+            link,
+            username: "ubuntu",
+            authType: .password,
+            credential: .password("secret")
+        )
+
+        XCTAssertEqual(profile.name, "prod-1")
+        XCTAssertEqual(profile.host, "203.0.113.1")
+        XCTAssertEqual(profile.username, "ubuntu")
+        XCTAssertEqual(profile.groupName, "Tencent Cloud")
+        XCTAssertEqual(try harness.keychain.readPassword(keychainRef: profile.keychainRef), "secret")
+        let persistedLink = try XCTUnwrap(try harness.repository.fetchCloudInstanceLinks().first)
+        XCTAssertEqual(persistedLink.serverId, profile.id)
+        XCTAssertEqual(persistedLink.instanceId, "ins-123")
+
+        try harness.cloudInstanceSyncService.unlinkInstanceFromServer(server: profile)
+        XCTAssertNil(try harness.repository.fetchCloudInstanceLinks().first?.serverId)
+        XCTAssertEqual(try harness.repository.fetchServers().map(\.id), [profile.id])
+    }
+
     func testTencentCloudAdapterFetchRegionsSignsRequestAndParsesResponse() async throws {
         let transport = MockTencentCloudTransport(responses: [
             """
@@ -337,12 +435,28 @@ final class ServerManagementServiceTests: XCTestCase {
         let keychain: KeychainService
         let service: ServerManagementService
         let cloudAccountService: CloudAccountService
+        let cloudInstanceSyncService: CloudInstanceSyncService
 
-        init() throws {
+        init(
+            adapters: [any CloudProviderAdapter] = [
+                MockCloudProviderAdapter(
+                    providerId: .tencentCloud,
+                    capabilities: [.regions, .instanceDiscovery, .instanceMetadata]
+                ),
+            ],
+            now: @escaping @Sendable () -> Date = Date.init
+        ) throws {
             repository = ServerRepository(database: try AppDatabase.inMemory())
             keychain = KeychainService(serviceName: "me.hhc.HHCServerManager.tests.\(UUID().uuidString)")
             service = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
+            cloudInstanceSyncService = CloudInstanceSyncService(
+                repository: repository,
+                keychain: keychain,
+                registry: CloudProviderRegistry(adapters: adapters),
+                serverManagementService: service,
+                now: now
+            )
         }
     }
 }

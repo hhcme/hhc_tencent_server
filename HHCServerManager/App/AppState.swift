@@ -5,10 +5,12 @@ final class AppState: ObservableObject {
     let repository: ServerRepository
     let serverManagementService: ServerManagementService
     let cloudAccountService: CloudAccountService
+    let cloudInstanceSyncService: CloudInstanceSyncService
     let cloudProviderRegistry: CloudProviderRegistry
     let sshClient: OpenSSHClient
 
     @Published var servers: [ServerProfile] = []
+    @Published var cloudInstanceLinks: [CloudInstanceLink] = []
     @Published var selectedServerId: UUID?
     @Published var connectionStates: [UUID: SSHConnectionState] = [:]
     @Published var startupError: String?
@@ -18,10 +20,17 @@ final class AppState: ObservableObject {
             let database = try AppDatabase.production()
             let repository = ServerRepository(database: database)
             let keychain = KeychainService()
+            let registry = CloudProviderRegistry(adapters: [TencentCloudAdapter()])
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
-            cloudProviderRegistry = CloudProviderRegistry(adapters: [TencentCloudAdapter()])
+            cloudProviderRegistry = registry
+            cloudInstanceSyncService = CloudInstanceSyncService(
+                repository: repository,
+                keychain: keychain,
+                registry: registry,
+                serverManagementService: serverManagementService
+            )
             sshClient = OpenSSHClient(repository: repository, keychain: keychain)
             reloadServers()
         } catch {
@@ -29,10 +38,17 @@ final class AppState: ObservableObject {
             let database = try! AppDatabase.inMemory()
             let repository = ServerRepository(database: database)
             let keychain = KeychainService(serviceName: "me.hhc.HHCServerManager.fallback")
+            let registry = CloudProviderRegistry(adapters: [TencentCloudAdapter()])
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
-            cloudProviderRegistry = CloudProviderRegistry(adapters: [TencentCloudAdapter()])
+            cloudProviderRegistry = registry
+            cloudInstanceSyncService = CloudInstanceSyncService(
+                repository: repository,
+                keychain: keychain,
+                registry: registry,
+                serverManagementService: serverManagementService
+            )
             sshClient = OpenSSHClient(repository: repository, keychain: keychain)
         }
     }
@@ -45,6 +61,7 @@ final class AppState: ObservableObject {
     func reloadServers() {
         do {
             servers = try repository.fetchServers()
+            cloudInstanceLinks = try repository.fetchCloudInstanceLinks()
             if let selectedServerId, !servers.contains(where: { $0.id == selectedServerId }) {
                 self.selectedServerId = nil
             }

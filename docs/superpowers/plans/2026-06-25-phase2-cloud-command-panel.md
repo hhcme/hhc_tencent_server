@@ -142,11 +142,13 @@ CREATE TABLE operation_logs (
 
 ### Task 5：实例同步和关联
 
-- [ ] 实现手动同步。
-- [ ] 实现增量 upsert。
-- [ ] 支持云实例创建 SSH profile。
-- [ ] 支持已有 SSH profile 关联云实例。
-- [ ] 解除关联时不删除 SSH profile，除非用户明确删除服务器。
+- [x] 实现手动同步服务入口。
+- [x] 实现增量 upsert，并保留已有 SSH profile 关联。
+- [x] 支持云实例创建 SSH profile。
+- [x] 支持已有 SSH profile 关联云实例。
+- [x] 解除关联时不删除 SSH profile，除非用户明确删除服务器。
+- [ ] 接入云账号设置和实例导入 UI。
+- [ ] 使用真实腾讯云只读账号完成手动验收。
 
 ### Task 6：简化命令面板
 
@@ -163,8 +165,8 @@ CREATE TABLE operation_logs (
 - [x] 云账号 repository 测试。
 - [x] 云凭据 Keychain 测试。
 - [x] Tencent Cloud response parser 测试。
-- [ ] 实例同步 upsert 测试。
-- [ ] 命令历史测试。
+- [x] 实例同步 upsert 测试。
+- [x] 命令历史测试。
 - [ ] 命令面板 ViewModel 测试。
 
 ### Task 8：手动验收

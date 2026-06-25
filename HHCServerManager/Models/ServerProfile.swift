@@ -156,6 +156,24 @@ struct CloudProviderInstance: Identifiable, Codable, Equatable, Hashable {
     var rawJSON: String?
 }
 
+extension CloudInstanceLink {
+    mutating func apply(instance: CloudProviderInstance, accountId: UUID, syncedAt: Date) {
+        self.accountId = accountId
+        providerId = instance.providerId
+        regionId = instance.regionId
+        instanceId = instance.id
+        displayName = instance.displayName
+        publicIp = instance.publicIp
+        privateIp = instance.privateIp
+        status = instance.status
+        instanceType = instance.instanceType
+        zoneId = instance.zoneId
+        vpcId = instance.vpcId
+        rawJSON = instance.rawJSON
+        lastSyncedAt = syncedAt
+    }
+}
+
 enum SSHConnectionState: Equatable, Hashable {
     case disconnected
     case connecting

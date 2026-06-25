@@ -9,17 +9,13 @@ struct ServerBrowserView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: .constant("all")) {
+            List(selection: $viewModel.sourceFilter) {
                 Label("All Servers", systemImage: "server.rack")
-                    .tag("all")
-                Label("Favorites", systemImage: "star")
-                    .tag("favorites")
-                Label("Recently Used", systemImage: "clock")
-                    .tag("recent")
+                    .tag(ServerSourceFilter.all)
                 Label("Manual SSH", systemImage: "terminal")
-                    .tag("manual")
+                    .tag(ServerSourceFilter.manual)
                 Label("Cloud", systemImage: "cloud")
-                    .tag("cloud")
+                    .tag(ServerSourceFilter.cloud)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190)
         } content: {
@@ -79,7 +75,7 @@ struct ServerBrowserView: View {
     }
 
     private var serverList: some View {
-        let servers = viewModel.filteredServers(from: appState.servers)
+        let servers = viewModel.filteredServers(from: appState.servers, links: appState.cloudInstanceLinks)
         return Group {
             if servers.isEmpty {
                 ContentUnavailableView(
@@ -89,7 +85,10 @@ struct ServerBrowserView: View {
                 )
             } else {
                 List(servers, selection: $viewModel.selectedServerId) { profile in
-                    ServerRowView(profile: profile)
+                    ServerRowView(
+                        profile: profile,
+                        cloudLink: viewModel.cloudLink(for: profile, links: appState.cloudInstanceLinks)
+                    )
                         .tag(profile.id)
                         .contextMenu {
                             Button("Open") {
@@ -114,6 +113,7 @@ struct ServerBrowserView: View {
             if let profile {
                 ServerSummaryPanel(
                     profile: profile,
+                    cloudLink: viewModel.cloudLink(for: profile, links: appState.cloudInstanceLinks),
                     open: {
                         appState.openWorkspace(for: profile)
                     },
@@ -148,6 +148,7 @@ struct ServerBrowserView: View {
 
 private struct ServerRowView: View {
     let profile: ServerProfile
+    let cloudLink: CloudInstanceLink?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -155,13 +156,23 @@ private struct ServerRowView: View {
                 Text(profile.name)
                     .font(.headline)
                 Spacer()
-                Text(profile.authType.displayName)
+                Text(cloudLink?.providerId.displayName ?? profile.authType.displayName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Text(profile.endpoint)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if let cloudLink {
+                HStack(spacing: 8) {
+                    Label(cloudLink.regionId, systemImage: "cloud")
+                    if let status = cloudLink.status {
+                        Label(status, systemImage: "circle.fill")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            }
             if let groupName = profile.groupName {
                 Text(groupName)
                     .font(.caption)
@@ -174,6 +185,7 @@ private struct ServerRowView: View {
 
 private struct ServerSummaryPanel: View {
     let profile: ServerProfile
+    let cloudLink: CloudInstanceLink?
     let open: () -> Void
     let edit: () -> Void
     let delete: () -> Void
@@ -208,6 +220,26 @@ private struct ServerSummaryPanel: View {
                     GridRow {
                         Text("Group").foregroundStyle(.secondary)
                         Text(groupName)
+                    }
+                }
+                if let cloudLink {
+                    GridRow {
+                        Text("Source").foregroundStyle(.secondary)
+                        Text(cloudLink.providerId.displayName)
+                    }
+                    GridRow {
+                        Text("Region").foregroundStyle(.secondary)
+                        Text(cloudLink.regionId)
+                    }
+                    if let status = cloudLink.status {
+                        GridRow {
+                            Text("Cloud Status").foregroundStyle(.secondary)
+                            Text(status)
+                        }
+                    }
+                    GridRow {
+                        Text("Instance").foregroundStyle(.secondary)
+                        Text(cloudLink.instanceId)
                     }
                 }
             }

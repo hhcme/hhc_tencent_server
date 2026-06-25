@@ -77,7 +77,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 
 ## 开发状态
 
-macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础也已经启动：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行、命令元数据历史、云账号元数据、云实例关联、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、操作日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。Dashboard、SFTP、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
+macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础也已经启动：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行、命令元数据历史、云账号元数据、云实例关联、云实例同步/导入服务基础、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、操作日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。Dashboard、SFTP、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
 
 ## 参与贡献
 
