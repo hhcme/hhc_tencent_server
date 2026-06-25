@@ -742,6 +742,47 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.firewallErrorMessage)
     }
 
+    func testEnvironmentFilesLoadSelectAndSaveWithAudit() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = EnvironmentViewModelMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let manager = EnvironmentFileManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadEnvironmentFiles(profile: profile, sshClient: client, environmentFileManager: manager)
+        try await waitUntil { viewModel.isLoadingEnvironmentFiles == false && viewModel.environmentFileList != nil }
+        try await waitUntil { viewModel.isLoadingEnvironmentFileContent == false && viewModel.environmentFileContent != nil }
+
+        XCTAssertEqual(viewModel.environmentFileList?.files.map(\.path), ["/etc/default/nginx", "/var/www/app/.env"])
+        XCTAssertEqual(viewModel.selectedEnvironmentFile?.path, "/etc/default/nginx")
+        XCTAssertTrue(viewModel.environmentFileContent?.content.contains("NGINX_DEBUG=0") == true)
+        XCTAssertNil(viewModel.environmentErrorMessage)
+
+        let appEnv = try XCTUnwrap(viewModel.environmentFileList?.files.first { $0.path.hasSuffix(".env") })
+        viewModel.selectEnvironmentFile(appEnv, profile: profile, sshClient: client, environmentFileManager: manager)
+        try await waitUntil { viewModel.environmentFileContent?.file.path == appEnv.path }
+        XCTAssertEqual(viewModel.environmentFileDraft, "APP_ENV=prod\n")
+
+        viewModel.environmentFileDraft = "APP_ENV=staging\n"
+        viewModel.saveEnvironmentFile(
+            profile: profile,
+            sshClient: client,
+            environmentFileManager: manager,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isSavingEnvironmentFile == false && viewModel.environmentActionMessage?.contains("Saved environment file") == true }
+        XCTAssertEqual(viewModel.environmentFileContent?.content, "APP_ENV=staging\n")
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.count, 1)
+        XCTAssertEqual(logs[0].targetType, "environment")
+        XCTAssertEqual(logs[0].targetId, "/var/www/app/.env")
+        XCTAssertEqual(logs[0].action, "save")
+        XCTAssertEqual(logs[0].status, "success")
+        XCTAssertEqual(logs[0].beforeSnapshot, "APP_ENV=prod")
+        XCTAssertEqual(logs[0].afterSnapshot, "APP_ENV=staging")
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -1363,4 +1404,74 @@ private final class FirewallViewModelMockSSHClient: SSHClient, @unchecked Sendab
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class EnvironmentViewModelMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+    var files = [
+        "/var/www/app/.env": "APP_ENV=prod\n",
+        "/etc/default/nginx": "NGINX_DEBUG=0\n",
+    ]
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("find /var/www") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                /var/www/app/.env\t13\t1700000000.5\tapp
+                /etc/default/nginx\t14\t1700000001.0\tos
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 < '/var/www/app/.env'") {
+            return CommandResult(
+                command: command,
+                stdout: Data((files["/var/www/app/.env"] ?? "").utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 < '/etc/default/nginx'") {
+            return CommandResult(
+                command: command,
+                stdout: Data((files["/etc/default/nginx"] ?? "").utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 -d > \"$tmp\"") {
+            let path = Self.extractShellValue(named: "path", from: command) ?? "/var/www/app/.env"
+            files[path] = Self.decodeEnvironmentFile(from: command)
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+
+    private static func decodeEnvironmentFile(from command: String) -> String {
+        guard let start = command.range(of: "__HHC_ENV_FILE_EOF__'\n"),
+              let end = command[start.upperBound...].range(of: "\n__HHC_ENV_FILE_EOF__")
+        else { return "" }
+        let encoded = String(command[start.upperBound..<end.lowerBound])
+        return Data(base64Encoded: encoded).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+
+    private static func extractShellValue(named name: String, from command: String) -> String? {
+        let prefix = "\(name)='"
+        guard let start = command.range(of: prefix),
+              let end = command[start.upperBound...].range(of: "'")
+        else { return nil }
+        return String(command[start.upperBound..<end.lowerBound])
+    }
 }

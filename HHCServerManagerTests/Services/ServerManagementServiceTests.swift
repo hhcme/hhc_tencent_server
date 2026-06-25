@@ -393,6 +393,48 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertThrowsError(try FirewallManager.parseSnapshot("bad", capturedAt: capturedAt))
     }
 
+    func testEnvironmentFileManagerListsReadsAndSavesWithBackup() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingEnvironmentSSHClient()
+        let manager = EnvironmentFileManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let parsed = EnvironmentFileManager.parseFileListing("""
+        /var/www/app/.env\t30\t1700000000.5\tapp
+        /etc/default/nginx\t20\t1700000001.0\tos
+        /tmp/secret\t12\t1700000002.0\tbad
+        /etc/systemd/system/api.service.d/env.conf\t42\t1700000003.0\tsystemd
+        """)
+        XCTAssertEqual(parsed.map(\.path), [
+            "/etc/default/nginx",
+            "/etc/systemd/system/api.service.d/env.conf",
+            "/var/www/app/.env",
+        ])
+        XCTAssertEqual(parsed[0].source, "os")
+        XCTAssertEqual(try EnvironmentFileManager.validatedEnvironmentPath("/var/www/app/.env"), "/var/www/app/.env")
+        XCTAssertEqual(try EnvironmentFileManager.validatedEnvironmentPath("/etc/default/nginx"), "/etc/default/nginx")
+        XCTAssertThrowsError(try EnvironmentFileManager.validatedEnvironmentPath("/etc/passwd"))
+        XCTAssertThrowsError(try EnvironmentFileManager.validatedEnvironmentPath("/tmp/secret.env"))
+        XCTAssertThrowsError(try EnvironmentFileManager.validatedEnvironmentPath("/var/www/../app/.env"))
+
+        let list = try await manager.listFiles(profile: profile, sshClient: client)
+        XCTAssertEqual(list.files.map(\.path), ["/etc/default/nginx", "/var/www/app/.env"])
+        XCTAssertTrue(client.commands[0].contains("find /var/www"))
+
+        let content = try await manager.readFile(file: list.files[1], profile: profile, sshClient: client)
+        XCTAssertEqual(content.content, "APP_ENV=prod\n")
+        XCTAssertTrue(client.commands.contains { $0.contains("base64 < '/var/www/app/.env'") })
+
+        let saved = try await manager.saveFile(
+            file: list.files[1],
+            content: "APP_ENV=staging\n",
+            profile: profile,
+            sshClient: client
+        )
+        XCTAssertEqual(client.files["/var/www/app/.env"], "APP_ENV=staging\n")
+        XCTAssertTrue(saved.backupPath.contains(".hhc-backup-"))
+        XCTAssertTrue(client.commands.contains { $0.contains("__HHC_ENV_FILE_EOF__") })
+    }
+
     func testDashboardServiceAppendsCloudMetricsWhenLinked() async throws {
         let harness = try Harness(adapters: [
             MockCloudProviderAdapter(
@@ -1431,6 +1473,76 @@ private final class RecordingFirewallSSHClient: SSHClient, @unchecked Sendable {
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class RecordingEnvironmentSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+    var files = [
+        "/var/www/app/.env": "APP_ENV=prod\n",
+        "/etc/default/nginx": "NGINX_DEBUG=0\n",
+    ]
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("find /var/www") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                /var/www/app/.env\t13\t1700000000.5\tapp
+                /etc/default/nginx\t14\t1700000001.0\tos
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 < '/var/www/app/.env'") {
+            return CommandResult(
+                command: command,
+                stdout: Data((files["/var/www/app/.env"] ?? "").utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 < '/etc/default/nginx'") {
+            return CommandResult(
+                command: command,
+                stdout: Data((files["/etc/default/nginx"] ?? "").utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 -d > \"$tmp\"") {
+            let path = Self.extractShellValue(named: "path", from: command) ?? "/var/www/app/.env"
+            files[path] = Self.decodeEnvironmentFile(from: command)
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+
+    private static func decodeEnvironmentFile(from command: String) -> String {
+        guard let start = command.range(of: "__HHC_ENV_FILE_EOF__'\n"),
+              let end = command[start.upperBound...].range(of: "\n__HHC_ENV_FILE_EOF__")
+        else { return "" }
+        let encoded = String(command[start.upperBound..<end.lowerBound])
+        return Data(base64Encoded: encoded).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+
+    private static func extractShellValue(named name: String, from command: String) -> String? {
+        let prefix = "\(name)='"
+        guard let start = command.range(of: prefix),
+              let end = command[start.upperBound...].range(of: "'")
+        else { return nil }
+        return String(command[start.upperBound..<end.lowerBound])
+    }
 }
 
 private final class RecordingTransferClient: RemoteFileTransferClient, @unchecked Sendable {

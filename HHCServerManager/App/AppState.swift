@@ -13,6 +13,7 @@ final class AppState: ObservableObject {
     let cronManager: CronManager
     let nginxConfigManager: NginxConfigManager
     let firewallManager: FirewallManager
+    let environmentFileManager: EnvironmentFileManager
     let remoteFileService: RemoteFileService
     let sshClient: OpenSSHClient
 
@@ -39,6 +40,7 @@ final class AppState: ObservableObject {
             cronManager = CronManager()
             nginxConfigManager = NginxConfigManager()
             firewallManager = FirewallManager()
+            environmentFileManager = EnvironmentFileManager()
             remoteFileService = RemoteFileService()
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,
@@ -64,6 +66,7 @@ final class AppState: ObservableObject {
             cronManager = CronManager()
             nginxConfigManager = NginxConfigManager()
             firewallManager = FirewallManager()
+            environmentFileManager = EnvironmentFileManager()
             remoteFileService = RemoteFileService()
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,

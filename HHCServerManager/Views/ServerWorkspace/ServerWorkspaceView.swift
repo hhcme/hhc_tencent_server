@@ -18,6 +18,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingCronAction: CronActionRequest?
     @State private var pendingNginxReload = false
     @State private var pendingNginxSave = false
+    @State private var pendingEnvironmentSave = false
 
     let profile: ServerProfile
 
@@ -36,6 +37,8 @@ struct ServerWorkspaceView: View {
                     .tag("nginx")
                 Label("Firewall", systemImage: "firewall")
                     .tag("firewall")
+                Label("Environment", systemImage: "slider.horizontal.3")
+                    .tag("environment")
                 Label("Cron", systemImage: "calendar.badge.clock")
                     .tag("cron")
                 Label("Cloud", systemImage: "cloud")
@@ -141,6 +144,19 @@ struct ServerWorkspaceView: View {
         } message: {
             Text("This will create a remote backup, write the config, run nginx -t, and restore the backup if the test fails.")
         }
+        .alert("Save Environment File?", isPresented: $pendingEnvironmentSave) {
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                viewModel.saveEnvironmentFile(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    environmentFileManager: appState.environmentFileManager,
+                    repository: appState.repository
+                )
+            }
+        } message: {
+            Text("This will create a remote backup and replace the selected environment file.")
+        }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
                 entry: entry,
@@ -232,6 +248,8 @@ struct ServerWorkspaceView: View {
             nginxPanel
         case "firewall":
             firewallPanel
+        case "environment":
+            environmentPanel
         case "cron":
             cronPanel
         default:
@@ -1125,6 +1143,151 @@ struct ServerWorkspaceView: View {
         }
     }
 
+    private var environmentPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Environment")
+                        .font(.title2.weight(.semibold))
+                    Spacer()
+                    Button {
+                        viewModel.loadEnvironmentFiles(
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            environmentFileManager: appState.environmentFileManager
+                        )
+                    } label: {
+                        if viewModel.isLoadingEnvironmentFiles {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isEnvironmentBusy)
+                }
+
+                if let capturedAt = viewModel.environmentFileList?.capturedAt {
+                    Text("Last updated \(capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = viewModel.environmentErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+
+                if let message = viewModel.environmentActionMessage {
+                    Label(message, systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
+                }
+            }
+            .padding(20)
+
+            Divider()
+
+            Group {
+                if let files = viewModel.environmentFileList?.files {
+                    HSplitView {
+                        environmentFileList(files)
+                            .frame(minWidth: 360, idealWidth: 440)
+                        environmentFileDetailPanel
+                            .frame(minWidth: 420)
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Environment Files Loaded",
+                        systemImage: "slider.horizontal.3",
+                        description: Text("Refresh to discover common .env, systemd drop-in, /etc/default, and /etc/sysconfig files.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .onAppear {
+            if viewModel.environmentFileList == nil && !viewModel.isLoadingEnvironmentFiles {
+                viewModel.loadEnvironmentFiles(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    environmentFileManager: appState.environmentFileManager
+                )
+            }
+        }
+    }
+
+    private func environmentFileList(_ files: [EnvironmentFile]) -> some View {
+        List(files, selection: environmentFileSelectionBinding) { file in
+            EnvironmentFileRow(file: file)
+                .tag(file.id)
+        }
+        .overlay {
+            if files.isEmpty {
+                ContentUnavailableView("No Environment Files", systemImage: "slider.horizontal.3")
+            }
+        }
+    }
+
+    private var environmentFileDetailPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let file = viewModel.selectedEnvironmentFile {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(file.path)
+                        .font(.title3.weight(.semibold))
+                        .textSelection(.enabled)
+                    Text(environmentFileMetadata(file))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if viewModel.isLoadingEnvironmentFileContent {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Variables")
+                            .font(.headline)
+                        Spacer()
+                        Button {
+                            viewModel.environmentFileDraft = viewModel.environmentFileContent?.content ?? ""
+                        } label: {
+                            Label("Revert", systemImage: "arrow.uturn.backward")
+                        }
+                        .disabled(isEnvironmentBusy || !isEnvironmentDraftDirty)
+
+                        Button {
+                            pendingEnvironmentSave = true
+                        } label: {
+                            if viewModel.isSavingEnvironmentFile {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Label("Save", systemImage: "square.and.arrow.down")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isEnvironmentBusy || !isEnvironmentDraftDirty || viewModel.environmentFileContent?.file.id != file.id)
+                    }
+
+                    TextEditor(text: $viewModel.environmentFileDraft)
+                        .font(.system(.caption, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .disabled(viewModel.environmentFileContent?.file.id != file.id || viewModel.isLoadingEnvironmentFileContent)
+                        .frame(minHeight: 320)
+                        .padding(8)
+                }
+                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+            } else {
+                ContentUnavailableView("Select an Environment File", systemImage: "slider.horizontal.3")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .padding(20)
+    }
+
     private var cronPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1510,6 +1673,23 @@ struct ServerWorkspaceView: View {
         )
     }
 
+    private var environmentFileSelectionBinding: Binding<String?> {
+        Binding(
+            get: { viewModel.selectedEnvironmentFile?.id },
+            set: { fileId in
+                guard let fileId,
+                      let file = viewModel.environmentFileList?.files.first(where: { $0.id == fileId })
+                else { return }
+                viewModel.selectEnvironmentFile(
+                    file,
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    environmentFileManager: appState.environmentFileManager
+                )
+            }
+        )
+    }
+
     private func nginxConfigText(for file: NginxConfigFile) -> String {
         guard viewModel.nginxConfigContent?.file.id == file.id else {
             return "Select Refresh to load this file."
@@ -1527,6 +1707,17 @@ struct ServerWorkspaceView: View {
             parts.append("modified \(modifiedAt.formatted(date: .abbreviated, time: .shortened))")
         }
         return parts.isEmpty ? "Remote config file" : parts.joined(separator: " · ")
+    }
+
+    private func environmentFileMetadata(_ file: EnvironmentFile) -> String {
+        var parts = [file.source]
+        if let size = file.size {
+            parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+        }
+        if let modifiedAt = file.modifiedAt {
+            parts.append("modified \(modifiedAt.formatted(date: .abbreviated, time: .shortened))")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var connectionBadge: some View {
@@ -1610,8 +1801,18 @@ struct ServerWorkspaceView: View {
             viewModel.isReloadingNginx
     }
 
+    private var isEnvironmentBusy: Bool {
+        viewModel.isLoadingEnvironmentFiles ||
+            viewModel.isLoadingEnvironmentFileContent ||
+            viewModel.isSavingEnvironmentFile
+    }
+
     private var isNginxDraftDirty: Bool {
         viewModel.nginxConfigDraft != (viewModel.nginxConfigContent?.content ?? "")
+    }
+
+    private var isEnvironmentDraftDirty: Bool {
+        viewModel.environmentFileDraft != (viewModel.environmentFileContent?.content ?? "")
     }
 }
 
@@ -1666,6 +1867,42 @@ private struct NginxConfigRow: View {
             parts.append(modifiedAt.formatted(date: .abbreviated, time: .shortened))
         }
         return parts.isEmpty ? "config" : parts.joined(separator: " · ")
+    }
+}
+
+private struct EnvironmentFileRow: View {
+    let file: EnvironmentFile
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "slider.horizontal.3")
+                .foregroundStyle(.blue)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(file.path)
+                    .font(.system(.body, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(metadata)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var metadata: String {
+        var parts = [file.source]
+        if let size = file.size {
+            parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+        }
+        if let modifiedAt = file.modifiedAt {
+            parts.append(modifiedAt.formatted(date: .abbreviated, time: .shortened))
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

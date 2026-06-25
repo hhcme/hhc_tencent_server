@@ -49,6 +49,15 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var firewallSnapshot: FirewallSnapshot?
     @Published var isLoadingFirewall = false
     @Published var firewallErrorMessage: String?
+    @Published var environmentFileList: EnvironmentFileList?
+    @Published var selectedEnvironmentFile: EnvironmentFile?
+    @Published var environmentFileContent: EnvironmentFileContent?
+    @Published var environmentFileDraft = ""
+    @Published var isLoadingEnvironmentFiles = false
+    @Published var isLoadingEnvironmentFileContent = false
+    @Published var isSavingEnvironmentFile = false
+    @Published var environmentErrorMessage: String?
+    @Published var environmentActionMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -1061,6 +1070,137 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.firewallErrorMessage = error.localizedDescription
                     self.isLoadingFirewall = false
+                }
+            }
+        }
+    }
+
+    func loadEnvironmentFiles(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        environmentFileManager: EnvironmentFileManager
+    ) {
+        isLoadingEnvironmentFiles = true
+        environmentErrorMessage = nil
+        environmentActionMessage = nil
+
+        Task {
+            do {
+                let list = try await environmentFileManager.listFiles(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.environmentFileList = list
+                    if let selected = self.selectedEnvironmentFile,
+                       let refreshed = list.files.first(where: { $0.id == selected.id }) {
+                        self.selectedEnvironmentFile = refreshed
+                    } else {
+                        self.selectedEnvironmentFile = list.files.first
+                    }
+                    self.isLoadingEnvironmentFiles = false
+                }
+                if let selected = await MainActor.run(body: { self.selectedEnvironmentFile }) {
+                    await MainActor.run {
+                        self.selectEnvironmentFile(
+                            selected,
+                            profile: profile,
+                            sshClient: sshClient,
+                            environmentFileManager: environmentFileManager
+                        )
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.environmentErrorMessage = error.localizedDescription
+                    self.isLoadingEnvironmentFiles = false
+                }
+            }
+        }
+    }
+
+    func selectEnvironmentFile(
+        _ file: EnvironmentFile,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        environmentFileManager: EnvironmentFileManager
+    ) {
+        selectedEnvironmentFile = file
+        isLoadingEnvironmentFileContent = true
+        environmentErrorMessage = nil
+
+        Task {
+            do {
+                let content = try await environmentFileManager.readFile(file: file, profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.environmentFileContent = content
+                    self.environmentFileDraft = content.content
+                    self.isLoadingEnvironmentFileContent = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.environmentErrorMessage = error.localizedDescription
+                    self.isLoadingEnvironmentFileContent = false
+                }
+            }
+        }
+    }
+
+    func saveEnvironmentFile(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        environmentFileManager: EnvironmentFileManager,
+        repository: ServerRepository? = nil
+    ) {
+        guard let content = environmentFileContent else { return }
+        isSavingEnvironmentFile = true
+        environmentErrorMessage = nil
+        environmentActionMessage = nil
+        let beforeSnapshot = content.content
+        let draft = environmentFileDraft
+
+        Task {
+            do {
+                let result = try await environmentFileManager.saveFile(
+                    file: content.file,
+                    content: draft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let refreshed = try await environmentFileManager.readFile(
+                    file: content.file,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "environment",
+                    targetId: content.file.path,
+                    action: "save",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: refreshed.content,
+                    status: "success",
+                    message: "Saved environment file. Backup: \(result.backupPath)."
+                )
+                await MainActor.run {
+                    self.environmentFileContent = refreshed
+                    self.environmentFileDraft = refreshed.content
+                    self.environmentActionMessage = "Saved environment file. Backup: \(result.backupPath)."
+                    self.isSavingEnvironmentFile = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "environment",
+                    targetId: content.file.path,
+                    action: "save",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.environmentErrorMessage = error.localizedDescription
+                    self.isSavingEnvironmentFile = false
                 }
             }
         }

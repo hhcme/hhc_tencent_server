@@ -1028,6 +1028,195 @@ final class FirewallManager: @unchecked Sendable {
     }
 }
 
+final class EnvironmentFileManager: @unchecked Sendable {
+    static let maxEditableBytes = 256 * 1024
+
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func listFiles(profile: ServerProfile, sshClient: SSHClient) async throws -> EnvironmentFileList {
+        let command = """
+        { \
+        home=${HOME:-}; \
+        if [ -n "$home" ] && [ -d "$home" ]; then \
+        find "$home" -maxdepth 3 -type f -name '.env' -printf '%p\\t%s\\t%T@\\tuser\\n' 2>/dev/null; \
+        find "$home" -maxdepth 3 -type f -name '*.env' -printf '%p\\t%s\\t%T@\\tuser\\n' 2>/dev/null; \
+        fi; \
+        if [ -d /var/www ]; then \
+        find /var/www -maxdepth 4 -type f -name '.env' -printf '%p\\t%s\\t%T@\\tapp\\n' 2>/dev/null; \
+        find /var/www -maxdepth 4 -type f -name '*.env' -printf '%p\\t%s\\t%T@\\tapp\\n' 2>/dev/null; \
+        fi; \
+        if [ -d /opt ]; then \
+        find /opt -maxdepth 4 -type f -name '.env' -printf '%p\\t%s\\t%T@\\tapp\\n' 2>/dev/null; \
+        find /opt -maxdepth 4 -type f -name '*.env' -printf '%p\\t%s\\t%T@\\tapp\\n' 2>/dev/null; \
+        fi; \
+        if [ -d /srv ]; then \
+        find /srv -maxdepth 4 -type f -name '.env' -printf '%p\\t%s\\t%T@\\tapp\\n' 2>/dev/null; \
+        find /srv -maxdepth 4 -type f -name '*.env' -printf '%p\\t%s\\t%T@\\tapp\\n' 2>/dev/null; \
+        fi; \
+        [ -d /etc/default ] && find /etc/default -maxdepth 1 -type f -printf '%p\\t%s\\t%T@\\tos\\n' 2>/dev/null; \
+        [ -d /etc/sysconfig ] && find /etc/sysconfig -maxdepth 1 -type f -printf '%p\\t%s\\t%T@\\tos\\n' 2>/dev/null; \
+        [ -d /etc/systemd/system ] && find /etc/systemd/system -path '*.service.d/*.conf' -type f -printf '%p\\t%s\\t%T@\\tsystemd\\n' 2>/dev/null; \
+        } | sort -u
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(12) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not list environment files.")
+        }
+        return EnvironmentFileList(files: Self.parseFileListing(result.stdout), capturedAt: now())
+    }
+
+    func readFile(
+        file: EnvironmentFile,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> EnvironmentFileContent {
+        let path = try Self.validatedEnvironmentPath(file.path)
+        if let size = file.size, size > Self.maxEditableBytes {
+            throw SSHClientError.processFailed("Environment file is larger than the editable preview limit.")
+        }
+        let command = """
+        bytes=$(wc -c < \(Self.shellQuote(path)) 2>/dev/null | tr -d '[:space:]' || echo 0); \
+        if [ "$bytes" -gt \(Self.maxEditableBytes) ]; then echo "__HHC_ENV_FILE_TOO_LARGE__$bytes"; exit 3; fi; \
+        base64 < \(Self.shellQuote(path))
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            if result.exitCode == 3 {
+                throw SSHClientError.processFailed("Environment file is larger than the editable preview limit.")
+            }
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not read \(path).")
+        }
+        let encoded = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = Data(base64Encoded: encoded),
+              let content = String(data: data, encoding: .utf8)
+        else {
+            throw SSHClientError.processFailed("Environment file is not valid UTF-8 text.")
+        }
+        return EnvironmentFileContent(file: file, content: content, byteCount: data.count, capturedAt: now())
+    }
+
+    func saveFile(
+        file: EnvironmentFile,
+        content: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> EnvironmentFileSaveResult {
+        let path = try Self.validatedEnvironmentPath(file.path)
+        let data = Data(content.utf8)
+        guard data.count <= Self.maxEditableBytes else {
+            throw SSHClientError.processFailed("Environment file is larger than the editable preview limit.")
+        }
+        let backupPath = "\(path).hhc-backup-\(Self.timestamp(for: now()))"
+        let encoded = data.base64EncodedString()
+        let command = """
+        set -e; \
+        path=\(Self.shellQuote(path)); \
+        backup=\(Self.shellQuote(backupPath)); \
+        tmp=$(mktemp "$path.hhc-tmp.XXXXXX"); \
+        cleanup() { rm -f "$tmp"; }; \
+        trap cleanup EXIT; \
+        cp -p -- "$path" "$backup"; \
+        base64 -d > "$tmp" <<'__HHC_ENV_FILE_EOF__'
+        \(encoded)
+        __HHC_ENV_FILE_EOF__
+        chmod --reference="$path" "$tmp" 2>/dev/null || true; \
+        chown --reference="$path" "$tmp" 2>/dev/null || true; \
+        mv -- "$tmp" "$path"
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(12) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.combinedOutput(result).nilIfEmpty ?? "Could not save \(path).")
+        }
+        return EnvironmentFileSaveResult(file: file, content: content, backupPath: backupPath, capturedAt: now())
+    }
+
+    static func parseFileListing(_ text: String) -> [EnvironmentFile] {
+        text.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard let path = parts.first,
+                  (try? validatedEnvironmentPath(path)) != nil
+            else { return nil }
+            let size = parts.indices.contains(1) ? Int64(parts[1]) : nil
+            let modifiedAt = parts.indices.contains(2)
+                ? Double(parts[2]).map { Date(timeIntervalSince1970: $0) }
+                : nil
+            let source = parts.indices.contains(3) && !parts[3].isEmpty ? parts[3] : source(for: path)
+            return EnvironmentFile(path: path, size: size, modifiedAt: modifiedAt, source: source)
+        }
+        .reduce(into: [String: EnvironmentFile]()) { files, file in
+            files[file.path] = file
+        }
+        .values
+        .sorted { left, right in
+            left.path.localizedStandardCompare(right.path) == .orderedAscending
+        }
+    }
+
+    static func validatedEnvironmentPath(_ path: String) throws -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/"),
+              !trimmed.contains("\n"),
+              !trimmed.contains("\r"),
+              !trimmed.contains("/../"),
+              !trimmed.hasSuffix("/..")
+        else {
+            throw SSHClientError.processFailed("Only supported environment file paths are allowed.")
+        }
+
+        let isDotEnv = (trimmed.hasSuffix("/.env") || trimmed.hasSuffix(".env"))
+            && (trimmed.hasPrefix("/home/") || trimmed.hasPrefix("/root/") || trimmed.hasPrefix("/var/www/") || trimmed.hasPrefix("/opt/") || trimmed.hasPrefix("/srv/"))
+        let isEtcDefault = trimmed.hasPrefix("/etc/default/") && trimmed.dropFirst("/etc/default/".count).contains("/") == false
+        let isEtcSysconfig = trimmed.hasPrefix("/etc/sysconfig/") && trimmed.dropFirst("/etc/sysconfig/".count).contains("/") == false
+        let isSystemdDropIn = trimmed.hasPrefix("/etc/systemd/system/")
+            && trimmed.contains(".service.d/")
+            && trimmed.hasSuffix(".conf")
+        guard isDotEnv || isEtcDefault || isEtcSysconfig || isSystemdDropIn else {
+            throw SSHClientError.processFailed("Only supported environment file paths are allowed.")
+        }
+        return trimmed
+    }
+
+    private static func source(for path: String) -> String {
+        if path.hasPrefix("/etc/systemd/system/") {
+            return "systemd"
+        }
+        if path.hasPrefix("/etc/default/") || path.hasPrefix("/etc/sysconfig/") {
+            return "os"
+        }
+        if path.hasPrefix("/var/www/") || path.hasPrefix("/opt/") {
+            return "app"
+        }
+        return "user"
+    }
+
+    private static func combinedOutput(_ result: CommandResult) -> String {
+        [result.stdout.trimmed, result.stderr.trimmed]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func timestamp(for date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+            .replacingOccurrences(of: ":", with: "-")
+    }
+}
+
 final class RemoteFileService: @unchecked Sendable {
     static let maxEditableTextBytes = 256 * 1024
 

@@ -57,6 +57,7 @@ All notable changes to this project will be documented in this file.
 - Added Nginx workspace foundations with dynamic config path discovery, config file reading, `nginx -t`, confirmed reload, audit logging, tests, and read-only real-server validation against a non-`/etc/nginx` install.
 - Added guarded Nginx config editing with remote backup, `nginx -t` after save, automatic rollback on test failure, UI confirmation, and audit coverage.
 - Added read-only Firewall workspace foundations with backend detection for firewalld, ufw, nftables, and iptables, rules display, tests, and inactive firewalld handling.
+- Added Environment workspace foundations for common `.env`, `/etc/default`, `/etc/sysconfig`, and systemd drop-in env files with guarded discovery, UTF-8 editing, remote backups, confirmation UI, and audit coverage.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -109,3 +110,4 @@ All notable changes to this project will be documented in this file.
 - 添加 Nginx 工作台基础，支持动态探测配置路径、读取配置文件、执行 `nginx -t`、确认后 reload、审计日志、测试，并在非 `/etc/nginx` 安装路径的真实服务器上完成只读验证。
 - 添加受保护的 Nginx 配置编辑，支持远端备份、保存后执行 `nginx -t`、测试失败自动回滚、UI 二次确认和审计覆盖。
 - 添加只读防火墙工作台基础，支持 firewalld、ufw、nftables、iptables 后端探测、规则展示、测试和 firewalld 未运行状态处理。
+- 添加环境变量工作台基础，支持常见 `.env`、`/etc/default`、`/etc/sysconfig` 和 systemd drop-in 环境文件的受限发现、UTF-8 编辑、远端备份、确认 UI 和审计覆盖。

@@ -67,7 +67,7 @@ CREATE TABLE environment_profiles (
 - `NginxConfigManager`：站点配置读取、编辑、测试、reload、回滚。
 - `FirewallAdapter`：ufw/firewalld/iptables 能力探测和有限操作。
 - `CronManager`：crontab 读取、编辑、禁用、恢复。
-- `EnvironmentConfigManager`：`.env`、shell profile、systemd env file 管理。
+- `EnvironmentFileManager`：常见 `.env`、`/etc/default`、`/etc/sysconfig` 和 systemd drop-in env file 的受限发现、读取、备份保存。
 - `RemoteChangeLogStore`：所有写操作审计。
 
 ## 6. UI 范围
@@ -85,8 +85,8 @@ CREATE TABLE environment_profiles (
 ### Task 1：危险操作框架
 
 - [ ] 定义 `RemoteOperationRisk` 和确认模型。
-- [x] 所有写操作写入 `remote_change_logs`：当前 systemd、Cron 和 Nginx reload 写操作已记录 before/after/status/message，安全组、防火墙待接入。
-- [x] 操作失败时保存 stderr 和上下文：当前 systemd、Cron 和 Nginx reload 失败会记录 before snapshot 与错误 message。
+- [x] 所有写操作写入 `remote_change_logs`：当前 systemd、Cron、Nginx 和 Environment 写操作已记录 before/after/status/message，安全组、防火墙待接入。
+- [x] 操作失败时保存 stderr 和上下文：当前 systemd、Cron、Nginx 和 Environment 失败会记录 before snapshot 与错误 message。
 - [ ] UI 展示操作预览和风险说明。
 
 ### Task 2：安全组
@@ -124,15 +124,16 @@ CREATE TABLE environment_profiles (
 
 - [x] 读取用户 crontab。
 - [x] 添加、禁用、删除任务：当前支持用户级 crontab 的添加、启用、禁用和删除，写入前创建远端备份。
-- [ ] 管理常用 `.env` 文件和 systemd env file。
-- [ ] 保存前创建备份。
+- [x] 管理常用 `.env` 文件和 systemd env file：当前支持用户/应用目录 `.env` 和 `*.env`、`/etc/default`、`/etc/sysconfig`、systemd drop-in `.conf` 的受限发现、读取和编辑。
+- [x] 保存前创建备份：当前保存环境变量文件前会创建远端 `.hhc-backup-*` 备份，并写入审计记录。
 
 ### Task 7：测试
 
-- [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验、Cron 解析和 crontab 写入内容、Nginx 配置列表解析和路径校验。
+- [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验、Cron 解析和 crontab 写入内容、Nginx 配置列表解析和路径校验、Environment 文件列表解析和路径校验。
 - [ ] 风险确认 ViewModel 测试。
 - [x] Nginx 配置测试/回滚逻辑测试：已覆盖配置保存、保存前备份、`nginx -t`、测试失败回滚、测试通过后 reload 和审计日志写入。
 - [x] Firewall adapter 能力探测测试：已覆盖 firewalld、ufw、nftables、iptables 解析和 firewalld 未运行状态。
+- [x] Environment 文件读写测试：已覆盖受限文件发现、UTF-8 读取、保存前备份、ViewModel 状态流和审计日志写入。
 - [x] RemoteChangeLogStore 测试：已覆盖保存、倒序查询、按 server 过滤和 server 删除后的 SET NULL。
 
 ### Task 8：手动验收
@@ -144,12 +145,12 @@ CREATE TABLE environment_profiles (
 - [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，真实配置写入/reload 待谨慎手动验收。
 - [x] 防火墙后端只读探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作待后续谨慎验收。
 - [ ] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，禁用/恢复写操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
-- [ ] 所有写操作可在操作日志中查到。
+- [ ] 所有写操作可在操作日志中查到。当前 systemd、Cron、Nginx 和 Environment 写操作已写入 `remote_change_logs`，安全组、防火墙写操作待实现后接入。
 
 ## 8. 完成标志
 
 1. 云安全组基础读写可用。
-2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。
+2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。当前 systemd、Nginx、Cron、Environment 已有工作台基础，Firewall 已有只读探测。
 3. 所有远程写操作有确认和审计。
 4. Nginx 等配置类操作有备份和回滚。当前 Nginx 已具备读取、编辑、保存前备份、保存后测试、失败回滚和 reload 前保护。
 5. 测试和手动验收通过。

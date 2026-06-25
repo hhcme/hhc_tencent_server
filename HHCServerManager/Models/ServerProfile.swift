@@ -252,6 +252,33 @@ struct FirewallSnapshot: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+struct EnvironmentFile: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { path }
+    var path: String
+    var size: Int64?
+    var modifiedAt: Date?
+    var source: String
+}
+
+struct EnvironmentFileList: Equatable, Hashable, Sendable {
+    var files: [EnvironmentFile]
+    var capturedAt: Date
+}
+
+struct EnvironmentFileContent: Equatable, Hashable, Sendable {
+    var file: EnvironmentFile
+    var content: String
+    var byteCount: Int
+    var capturedAt: Date
+}
+
+struct EnvironmentFileSaveResult: Equatable, Hashable, Sendable {
+    var file: EnvironmentFile
+    var content: String
+    var backupPath: String
+    var capturedAt: Date
+}
+
 enum RemoteFileKind: String, Equatable, Hashable {
     case directory
     case file
