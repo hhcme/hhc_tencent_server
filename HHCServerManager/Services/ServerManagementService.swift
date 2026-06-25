@@ -782,23 +782,20 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         action: InstancePowerAction,
         status: String
     ) -> Bool {
-        let normalizedStatus = status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let cloudAction: CloudInstancePowerAction
         switch action {
         case .start:
-            switch providerId {
-            case .tencentCloud, .alibabaCloud:
-                return normalizedStatus == "STOPPED"
-            case .huaweiCloud:
-                return normalizedStatus == "SHUTOFF" || normalizedStatus == "STOPPED"
-            }
-        case .stop, .reboot:
-            switch providerId {
-            case .tencentCloud, .alibabaCloud:
-                return normalizedStatus == "RUNNING"
-            case .huaweiCloud:
-                return normalizedStatus == "ACTIVE" || normalizedStatus == "RUNNING"
-            }
+            cloudAction = .start
+        case .stop:
+            cloudAction = .stop
+        case .reboot:
+            cloudAction = .reboot
         }
+        return CloudResourceActionPolicy.canPerformPowerAction(
+            providerId: providerId,
+            action: cloudAction,
+            status: status
+        )
     }
 
     private func persistInstanceTransition(
@@ -826,39 +823,15 @@ final class CloudInstanceSyncService: @unchecked Sendable {
     }
 
     private static func canDeleteSnapshot(providerId: CloudProviderID, status: String) -> Bool {
-        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        switch providerId {
-        case .tencentCloud:
-            return normalized == "NORMAL"
-        case .alibabaCloud:
-            return normalized == "ACCOMPLISHED"
-        case .huaweiCloud:
-            return normalized == "AVAILABLE"
-        }
+        CloudResourceActionPolicy.canDeleteSnapshot(providerId: providerId, status: status)
     }
 
     private static func canAttachDisk(providerId: CloudProviderID, status: String) -> Bool {
-        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        switch providerId {
-        case .tencentCloud:
-            return normalized == "UNATTACHED" || normalized == "DETACHED"
-        case .alibabaCloud:
-            return normalized == "AVAILABLE"
-        case .huaweiCloud:
-            return normalized == "AVAILABLE"
-        }
+        CloudResourceActionPolicy.canAttachDisk(providerId: providerId, status: status)
     }
 
     private static func canDetachDisk(providerId: CloudProviderID, status: String) -> Bool {
-        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        switch providerId {
-        case .tencentCloud:
-            return normalized == "ATTACHED"
-        case .alibabaCloud:
-            return normalized == "IN_USE"
-        case .huaweiCloud:
-            return normalized == "IN-USE" || normalized == "IN_USE"
-        }
+        CloudResourceActionPolicy.canDetachDisk(providerId: providerId, status: status)
     }
 }
 

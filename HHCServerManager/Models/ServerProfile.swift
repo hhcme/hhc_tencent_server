@@ -999,6 +999,118 @@ enum CloudInstancePowerAction: String, Codable, CaseIterable, Identifiable, Send
     }
 }
 
+enum CloudResourceActionPolicy {
+    static func canPerformPowerAction(
+        providerId: CloudProviderID,
+        action: CloudInstancePowerAction,
+        status: String?
+    ) -> Bool {
+        guard let normalizedStatus = normalizedStatus(status) else {
+            return false
+        }
+        switch action {
+        case .start:
+            switch providerId {
+            case .tencentCloud, .alibabaCloud:
+                return normalizedStatus == "STOPPED"
+            case .huaweiCloud:
+                return normalizedStatus == "SHUTOFF" || normalizedStatus == "STOPPED"
+            }
+        case .stop, .reboot:
+            switch providerId {
+            case .tencentCloud, .alibabaCloud:
+                return normalizedStatus == "RUNNING"
+            case .huaweiCloud:
+                return normalizedStatus == "ACTIVE" || normalizedStatus == "RUNNING"
+            }
+        }
+    }
+
+    static func canDeleteSnapshot(providerId: CloudProviderID, status: String?) -> Bool {
+        guard let normalizedStatus = normalizedStatus(status) else {
+            return false
+        }
+        switch providerId {
+        case .tencentCloud:
+            return normalizedStatus == "NORMAL"
+        case .alibabaCloud:
+            return normalizedStatus == "ACCOMPLISHED"
+        case .huaweiCloud:
+            return normalizedStatus == "AVAILABLE"
+        }
+    }
+
+    static func canAttachDisk(providerId: CloudProviderID, status: String?) -> Bool {
+        guard let normalizedStatus = normalizedStatus(status) else {
+            return true
+        }
+        switch providerId {
+        case .tencentCloud:
+            return normalizedStatus == "UNATTACHED" || normalizedStatus == "DETACHED"
+        case .alibabaCloud:
+            return normalizedStatus == "AVAILABLE"
+        case .huaweiCloud:
+            return normalizedStatus == "AVAILABLE"
+        }
+    }
+
+    static func canDetachDisk(providerId: CloudProviderID, status: String?) -> Bool {
+        guard let normalizedStatus = normalizedStatus(status) else {
+            return false
+        }
+        switch providerId {
+        case .tencentCloud:
+            return normalizedStatus == "ATTACHED"
+        case .alibabaCloud:
+            return normalizedStatus == "IN_USE"
+        case .huaweiCloud:
+            return normalizedStatus == "IN-USE" || normalizedStatus == "IN_USE"
+        }
+    }
+
+    static func powerActionHint(providerId: CloudProviderID) -> String {
+        switch providerId {
+        case .tencentCloud, .alibabaCloud:
+            return "Power actions are available for RUNNING or STOPPED instances."
+        case .huaweiCloud:
+            return "Power actions are available for ACTIVE or SHUTOFF instances."
+        }
+    }
+
+    static func snapshotDeletionHint(providerId: CloudProviderID) -> String {
+        switch providerId {
+        case .tencentCloud:
+            return "Only NORMAL snapshots can be deleted."
+        case .alibabaCloud:
+            return "Only accomplished snapshots can be deleted."
+        case .huaweiCloud:
+            return "Only available snapshots can be deleted."
+        }
+    }
+
+    static func diskAttachmentHint(providerId: CloudProviderID) -> String {
+        switch providerId {
+        case .tencentCloud:
+            return "Attach is available for UNATTACHED or DETACHED disks; detach is available for ATTACHED disks."
+        case .alibabaCloud:
+            return "Attach is available for Available disks; detach is available for In_use disks."
+        case .huaweiCloud:
+            return "Attach is available for available disks; detach is available for in-use disks."
+        }
+    }
+
+    private static func normalizedStatus(_ status: String?) -> String? {
+        guard let status else {
+            return nil
+        }
+        let trimmed = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed.uppercased()
+    }
+}
+
 enum CloudCapability: String, Codable, CaseIterable, Identifiable, Sendable {
     case regions
     case instanceDiscovery

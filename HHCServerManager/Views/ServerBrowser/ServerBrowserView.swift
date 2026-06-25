@@ -434,7 +434,21 @@ private struct CloudResourceCenterSheet: View {
         if supportsPowerActions && resource.kind == .instance {
             Divider()
                 .padding(.bottom, 12)
-            let normalizedStatus = resource.status?.uppercased()
+            let canStart = CloudResourceActionPolicy.canPerformPowerAction(
+                providerId: resource.providerId,
+                action: .start,
+                status: resource.status
+            )
+            let canStop = CloudResourceActionPolicy.canPerformPowerAction(
+                providerId: resource.providerId,
+                action: .stop,
+                status: resource.status
+            )
+            let canReboot = CloudResourceActionPolicy.canPerformPowerAction(
+                providerId: resource.providerId,
+                action: .reboot,
+                status: resource.status
+            )
             HStack(spacing: 8) {
                 Button {
                     queueInstancePowerAction(.start, for: resource)
@@ -442,7 +456,7 @@ private struct CloudResourceCenterSheet: View {
                     Label("Start", systemImage: "power")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isWorking || normalizedStatus != "STOPPED")
+                .disabled(viewModel.isWorking || !canStart)
 
                 Button {
                     queueInstancePowerAction(.stop, for: resource)
@@ -451,7 +465,7 @@ private struct CloudResourceCenterSheet: View {
                 }
                 .buttonStyle(.bordered)
                 .foregroundStyle(.red)
-                .disabled(viewModel.isWorking || normalizedStatus != "RUNNING")
+                .disabled(viewModel.isWorking || !canStop)
 
                 Button {
                     queueInstancePowerAction(.reboot, for: resource)
@@ -459,10 +473,10 @@ private struct CloudResourceCenterSheet: View {
                     Label("Reboot", systemImage: "arrow.clockwise.circle")
                 }
                 .buttonStyle(.bordered)
-                .disabled(viewModel.isWorking || normalizedStatus != "RUNNING")
+                .disabled(viewModel.isWorking || !canReboot)
             }
-            if normalizedStatus != "RUNNING" && normalizedStatus != "STOPPED" {
-                Text("Power actions are available for RUNNING or STOPPED instances.")
+            if !canStart && !canStop && !canReboot {
+                Text(CloudResourceActionPolicy.powerActionHint(providerId: resource.providerId))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -491,6 +505,10 @@ private struct CloudResourceCenterSheet: View {
         } else if supportsSnapshots && resource.kind == .snapshot {
             Divider()
                 .padding(.bottom, 12)
+            let canDelete = CloudResourceActionPolicy.canDeleteSnapshot(
+                providerId: resource.providerId,
+                status: resource.status
+            )
             Button {
                 pendingSnapshotAction = CloudSnapshotActionRequest(
                     kind: .delete,
@@ -503,9 +521,9 @@ private struct CloudResourceCenterSheet: View {
             }
             .buttonStyle(.bordered)
             .foregroundStyle(.red)
-            .disabled(viewModel.isWorking || resource.status?.uppercased() != "NORMAL")
-            if resource.status?.uppercased() != "NORMAL" {
-                Text("Only NORMAL snapshots can be deleted.")
+            .disabled(viewModel.isWorking || !canDelete)
+            if !canDelete {
+                Text(CloudResourceActionPolicy.snapshotDeletionHint(providerId: resource.providerId))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -518,8 +536,15 @@ private struct CloudResourceCenterSheet: View {
         if supportsDiskAttachment && resource.kind == .disk {
             Divider()
                 .padding(.bottom, 12)
-            let normalizedStatus = resource.status?.uppercased()
-            if normalizedStatus == "UNATTACHED" || normalizedStatus == "DETACHED" || normalizedStatus == nil {
+            let canAttach = CloudResourceActionPolicy.canAttachDisk(
+                providerId: resource.providerId,
+                status: resource.status
+            )
+            let canDetach = CloudResourceActionPolicy.canDetachDisk(
+                providerId: resource.providerId,
+                status: resource.status
+            )
+            if canAttach {
                 VStack(alignment: .leading, spacing: 8) {
                     TextField("Target Instance ID", text: $attachDiskInstanceId)
                         .textFieldStyle(.roundedBorder)
@@ -537,7 +562,7 @@ private struct CloudResourceCenterSheet: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.isWorking || attachDiskInstanceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-            } else {
+            } else if canDetach {
                 Button {
                     pendingDiskAction = CloudDiskActionRequest(
                         kind: .detach,
@@ -550,12 +575,17 @@ private struct CloudResourceCenterSheet: View {
                 }
                 .buttonStyle(.bordered)
                 .foregroundStyle(.red)
-                .disabled(viewModel.isWorking || normalizedStatus != "ATTACHED")
-                if normalizedStatus != "ATTACHED" {
-                    Text("Only ATTACHED disks can be detached.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                .disabled(viewModel.isWorking)
+            } else {
+                Button {} label: {
+                    Label("Detach Disk", systemImage: "externaldrive.badge.minus")
                 }
+                .buttonStyle(.bordered)
+                .foregroundStyle(.red)
+                .disabled(true)
+                Text(CloudResourceActionPolicy.diskAttachmentHint(providerId: resource.providerId))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

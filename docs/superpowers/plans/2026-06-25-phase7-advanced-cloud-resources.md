@@ -109,6 +109,7 @@ CREATE TABLE cloud_billing_states (
 - 已为腾讯云 CVM 接入实例启动、停止、重启操作，云资源中心会按 `powerActions` capability 展示操作；启动仅允许 `STOPPED` 实例，停止/重启仅允许 `RUNNING` 实例，执行后本地缓存进入 `STARTING`/`STOPPING`/`REBOOTING` 并写入云端变更审计。
 - 已为阿里云 ECS 接入实例启动、停止、重启操作，云资源中心会按 `powerActions` capability 展示操作；启动仅允许 `Stopped` 实例，停止/重启仅允许 `Running` 实例，执行后本地缓存进入 `STARTING`/`STOPPING`/`REBOOTING` 并写入云端变更审计。
 - 已为华为云 ECS 接入实例启动、停止、重启操作，云资源中心会按 `powerActions` capability 展示操作；启动允许 `SHUTOFF` 实例，停止/重启允许 `ACTIVE` 实例，停止/重启默认使用 `SOFT`，执行后本地缓存进入 `STARTING`/`STOPPING`/`REBOOTING` 并写入云端变更审计。
+- 已统一云资源操作状态门禁，服务层和云资源中心 UI 共用 provider-aware 策略，避免阿里云 `Available` / `In_use`、华为云 `ACTIVE` / `SHUTOFF` / `in-use` 等状态被腾讯云状态规则误禁用。
 - 已为阿里云 ECS 接入安全组单条规则新增/删除操作，云资源中心会按 `securityGroupActions` capability 展示操作；规则参数复用统一预览模型，`443` 这类单端口会自动转为 `443/443`，执行后刷新规则快照并复用远程变更审计。
 - 已为华为云 VPC 接入安全组单条规则创建/删除操作，云资源中心会按 `securityGroupActions` capability 展示操作；规则读取会保留 `providerRuleId`，删除时使用华为云 rule id 精确定位，执行后刷新规则快照并复用远程变更审计。
 

@@ -189,6 +189,48 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(matrix.status(providerId: .huaweiCloud, capability: .instanceDiscovery)?.providerName, "Huawei Cloud")
     }
 
+    func testCloudResourceActionPolicyUsesProviderSpecificStatuses() {
+        XCTAssertTrue(CloudResourceActionPolicy.canPerformPowerAction(
+            providerId: .tencentCloud,
+            action: .start,
+            status: " STOPPED "
+        ))
+        XCTAssertTrue(CloudResourceActionPolicy.canPerformPowerAction(
+            providerId: .alibabaCloud,
+            action: .reboot,
+            status: "Running"
+        ))
+        XCTAssertTrue(CloudResourceActionPolicy.canPerformPowerAction(
+            providerId: .huaweiCloud,
+            action: .start,
+            status: "SHUTOFF"
+        ))
+        XCTAssertTrue(CloudResourceActionPolicy.canPerformPowerAction(
+            providerId: .huaweiCloud,
+            action: .stop,
+            status: "ACTIVE"
+        ))
+        XCTAssertFalse(CloudResourceActionPolicy.canPerformPowerAction(
+            providerId: .alibabaCloud,
+            action: .stop,
+            status: "Stopped"
+        ))
+
+        XCTAssertTrue(CloudResourceActionPolicy.canDeleteSnapshot(providerId: .tencentCloud, status: "NORMAL"))
+        XCTAssertTrue(CloudResourceActionPolicy.canDeleteSnapshot(providerId: .alibabaCloud, status: "accomplished"))
+        XCTAssertTrue(CloudResourceActionPolicy.canDeleteSnapshot(providerId: .huaweiCloud, status: "available"))
+        XCTAssertFalse(CloudResourceActionPolicy.canDeleteSnapshot(providerId: .huaweiCloud, status: "creating"))
+
+        XCTAssertTrue(CloudResourceActionPolicy.canAttachDisk(providerId: .tencentCloud, status: "DETACHED"))
+        XCTAssertTrue(CloudResourceActionPolicy.canAttachDisk(providerId: .alibabaCloud, status: "Available"))
+        XCTAssertTrue(CloudResourceActionPolicy.canAttachDisk(providerId: .huaweiCloud, status: "available"))
+        XCTAssertTrue(CloudResourceActionPolicy.canAttachDisk(providerId: .huaweiCloud, status: nil))
+        XCTAssertTrue(CloudResourceActionPolicy.canDetachDisk(providerId: .tencentCloud, status: "ATTACHED"))
+        XCTAssertTrue(CloudResourceActionPolicy.canDetachDisk(providerId: .alibabaCloud, status: "In_use"))
+        XCTAssertTrue(CloudResourceActionPolicy.canDetachDisk(providerId: .huaweiCloud, status: "in-use"))
+        XCTAssertFalse(CloudResourceActionPolicy.canDetachDisk(providerId: .huaweiCloud, status: nil))
+    }
+
     func testCloudResourceSearchUnifiesFiltersAndSearchesResources() {
         let accountId = UUID()
         let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
