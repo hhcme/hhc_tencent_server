@@ -169,6 +169,7 @@ CREATE TABLE operation_logs (
 - [x] 命令历史测试。
 - [x] 命令面板 ViewModel 测试。
 - [x] 云账号验证失败 ViewModel 测试：厂商凭据校验失败时不创建账号、不清空待修正密钥输入。
+- [x] 可选真实命令面板集成测试：`SSHIntegrationTests.testRealCommandPanelExecutesUnameAndRerunsHistoryWhenEnvironmentIsConfigured` 覆盖真实 SSH 执行 `uname -a`、stdout/exit code、`command_history`、`operation_logs` 和历史复跑。
 
 ### Task 8：手动验收
 
@@ -177,8 +178,8 @@ CREATE TABLE operation_logs (
 - [ ] 同步 CVM 实例并在服务器列表看到云来源。
 - [ ] 将云实例关联到 SSH profile。
 - [ ] 手动 SSH 服务器在无云账号时仍可正常使用。
-- [ ] 命令面板执行 `uname -a` 并展示 stdout、exit code。
-- [ ] 命令历史可重复执行。
+- [x] 命令面板执行 `uname -a` 并展示 stdout、exit code：2026-06-26 已通过真实 SSH + ViewModel 集成测试验证。
+- [x] 命令历史可重复执行：2026-06-26 已通过真实 SSH + ViewModel 集成测试验证历史持久化和 rerun。
 
 ## 8. 完成标志
 

@@ -12,6 +12,61 @@ final class SSHIntegrationTests: XCTestCase {
         XCTAssertEqual(result.stdout, "hhc-ssh-ok", result.stderr)
     }
 
+    @MainActor
+    func testRealCommandPanelExecutesUnameAndRerunsHistoryWhenEnvironmentIsConfigured() async throws {
+        let harness = try makeRealSSHHarness()
+        defer { try? harness.service.deleteServer(harness.profile) }
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+
+        let viewModel = ServerWorkspaceViewModel()
+        viewModel.executeCommand(
+            "uname -a",
+            profile: harness.profile,
+            sshClient: harness.sshClient,
+            repository: harness.repository
+        )
+        try await Self.waitUntil {
+            viewModel.isRunningCommand == false && viewModel.persistedCommandHistory.count == 1
+        }
+
+        let firstResult = try XCTUnwrap(viewModel.commandResult)
+        XCTAssertEqual(firstResult.command, "uname -a")
+        XCTAssertEqual(firstResult.exitCode, 0, firstResult.stderr)
+        XCTAssertTrue(firstResult.stdout.contains("Linux"), firstResult.stdout)
+        XCTAssertNil(viewModel.lastCommandFailure)
+
+        let firstEntry = try XCTUnwrap(viewModel.persistedCommandHistory.first)
+        XCTAssertEqual(firstEntry.command, "uname -a")
+        XCTAssertEqual(firstEntry.exitCode, 0)
+        XCTAssertEqual(try harness.repository.fetchCommandHistory(serverId: harness.profile.id).count, 1)
+        XCTAssertTrue(try harness.repository.fetchOperationLogs().contains {
+            $0.scope == "ssh"
+                && $0.action == "execute_command"
+                && $0.targetId == harness.profile.id.uuidString
+                && $0.status == "success"
+                && $0.message == "exit_code=0"
+        })
+
+        viewModel.rerunCommand(
+            firstEntry,
+            profile: harness.profile,
+            sshClient: harness.sshClient,
+            repository: harness.repository
+        )
+        try await Self.waitUntil {
+            viewModel.isRunningCommand == false && viewModel.persistedCommandHistory.count == 2
+        }
+
+        let rerunResult = try XCTUnwrap(viewModel.commandResult)
+        XCTAssertEqual(rerunResult.command, "uname -a")
+        XCTAssertEqual(rerunResult.exitCode, 0, rerunResult.stderr)
+        XCTAssertTrue(rerunResult.stdout.contains("Linux"), rerunResult.stdout)
+        XCTAssertEqual(
+            try harness.repository.fetchCommandHistory(serverId: harness.profile.id).map(\.command),
+            ["uname -a", "uname -a"]
+        )
+    }
+
     func testRealSFTPTransferRoundTripWhenEnvironmentIsConfigured() async throws {
         let harness = try makeRealSSHHarness(disableRsync: true, disableSCPFallback: true)
         defer { try? harness.service.deleteServer(harness.profile) }
