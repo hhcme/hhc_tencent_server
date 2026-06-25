@@ -6,9 +6,9 @@ HHC Server Manager is an open-source macOS native server management client. It a
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，目标是以 SSH 为核心提供类似宝塔面板的桌面端体验，并在用户配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-> Project status: active macOS implementation. The app can already store server profiles, keep SSH and cloud credentials in Keychain, verify SSH host keys, run real OpenSSH smoke tests, execute single remote commands, browse and edit remote files, queue rsync/scp-backed batch transfers with running byte progress, show SSH and linked-cloud dashboard metrics, inspect and mutate selected cloud/security resources, manage systemd/Cron/Nginx/Firewall/Environment foundations, run GitLab-style deployment workflows, manage Verdaccio npm registry foundations, and persist command/cloud/deployment/registry/remote-change metadata in SQLite.
+> Project status: active macOS implementation. The app can already store server profiles, keep SSH and cloud credentials in Keychain, verify SSH host keys, run real OpenSSH smoke tests, execute single remote commands, browse and edit remote files, queue rsync/scp-backed batch transfers with running byte progress, show SSH and linked-cloud dashboard metrics, inspect and mutate selected cloud/security resources, manage systemd/Cron/Nginx/Firewall/Environment foundations, run GitLab-style deployment workflows, manage Verdaccio npm registry foundations with real isolated lifecycle validation, and persist command/cloud/deployment/registry/remote-change metadata in SQLite.
 >
-> 项目状态：macOS 活跃实现阶段。当前应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/scp 排队批量传输文件并展示运行中字节进度、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。
+> 项目状态：macOS 活跃实现阶段。当前应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/scp 排队批量传输文件并展示运行中字节进度、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力并完成隔离真实生命周期验证，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。
 
 ## Highlights / 亮点
 
@@ -18,6 +18,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - Host key verification as a first-class security requirement.
 - Server browser, dedicated server workspace, real smoke test, simplified command panel, and command metadata history are underway.
 - Dashboard auto-refresh, SSH metrics, linked cloud metrics, security group inspection and confirmed single-rule changes, remote file browsing, lightweight text editing with Save As, permission changes, queued batch upload/download, systemd Services, Cron management, guarded Nginx config edit/test/reload, limited Firewall rule changes, guarded Environment file editing, GitLab-style deployments, and Verdaccio registry management are underway.
+- Verdaccio has guarded real-server lifecycle coverage for isolated install, user creation, npm publish/install smoke, restart, config backup, and backup/restore; production deployment and proxy exposure still require environment-specific validation.
 - Cloud account metadata and cloud credential storage foundation are in place.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper are in place.
 - Tencent Cloud, Alibaba Cloud, and Huawei Cloud adapters now cover instance discovery, selected power/disk/snapshot/security-group operations, and linked dashboard metrics with mock-backed tests.
@@ -30,6 +31,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - 把主机指纹验证作为基础安全能力。
 - 服务器列表、单服务器工作台、真实 smoke test、简化命令面板和命令元数据历史已进入实现。
 - Dashboard 自动刷新、SSH 指标、已关联云实例指标、安全组查看和经确认的单条规则变更、远程文件浏览、带另存为的轻量文本编辑、权限修改、带 rsync 字节进度和 scp 回退的排队批量上传/下载、systemd Services、Cron 管理、受保护的 Nginx 配置编辑/测试/reload、有限防火墙规则变更、受保护的环境变量文件编辑、GitLab 风格部署和 Verdaccio 仓库管理已进入实现。
+- Verdaccio 已有受保护的真实服务器生命周期覆盖：隔离安装、用户创建、npm publish/install smoke、重启、配置备份和备份/恢复；生产环境部署和 proxy 暴露仍需按目标环境单独验收。
 - 云账号元数据和云凭据存储基础已经落地。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装已经落地。
 - 腾讯云、阿里云和华为云 adapter 已覆盖实例发现、部分电源/云盘/快照/安全组操作，以及已关联实例 Dashboard 指标，并有 mock 测试覆盖。

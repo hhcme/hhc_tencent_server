@@ -92,21 +92,21 @@ CREATE TABLE registry_backups (
 ### Task 2：Verdaccio 安装
 
 - [x] 固定 Verdaccio 稳定版本：当前默认固定为 `5.31.1`，并拒绝 `latest`、pre-release 和非 semver 版本。
-- [x] 创建安装目录和数据目录：已生成受控安装命令，创建 system user、安装目录和 data 目录；真实服务器写操作仍需谨慎手动验收。
+- [x] 创建安装目录和数据目录：已生成受控安装命令，创建 system user、安装目录和 data 目录；已在真实测试服务器用隔离的临时 service/path 完成安装和清理验收。
 - [x] 生成配置文件：已生成基础 `config.yaml` 模板，包含 storage、listen、npmjs uplink、package access/publish 和日志配置。
-- [x] 创建 systemd service：已生成 systemd unit 模板，包含固定 Verdaccio 版本、工作目录、重启策略和基础 hardening。
-- [x] 启动并验证健康检查：已生成 `systemctl daemon-reload`、`enable --now`、`restart` 和 `/-/ping` health check 流程，mock/contract 测试已覆盖；真实服务器手动验收仍未执行。
+- [x] 创建 systemd service：已生成 systemd unit 模板，包含固定 Verdaccio 版本、工作目录、重启策略和基础 hardening；真实测试表明运行期使用本地固定安装包比每次 `npx` 拉取更稳定，当前 service 已改为执行 install path 下的 `node_modules/.bin/verdaccio`。
+- [x] 启动并验证健康检查：已生成 `systemctl daemon-reload`、`enable --now`、`restart` 和 `/-/ping` health check 流程，mock/contract 测试已覆盖；真实测试服务器已完成 install/start/health check 验收，health check 使用短重试避免刚重启时的瞬时连接失败。
 - [x] 固定版本升级：已支持备份当前 systemd unit、写入新固定版本 unit、`daemon-reload`、重启、health check、状态刷新和远程变更审计；真实服务器升级验收仍待执行。
 
 ### Task 3：Verdaccio 管理
 
 - [x] 查看运行状态和日志：已通过 systemd state、Verdaccio version、storage size 和 journal tail 生成状态快照，日志会脱敏。
 - [x] 启动、停止、重启服务：已通过受控 `systemctl` action 枚举接入 start/stop/restart，start/restart 后执行 health check，操作后刷新状态并写入远程变更审计。
-- [x] 管理用户和权限配置：已支持生成 `htpasswd` auth 配置、包访问/发布策略切换，以及基于远端 `htpasswd -B -i` / `htpasswd -D` 的用户创建、改密和删除命令层；macOS 工作台已接入用户创建、改密和确认删除，真实服务器验收仍待完成。
+- [x] 管理用户和权限配置：已支持生成 `htpasswd` auth 配置、包访问/发布策略切换，以及基于远端 `htpasswd -B -i` / `htpasswd -D` 的用户创建、改密和删除命令层；macOS 工作台已接入用户创建、改密和确认删除，真实测试服务器已完成 htpasswd 用户创建和 npm auth smoke 验收。
 - [x] 列出私有包：已基于 Verdaccio storage 下 package metadata 生成包名、版本数量、latest version、大小和更新时间摘要。
-- [x] npm publish/install smoke test：已提供受控临时 scoped package 发布、安装回读、`require` 验证和退出清理流程；明文密码不进入 shell 命令字符串，真实服务器验收仍待执行。
+- [x] npm publish/install smoke test：已提供受控临时 scoped package 发布、安装回读、`require` 验证和退出清理流程；明文密码不进入 shell 命令字符串，真实测试服务器已完成 publish/install/require 验收。当前实现用临时 `.npmrc` 写入运行期生成的 `_auth`，避开部分 npm CLI 在非交互 `adduser` 下的不稳定行为。
 - [x] 修改上游 registry 配置：已支持通过 `VerdaccioConfigPolicy` 生成受控 uplink URL，并复用保存前备份和重启流程。
-- [x] 保存配置前备份：已支持读取/保存 `config.yaml`，保存前创建 `.hhc-backup-*` 备份并重启服务；真实服务器写操作仍需谨慎验收。
+- [x] 保存配置前备份：已支持读取/保存 `config.yaml`，保存前创建 `.hhc-backup-*` 备份并重启服务；真实测试服务器已验证配置修改前备份和重启后健康检查。
 
 ### Task 4：反向代理
 
@@ -117,10 +117,10 @@ CREATE TABLE registry_backups (
 
 ### Task 5：备份与恢复
 
-- [x] 备份 storage 和配置：已生成受控 tar.gz 备份命令，包含 `config.yaml` 和 storage 目录，并返回备份文件大小；真实服务器手动验收仍未执行。
+- [x] 备份 storage 和配置：已生成受控 tar.gz 备份命令，包含 `config.yaml` 和 storage 目录，并返回备份文件大小；真实测试服务器已完成归档创建和大小回读验收。
 - [x] 恢复前停止服务并二次确认：恢复命令会先创建 rollback 归档并停止服务；UI 层仍必须在调用前做二次确认。
 - [x] 恢复失败时尝试回滚：恢复命令失败或恢复后 health check 失败时，会尝试使用恢复前 rollback 归档回滚。
-- [x] 记录备份历史：已接入 `registry_instances` / `registry_backups` SQLite 持久化，可记录备份成功/失败、恢复成功/失败、大小、恢复时间和脱敏错误信息。
+- [x] 记录备份历史：已接入 `registry_instances` / `registry_backups` SQLite 持久化，可记录备份成功/失败、恢复成功/失败、大小、恢复时间和脱敏错误信息；真实 SSH 集成测试入口会在提供 repository 时验证 `.created` / `.restored` 历史记录。
 
 ### Task 6：Dart/Flutter pub 方案验证
 
@@ -140,6 +140,7 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 用户创建、改密、删除命令层测试，覆盖 htpasswd 依赖、备份、重启和明文密码不进入命令字符串。
 - [x] Verdaccio npm smoke test harness 测试，覆盖临时包发布、安装、`require` marker 解析、非法 email 拒绝和明文密码不进入命令字符串。
 - [x] Verdaccio 服务控制和升级测试，覆盖受控 systemd action、unit 备份、固定版本 unit 写入、health check、状态刷新和审计日志。
+- [x] Verdaccio 真实 SSH lifecycle 集成测试入口：默认跳过，设置 `HHC_TEST_VERDACCIO_REAL=1` 后会在真实服务器创建临时 Verdaccio service/path，覆盖 install、user、npm smoke、restart、config backup、backup、restore 和远端清理。
 - [x] macOS Registries 工作台 ViewModel 测试，覆盖 preflight、安装、状态、用户管理、npm smoke test、包列表、备份/恢复入口和 Nginx proxy 写入/reload。
 - [x] Verdaccio Nginx proxy 生成、写入、`nginx -t` 和 reload contract 测试。
 - [x] 备份归档命令测试。
@@ -148,12 +149,12 @@ CREATE TABLE registry_backups (
 
 ### Task 8：手动验收
 
-- [ ] 在测试服务器安装 Verdaccio。
-- [ ] npm publish/install 走私有 registry 成功。
-- [ ] 服务重启后仍可用。
-- [ ] 修改配置前有备份。
+- [x] 在测试服务器安装 Verdaccio：已使用隔离临时 service/path 完成真实安装，安装后自动清理；测试机缺少 `htpasswd` 时已安装 `httpd-tools`。
+- [x] npm publish/install 走私有 registry 成功：已用临时 scoped package 验证 publish、install 和 `require`。
+- [x] 服务重启后仍可用：已验证 `systemctl restart` 后 `/-/ping` 恢复。
+- [x] 修改配置前有备份：已验证 `config.yaml.hhc-backup-*` 创建。
 - [x] Nginx proxy 配置测试通过后 reload：proxy 写入会先执行 `nginx -t`，reload 需单独危险确认并再次测试通过后执行。真实服务器写入/reload 仍需谨慎手动验收。
-- [x] 备份和恢复可用：底层已覆盖成功、失败回滚和非法路径拒绝；macOS 工作台已接入备份创建、恢复路径回填、危险确认和恢复后状态刷新。真实服务器恢复仍需谨慎手动验收。
+- [x] 备份和恢复可用：底层已覆盖成功、失败回滚和非法路径拒绝；macOS 工作台已接入备份创建、恢复路径回填、危险确认和恢复后状态刷新。真实测试服务器已完成 tar.gz 备份、停止服务、恢复归档、重启和健康检查验收。
 - [x] Dart/Flutter pub 方案有明确验证结论：暂不做自托管 installer，保留外部 Hosted Pub Repository 配置辅助方向。
 
 ## 8. 完成标志

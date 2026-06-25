@@ -2120,7 +2120,7 @@ enum VerdaccioConfigurationBuilder {
         Group=\(serviceName)
         WorkingDirectory=\(installPath)
         Environment=NODE_ENV=production
-        ExecStart=/usr/bin/env npx --yes verdaccio@\(draft.version.trimmed) --config \(installPath)/config.yaml
+        ExecStart=\(installPath)/node_modules/.bin/verdaccio --config \(installPath)/config.yaml
         Restart=on-failure
         RestartSec=5
         NoNewPrivileges=true
@@ -2182,7 +2182,7 @@ final class VerdaccioInstaller: @unchecked Sendable {
         sshClient: SSHClient
     ) async throws -> VerdaccioInstallResult {
         let command = try Self.installCommand(for: draft)
-        let installResult = try await CloudProviderRequestRunner.withTimeout(30) {
+        let installResult = try await CloudProviderRequestRunner.withTimeout(120) {
             try await sshClient.execute(command, profile: profile)
         }
         guard installResult.exitCode == 0 else {
@@ -2190,8 +2190,8 @@ final class VerdaccioInstaller: @unchecked Sendable {
         }
 
         let healthCheckURL = Self.healthCheckURL(for: draft)
-        let healthResult = try await CloudProviderRequestRunner.withTimeout(10) {
-            try await sshClient.execute("curl -fsS --max-time 5 \(Self.shellQuote(healthCheckURL))", profile: profile)
+        let healthResult = try await CloudProviderRequestRunner.withTimeout(45) {
+            try await sshClient.execute(Self.healthCheckCommand(url: healthCheckURL), profile: profile)
         }
         guard healthResult.exitCode == 0 else {
             throw SSHClientError.processFailed(Self.redactedOutput(from: healthResult, fallback: "Verdaccio health check failed."))
@@ -2224,6 +2224,8 @@ final class VerdaccioInstaller: @unchecked Sendable {
         __HHC_VERDACCIO_CONFIG__
         chown "$service_name:$service_name" "$install_path/config.yaml"; \
         chmod 0640 "$install_path/config.yaml"; \
+        npm install --prefix "$install_path" --omit=dev --no-audit --no-fund \(shellQuote("verdaccio@\(draft.version.trimmed)")); \
+        chown -R "$service_name:$service_name" "$install_path"; \
         base64 -d > \(shellQuote("/etc/systemd/system/\(serviceName).service")) <<'__HHC_VERDACCIO_SERVICE__'
         \(serviceData)
         __HHC_VERDACCIO_SERVICE__
@@ -2237,6 +2239,14 @@ final class VerdaccioInstaller: @unchecked Sendable {
     private static func healthCheckURL(for draft: VerdaccioInstallDraft) -> String {
         let host = draft.listenHost.trimmed == "0.0.0.0" ? "127.0.0.1" : draft.listenHost.trimmed
         return "http://\(host):\(draft.listenPort)/-/ping"
+    }
+
+    private static func healthCheckCommand(url: String) -> String {
+        """
+        url=\(shellQuote(url)); \
+        for attempt in $(seq 1 8); do curl -fsS --max-time 3 "$url" && exit 0; sleep 2; done; \
+        curl -fsS --max-time 5 "$url"
+        """
     }
 
     private static func redactedOutput(from result: CommandResult, fallback: String) -> String {
@@ -2473,7 +2483,7 @@ final class VerdaccioManager: @unchecked Sendable {
         let packageName = "@hhc-smoke/pkg-\(timestamp)"
         let version = "0.0.1"
         let registryURL = Self.registryURL(for: draft)
-        let result = try await CloudProviderRequestRunner.withTimeout(45) {
+        let result = try await CloudProviderRequestRunner.withTimeout(90) {
             try await sshClient.execute(
                 Self.npmSmokeTestCommand(
                     packageName: packageName,
@@ -2507,7 +2517,7 @@ final class VerdaccioManager: @unchecked Sendable {
         sshClient: SSHClient
     ) async throws -> VerdaccioServiceActionResult {
         try VerdaccioConfigurationBuilder.validate(draft)
-        let result = try await CloudProviderRequestRunner.withTimeout(15) {
+        let result = try await CloudProviderRequestRunner.withTimeout(30) {
             try await sshClient.execute(Self.serviceActionCommand(action, for: draft), profile: profile)
         }
         guard result.exitCode == 0 else {
@@ -2516,8 +2526,8 @@ final class VerdaccioManager: @unchecked Sendable {
 
         var healthCheckOutput: String?
         if action != .stop {
-            let healthResult = try await CloudProviderRequestRunner.withTimeout(10) {
-                try await sshClient.execute("curl -fsS --max-time 5 \(Self.shellQuote(Self.healthCheckURL(for: draft)))", profile: profile)
+            let healthResult = try await CloudProviderRequestRunner.withTimeout(45) {
+                try await sshClient.execute(Self.healthCheckCommand(url: Self.healthCheckURL(for: draft)), profile: profile)
             }
             guard healthResult.exitCode == 0 else {
                 throw SSHClientError.processFailed(Self.redactedOutput(from: healthResult, fallback: "Verdaccio health check failed after \(action.rawValue)."))
@@ -2543,7 +2553,7 @@ final class VerdaccioManager: @unchecked Sendable {
         try VerdaccioConfigurationBuilder.validate(draft)
         let servicePath = "/etc/systemd/system/\(draft.serviceName.trimmed).service"
         let backupPath = "\(draft.installPath.trimmed)/backups/\(draft.serviceName.trimmed).service.hhc-backup-\(Self.timestamp(for: now()))"
-        let result = try await CloudProviderRequestRunner.withTimeout(30) {
+        let result = try await CloudProviderRequestRunner.withTimeout(90) {
             try await sshClient.execute(Self.upgradeCommand(for: draft, backupPath: backupPath), profile: profile)
         }
         guard result.exitCode == 0 else {
@@ -2551,8 +2561,8 @@ final class VerdaccioManager: @unchecked Sendable {
         }
 
         let healthCheckURL = Self.healthCheckURL(for: draft)
-        let healthResult = try await CloudProviderRequestRunner.withTimeout(10) {
-            try await sshClient.execute("curl -fsS --max-time 5 \(Self.shellQuote(healthCheckURL))", profile: profile)
+        let healthResult = try await CloudProviderRequestRunner.withTimeout(45) {
+            try await sshClient.execute(Self.healthCheckCommand(url: healthCheckURL), profile: profile)
         }
         guard healthResult.exitCode == 0 else {
             throw SSHClientError.processFailed(Self.redactedOutput(from: healthResult, fallback: "Verdaccio health check failed after upgrade."))
@@ -2576,7 +2586,7 @@ final class VerdaccioManager: @unchecked Sendable {
     ) async throws -> VerdaccioRegistryBackupResult {
         try VerdaccioConfigurationBuilder.validate(draft)
         let backupPath = "\(draft.installPath.trimmed)/backups/verdaccio-\(Self.timestamp(for: now())).tar.gz"
-        let result = try await CloudProviderRequestRunner.withTimeout(30) {
+        let result = try await CloudProviderRequestRunner.withTimeout(60) {
             try await sshClient.execute(Self.backupCommand(for: draft, backupPath: backupPath), profile: profile)
         }
         guard result.exitCode == 0 else {
@@ -2620,7 +2630,7 @@ final class VerdaccioManager: @unchecked Sendable {
         try VerdaccioConfigurationBuilder.validate(draft)
         let backupPath = try Self.validatedBackupPath(backupPath, for: draft)
         let rollbackPath = "\(draft.installPath.trimmed)/backups/restore-rollback-\(Self.timestamp(for: now())).tar.gz"
-        let restoreResult = try await CloudProviderRequestRunner.withTimeout(30) {
+        let restoreResult = try await CloudProviderRequestRunner.withTimeout(60) {
             try await sshClient.execute(
                 Self.restoreCommand(for: draft, backupPath: backupPath, rollbackBackupPath: rollbackPath),
                 profile: profile
@@ -2648,11 +2658,11 @@ final class VerdaccioManager: @unchecked Sendable {
         }
 
         let healthCheckURL = Self.healthCheckURL(for: draft)
-        let healthResult = try await CloudProviderRequestRunner.withTimeout(10) {
-            try await sshClient.execute("curl -fsS --max-time 5 \(Self.shellQuote(healthCheckURL))", profile: profile)
+        let healthResult = try await CloudProviderRequestRunner.withTimeout(45) {
+            try await sshClient.execute(Self.healthCheckCommand(url: healthCheckURL), profile: profile)
         }
         guard healthResult.exitCode == 0 else {
-            let rollbackResult = try await CloudProviderRequestRunner.withTimeout(30) {
+            let rollbackResult = try await CloudProviderRequestRunner.withTimeout(60) {
                 try await sshClient.execute(
                     Self.rollbackCommand(for: draft, rollbackBackupPath: rollbackPath),
                     profile: profile
@@ -2764,7 +2774,7 @@ final class VerdaccioManager: @unchecked Sendable {
         fallback: String
     ) async throws -> SSHClientError {
         let restoreMessage = Self.redactedOutput(from: result, fallback: fallback)
-        let rollbackResult = try await CloudProviderRequestRunner.withTimeout(30) {
+        let rollbackResult = try await CloudProviderRequestRunner.withTimeout(60) {
             try await sshClient.execute(Self.rollbackCommand(for: draft, rollbackBackupPath: rollbackPath), profile: profile)
         }
         if rollbackResult.exitCode == 0 {
@@ -2922,10 +2932,10 @@ final class VerdaccioManager: @unchecked Sendable {
         let service = shellQuote("\(draft.serviceName.trimmed).service")
         let dataPath = shellQuote(draft.dataPath.trimmed)
         return """
-        service=\(service); data_path=\(dataPath); \
+        service=\(service); install_path=\(shellQuote(draft.installPath.trimmed)); data_path=\(dataPath); \
         printf '__HHC_VERDACCIO_ACTIVE_STATE__%s\\n' "$(systemctl show "$service" --property=ActiveState --value 2>/dev/null || echo unknown)"; \
         printf '__HHC_VERDACCIO_SUB_STATE__%s\\n' "$(systemctl show "$service" --property=SubState --value 2>/dev/null || echo unknown)"; \
-        printf '__HHC_VERDACCIO_VERSION__%s\\n' "$(npx --yes verdaccio@\(draft.version.trimmed) --version 2>/dev/null || true)"; \
+        printf '__HHC_VERDACCIO_VERSION__%s\\n' "$("$install_path/node_modules/.bin/verdaccio" --version 2>/dev/null || true)"; \
         printf '__HHC_VERDACCIO_STORAGE_BYTES__%s\\n' "$(du -sb "$data_path" 2>/dev/null | awk '{print $1}' || echo 0)"; \
         printf '__HHC_VERDACCIO_LOGS__'; journalctl -u "$service" -n 80 --no-pager 2>/dev/null | tail -n 80 | base64 | tr -d '\\n'; printf '\\n'
         """
@@ -2967,12 +2977,15 @@ final class VerdaccioManager: @unchecked Sendable {
         set -e; \
         command -v npm >/dev/null 2>&1 || { echo 'npm command is required for Verdaccio smoke test.' >&2; exit 127; }; \
         registry_url=\(shellQuote(registryURL)); package_name=\(shellQuote(packageName)); package_version=\(shellQuote(version)); username=\(shellQuote(username.trimmed)); email=\(shellQuote(email.trimmed)); \
-        work_dir=$(mktemp -d); password_file=$(mktemp); publish_log="$work_dir/publish.log"; install_log="$work_dir/install.log"; \
-        cleanup() { npm unpublish "$package_name@$package_version" --registry "$registry_url" --force >/dev/null 2>&1 || true; rm -rf -- "$work_dir" "$password_file"; }; \
+        registry_host=${registry_url#http://}; registry_host=${registry_host#https://}; \
+        work_dir=$(mktemp -d); password_file=$(mktemp); npmrc="$work_dir/.npmrc"; publish_log="$work_dir/publish.log"; install_log="$work_dir/install.log"; \
+        cleanup() { npm unpublish "$package_name@$package_version" --userconfig "$npmrc" --registry "$registry_url" --force >/dev/null 2>&1 || true; rm -rf -- "$work_dir" "$password_file"; }; \
         trap cleanup EXIT; \
         base64 -d > "$password_file" <<'__HHC_VERDACCIO_SMOKE_PASSWORD__'
         \(encodedPassword)
         __HHC_VERDACCIO_SMOKE_PASSWORD__
+        auth=$(printf '%s:%s' "$username" "$(cat "$password_file")" | base64 | tr -d '\\n'); \
+        { printf 'registry=%s\\n' "$registry_url"; printf '//%s/:_auth=%s\\n' "$registry_host" "$auth"; printf '//%s/:username=%s\\n' "$registry_host" "$username"; printf '//%s/:email=%s\\n' "$registry_host" "$email"; printf '//%s/:always-auth=true\\n' "$registry_host"; } > "$npmrc"; \
         cd "$work_dir"; \
         mkdir package install; \
         base64 -d > package/package.json <<'__HHC_VERDACCIO_SMOKE_PACKAGE__'
@@ -2981,9 +2994,8 @@ final class VerdaccioManager: @unchecked Sendable {
         base64 -d > package/index.js <<'__HHC_VERDACCIO_SMOKE_INDEX__'
         \(indexJS)
         __HHC_VERDACCIO_SMOKE_INDEX__
-        { printf '%s\\n' "$username"; cat "$password_file"; printf '%s\\n' "$email"; } | npm adduser --registry "$registry_url" --auth-type=legacy >/dev/null; \
-        cd "$work_dir/package"; npm publish --registry "$registry_url" --access public > "$publish_log"; \
-        cd "$work_dir/install"; npm init -y >/dev/null; npm install "$package_name@$package_version" --registry "$registry_url" > "$install_log"; \
+        cd "$work_dir/package"; npm publish --userconfig "$npmrc" --registry "$registry_url" --access public > "$publish_log"; \
+        cd "$work_dir/install"; npm init -y >/dev/null; npm install "$package_name@$package_version" --userconfig "$npmrc" --registry "$registry_url" > "$install_log"; \
         require_output=$(node -e "process.stdout.write(require('$package_name'))"); \
         printf '__HHC_VERDACCIO_NPM_PACKAGE__%s\\n' "$package_name"; \
         printf '__HHC_VERDACCIO_NPM_PUBLISH__%s\\n' "$(tail -n 3 "$publish_log" | tr '\\n' ' ' | sed 's/[[:space:]]\\{1,\\}/ /g')"; \
@@ -3007,6 +3019,8 @@ final class VerdaccioManager: @unchecked Sendable {
         backup_dir=$(dirname -- "$backup_path"); install -d -m 0750 "$backup_dir"; \
         test -f "$service_path"; \
         cp -p -- "$service_path" "$backup_path"; \
+        npm install --prefix \(shellQuote(draft.installPath.trimmed)) --omit=dev --no-audit --no-fund \(shellQuote("verdaccio@\(draft.version.trimmed)")); \
+        chown -R \(shellQuote("\(draft.serviceName.trimmed):\(draft.serviceName.trimmed)")) \(shellQuote(draft.installPath.trimmed)); \
         base64 -d > "$service_path" <<'__HHC_VERDACCIO_SERVICE_UPGRADE__'
         \(serviceData)
         __HHC_VERDACCIO_SERVICE_UPGRADE__
@@ -3168,6 +3182,14 @@ final class VerdaccioManager: @unchecked Sendable {
     private static func healthCheckURL(for draft: VerdaccioInstallDraft) -> String {
         let host = draft.listenHost.trimmed == "0.0.0.0" ? "127.0.0.1" : draft.listenHost.trimmed
         return "http://\(host):\(draft.listenPort)/-/ping"
+    }
+
+    private static func healthCheckCommand(url: String) -> String {
+        """
+        url=\(shellQuote(url)); \
+        for attempt in $(seq 1 8); do curl -fsS --max-time 3 "$url" && exit 0; sleep 2; done; \
+        curl -fsS --max-time 5 "$url"
+        """
     }
 
     private static func registryURL(for draft: VerdaccioInstallDraft) -> String {

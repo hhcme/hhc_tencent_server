@@ -108,6 +108,114 @@ final class SSHIntegrationTests: XCTestCase {
         _ = try? await harness.sshClient.execute("rm -rf -- \(Self.shellQuote(basePath))", profile: harness.profile)
     }
 
+    func testRealVerdaccioLifecycleWhenExplicitlyEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["HHC_TEST_VERDACCIO_REAL"] == "1" else {
+            throw XCTSkip("Set HHC_TEST_VERDACCIO_REAL=1 with the real SSH environment to run the Verdaccio lifecycle integration test.")
+        }
+
+        let harness = try makeRealSSHHarness()
+        defer { try? harness.service.deleteServer(harness.profile) }
+        try await trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+
+        let token = UUID().uuidString
+            .replacingOccurrences(of: "-", with: "")
+            .lowercased()
+            .prefix(12)
+        let serviceName = "hhc-verdaccio-\(token)"
+        let installPath = "/srv/\(serviceName)"
+        let draft = VerdaccioInstallDraft(
+            name: "Integration Verdaccio",
+            installPath: installPath,
+            dataPath: "\(installPath)/storage",
+            listenHost: "127.0.0.1",
+            listenPort: Int.random(in: 48_000...58_000),
+            serviceName: serviceName,
+            version: VerdaccioInstallDraft.defaultVersion
+        )
+        let cleanup = Self.verdaccioCleanupCommand(for: draft)
+        defer {
+            Task {
+                _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+            }
+        }
+        _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+
+        let dependencyCheck = try await harness.sshClient.execute(
+            "command -v node >/dev/null && command -v npm >/dev/null && command -v systemctl >/dev/null && command -v htpasswd >/dev/null",
+            profile: harness.profile
+        )
+        guard dependencyCheck.exitCode == 0 else {
+            throw XCTSkip("Real Verdaccio lifecycle test requires node, npm, systemctl, and htpasswd on the test server.")
+        }
+
+        let installer = VerdaccioInstaller()
+        let manager = VerdaccioManager()
+
+        let installResult = try await installer.install(draft: draft, profile: harness.profile, sshClient: harness.sshClient)
+        XCTAssertEqual(installResult.configPath, "\(installPath)/config.yaml")
+        XCTAssertEqual(installResult.servicePath, "/etc/systemd/system/\(serviceName).service")
+        XCTAssertFalse(installResult.healthCheckOutput.isEmpty)
+
+        let createdUser = try await manager.createUser(
+            draft: draft,
+            username: "hhcsmoke",
+            password: "HhcSmokePassword123!",
+            profile: harness.profile,
+            sshClient: harness.sshClient
+        )
+        XCTAssertEqual(createdUser.htpasswdPath, "\(installPath)/htpasswd")
+
+        let smoke = try await manager.runNpmSmokeTest(
+            draft: draft,
+            username: "hhcsmoke",
+            password: "HhcSmokePassword123!",
+            email: "hhc-smoke@example.com",
+            profile: harness.profile,
+            sshClient: harness.sshClient
+        )
+        XCTAssertEqual(smoke.requireOutput, "hhc-verdaccio-smoke-ok")
+
+        let restart = try await manager.performServiceAction(.restart, draft: draft, profile: harness.profile, sshClient: harness.sshClient)
+        XCTAssertTrue(restart.snapshot.isRunning)
+        XCTAssertFalse(restart.healthCheckOutput?.isEmpty ?? true)
+
+        let config = try await manager.readConfig(draft: draft, profile: harness.profile, sshClient: harness.sshClient)
+        let saved = try await manager.saveConfig(
+            draft: draft,
+            content: config.content,
+            profile: harness.profile,
+            sshClient: harness.sshClient
+        )
+        XCTAssertEqual(saved.path, "\(installPath)/config.yaml")
+        XCTAssertTrue(saved.backupPath.contains(".hhc-backup-"))
+
+        let backup = try await manager.createBackup(
+            draft: draft,
+            profile: harness.profile,
+            sshClient: harness.sshClient,
+            repository: harness.repository
+        )
+        XCTAssertTrue((backup.sizeBytes ?? 0) > 0)
+
+        let restore = try await manager.restoreBackup(
+            draft: draft,
+            backupPath: backup.backupPath,
+            profile: harness.profile,
+            sshClient: harness.sshClient,
+            repository: harness.repository
+        )
+        XCTAssertEqual(restore.backupPath, backup.backupPath)
+        XCTAssertFalse(restore.healthCheckOutput.isEmpty)
+
+        let registries = try harness.repository.fetchRegistryInstances(serverId: harness.profile.id)
+        XCTAssertEqual(registries.count, 1)
+        let records = try harness.repository.fetchRegistryBackups(registryId: registries[0].id)
+        XCTAssertTrue(records.contains { $0.status == .created })
+        XCTAssertTrue(records.contains { $0.status == .restored })
+
+        _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+    }
+
     private func makeRealSSHHarness() throws -> RealSSHHarness {
         let environment = ProcessInfo.processInfo.environment
         guard
@@ -153,6 +261,21 @@ final class SSHIntegrationTests: XCTestCase {
 
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+    }
+
+    private static func verdaccioCleanupCommand(for draft: VerdaccioInstallDraft) -> String {
+        let serviceName = draft.serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let service = "\(serviceName).service"
+        return """
+        service=\(shellQuote(service)); \
+        service_name=\(shellQuote(serviceName)); \
+        install_path=\(shellQuote(draft.installPath.trimmingCharacters(in: .whitespacesAndNewlines))); \
+        systemctl disable --now "$service" >/dev/null 2>&1 || true; \
+        rm -f -- "/etc/systemd/system/$service"; \
+        systemctl daemon-reload >/dev/null 2>&1 || true; \
+        userdel "$service_name" >/dev/null 2>&1 || true; \
+        rm -rf -- "$install_path"
+        """
     }
 }
 

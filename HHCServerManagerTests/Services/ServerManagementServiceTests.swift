@@ -796,7 +796,7 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(yaml.contains("max_users: -1"))
         XCTAssertTrue(yaml.contains("url: https://registry.npmjs.org/"))
         XCTAssertTrue(yaml.contains("proxy: npmjs"))
-        XCTAssertTrue(service.contains("verdaccio@5.31.1"))
+        XCTAssertTrue(service.contains("ExecStart=/srv/verdaccio/node_modules/.bin/verdaccio --config /srv/verdaccio/config.yaml"))
         XCTAssertTrue(service.contains("ReadWritePaths=/srv/verdaccio /srv/verdaccio/storage"))
     }
 
@@ -984,10 +984,11 @@ final class ServerManagementServiceTests: XCTestCase {
             email: "team@example.com"
         )
 
-        XCTAssertTrue(command.contains("npm adduser --registry \"$registry_url\" --auth-type=legacy"))
-        XCTAssertTrue(command.contains("npm publish --registry \"$registry_url\" --access public"))
-        XCTAssertTrue(command.contains("npm install \"$package_name@$package_version\" --registry \"$registry_url\""))
-        XCTAssertTrue(command.contains("npm unpublish \"$package_name@$package_version\" --registry \"$registry_url\" --force"))
+        XCTAssertTrue(command.contains("registry_host=${registry_url#http://}"))
+        XCTAssertTrue(command.contains("printf '//%s/:_auth=%s\\n' \"$registry_host\" \"$auth\""))
+        XCTAssertTrue(command.contains("npm publish --userconfig \"$npmrc\" --registry \"$registry_url\" --access public"))
+        XCTAssertTrue(command.contains("npm install \"$package_name@$package_version\" --userconfig \"$npmrc\" --registry \"$registry_url\""))
+        XCTAssertTrue(command.contains("npm unpublish \"$package_name@$package_version\" --userconfig \"$npmrc\" --registry \"$registry_url\" --force"))
         XCTAssertTrue(command.contains("__HHC_VERDACCIO_NPM_REQUIRE__"))
         XCTAssertFalse(command.contains("Correct-Horse-Secret-123"))
     }
@@ -1004,8 +1005,9 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(restartCommand.contains("systemctl show \"$service\""))
         XCTAssertFalse(restartCommand.contains(";rm"))
         XCTAssertTrue(upgradeCommand.contains("cp -p -- \"$service_path\" \"$backup_path\""))
+        XCTAssertTrue(upgradeCommand.contains("npm install --prefix '/srv/verdaccio' --omit=dev --no-audit --no-fund 'verdaccio@5.31.2'"))
         XCTAssertTrue(upgradeCommand.contains("__HHC_VERDACCIO_SERVICE_UPGRADE__"))
-        XCTAssertTrue(try VerdaccioConfigurationBuilder.systemdService(for: draft).contains("verdaccio@5.31.2"))
+        XCTAssertTrue(try VerdaccioConfigurationBuilder.systemdService(for: draft).contains("/srv/verdaccio/node_modules/.bin/verdaccio"))
         XCTAssertTrue(upgradeCommand.contains("systemctl daemon-reload"))
         XCTAssertTrue(upgradeCommand.contains("systemctl restart \"$service\""))
     }
@@ -1131,7 +1133,7 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(upgraded.healthCheckOutput, #"{"ok":"verdaccio"}"#)
         XCTAssertTrue(client.commands.contains { $0.contains("systemctl restart \"$service\"") })
         XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_SERVICE_UPGRADE__") })
-        XCTAssertTrue(client.commands.contains { $0.contains("curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'") })
+        XCTAssertTrue(client.commands.contains { $0.contains("for attempt in $(seq 1 8)") && $0.contains("http://127.0.0.1:4873/-/ping") })
     }
 
     func testVerdaccioManagerRunsNpmSmokeTestAndRejectsInvalidEmail() async throws {
@@ -1243,6 +1245,7 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(command.contains("useradd --system --home-dir \"$install_path\""))
         XCTAssertTrue(command.contains("install -d -m 0755 -o \"$service_name\" -g \"$service_name\" \"$install_path\" \"$data_path\""))
         XCTAssertTrue(command.contains("base64 -d > \"$install_path/config.yaml\""))
+        XCTAssertTrue(command.contains("npm install --prefix \"$install_path\" --omit=dev --no-audit --no-fund 'verdaccio@5.31.1'"))
         XCTAssertTrue(command.contains("base64 -d > '/etc/systemd/system/verdaccio.service'"))
         XCTAssertTrue(command.contains("systemctl daemon-reload"))
         XCTAssertTrue(command.contains("systemctl enable --now 'verdaccio.service'"))
@@ -1270,7 +1273,8 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(result.healthCheckOutput, #"{"ok":"verdaccio"}"#)
         XCTAssertEqual(client.commands.count, 2)
         XCTAssertTrue(client.commands[0].contains("systemctl restart 'verdaccio.service'"))
-        XCTAssertEqual(client.commands[1], "curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'")
+        XCTAssertTrue(client.commands[1].contains("for attempt in $(seq 1 8)"))
+        XCTAssertTrue(client.commands[1].contains("http://127.0.0.1:4873/-/ping"))
     }
 
     func testVerdaccioInstallerStopsWhenInstallCommandFails() async {
@@ -1557,7 +1561,8 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(client.commands[0].contains("test -f \"$restore_dir/config.yaml\""))
         XCTAssertTrue(client.commands[0].contains("test -d \"$restore_dir/$data_name\""))
         XCTAssertTrue(client.commands[0].contains("systemctl start \"$service\""))
-        XCTAssertEqual(client.commands[1], "curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'")
+        XCTAssertTrue(client.commands[1].contains("for attempt in $(seq 1 8)"))
+        XCTAssertTrue(client.commands[1].contains("http://127.0.0.1:4873/-/ping"))
     }
 
     func testVerdaccioManagerRecordsRestoreHistoryWhenRepositoryProvided() async throws {

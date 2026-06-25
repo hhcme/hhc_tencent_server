@@ -1809,7 +1809,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.verdaccioStatusSnapshot?.isRunning == true)
         XCTAssertTrue(viewModel.registryActionMessage?.contains("Installed Verdaccio") == true)
         XCTAssertTrue(client.commands.contains { $0.contains("systemctl enable --now 'verdaccio.service'") })
-        XCTAssertTrue(client.commands.contains { $0.contains("curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'") })
+        XCTAssertTrue(client.commands.contains { $0.contains("for attempt in $(seq 1 8)") && $0.contains("http://127.0.0.1:4873/-/ping") })
         XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_ACTIVE_STATE__") })
     }
 
@@ -2814,7 +2814,7 @@ private final class RegistryViewModelMockSSHClient: SSHClient, @unchecked Sendab
                 duration: 0
             )
         }
-        if command.contains("curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'") {
+        if command.contains("curl -fsS") && command.contains("http://127.0.0.1:4873/-/ping") {
             return CommandResult(command: command, stdout: #"{"ok":"verdaccio"}"#, stderr: "", exitCode: 0, duration: 0)
         }
         if command.contains("__HHC_REGISTRY_NODE_VERSION__") {
