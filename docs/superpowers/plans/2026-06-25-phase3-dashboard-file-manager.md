@@ -105,7 +105,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 实现 CPU 核心数、内存、根磁盘、负载和网络基础采集。
 - [x] 实现进程摘要采集。
 - [x] Dashboard 基础采集命令配置超时。
-- [ ] 解析失败返回结构化错误。
+- [x] 解析失败和单项命令失败返回结构化 warning。
 
 ### Task 3：云监控接入
 
@@ -117,7 +117,7 @@ CREATE TABLE file_transfer_jobs (
 
 - [x] 实现 Dashboard ViewModel 基础刷新。
 - [x] 实现指标卡片、系统信息、刷新状态。
-- [ ] 实现错误和能力缺失提示。
+- [x] 实现错误和能力缺失基础提示。
 - [ ] 支持手动刷新和自动刷新开关。
 
 ### Task 5：SFTP 技术验证

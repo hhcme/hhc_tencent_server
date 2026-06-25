@@ -42,6 +42,7 @@ All notable changes to this project will be documented in this file.
 - Added cancellable command execution that terminates the underlying OpenSSH process when a running command is cancelled.
 - Started Phase 3 Dashboard foundations with SSH-based OS/capability detection, load/memory/disk/CPU metric parsing, Dashboard refresh state, and tests.
 - Expanded Dashboard SSH metrics with network traffic totals and process summary parsing.
+- Added Dashboard partial-failure warnings so optional SSH metric failures no longer block the whole snapshot.
 - Added read-only remote file browser foundations with path navigation, directory listing, metadata display, and tests.
 - Added remote file rename and recoverable delete-to-trash actions with confirmation, validation, refresh, and tests.
 
@@ -81,5 +82,6 @@ All notable changes to this project will be documented in this file.
 - 添加可取消命令执行，取消运行中的命令时会终止底层 OpenSSH 子进程。
 - 启动 Phase 3 Dashboard 基础，加入基于 SSH 的 OS/能力探测、负载/内存/磁盘/CPU 指标解析、Dashboard 刷新状态和测试。
 - 扩展 Dashboard SSH 指标，加入网络收发总量和进程摘要解析。
+- 添加 Dashboard 部分失败 warning，单项 SSH 指标失败不再阻断整个快照。
 - 添加只读远程文件浏览基础，支持路径导航、目录列表、元信息展示和测试。
 - 添加远程文件重命名和可恢复移入回收目录操作，包含确认、校验、刷新和测试。

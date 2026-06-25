@@ -274,12 +274,12 @@ final class DashboardService: @unchecked Sendable {
         async let proc = runDashboardCommand("test -d /proc && echo yes || echo no", profile: profile, sshClient: sshClient)
         async let systemd = runDashboardCommand("command -v systemctl >/dev/null 2>&1 && echo yes || echo no", profile: profile, sshClient: sshClient)
         async let sftp = runDashboardCommand("command -v sftp >/dev/null 2>&1 && echo yes || echo no", profile: profile, sshClient: sshClient)
-        async let loadavg = runDashboardCommand("cat /proc/loadavg 2>/dev/null || true", profile: profile, sshClient: sshClient)
-        async let meminfo = runDashboardCommand("cat /proc/meminfo 2>/dev/null || true", profile: profile, sshClient: sshClient)
-        async let disk = runDashboardCommand("df -kP / 2>/dev/null | tail -1 || true", profile: profile, sshClient: sshClient)
-        async let cpu = runDashboardCommand("getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0", profile: profile, sshClient: sshClient)
-        async let network = runDashboardCommand("cat /proc/net/dev 2>/dev/null || true", profile: profile, sshClient: sshClient)
-        async let processes = runDashboardCommand("ps -eo stat= 2>/dev/null | awk '{total++; state=substr($1,1,1); counts[state]++} END {printf \"total=%d running=%d sleeping=%d stopped=%d zombie=%d\\n\", total, counts[\"R\"], counts[\"S\"] + counts[\"I\"], counts[\"T\"], counts[\"Z\"]}'", profile: profile, sshClient: sshClient)
+        async let loadavg = runOptionalDashboardCommand("Load Average", command: "cat /proc/loadavg 2>/dev/null || true", profile: profile, sshClient: sshClient)
+        async let meminfo = runOptionalDashboardCommand("Memory", command: "cat /proc/meminfo 2>/dev/null || true", profile: profile, sshClient: sshClient)
+        async let disk = runOptionalDashboardCommand("Root Disk", command: "df -kP / 2>/dev/null | tail -1 || true", profile: profile, sshClient: sshClient)
+        async let cpu = runOptionalDashboardCommand("CPU Cores", command: "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0", profile: profile, sshClient: sshClient)
+        async let network = runOptionalDashboardCommand("Network", command: "cat /proc/net/dev 2>/dev/null || true", profile: profile, sshClient: sshClient)
+        async let processes = runOptionalDashboardCommand("Processes", command: "ps -eo stat= 2>/dev/null | awk '{total++; state=substr($1,1,1); counts[state]++} END {printf \"total=%d running=%d sleeping=%d stopped=%d zombie=%d\\n\", total, counts[\"R\"], counts[\"S\"] + counts[\"I\"], counts[\"T\"], counts[\"Z\"]}'", profile: profile, sshClient: sshClient)
 
         let osReleaseResult = try await osRelease
         let os = Self.parseOSRelease(osReleaseResult.stdout)
@@ -287,12 +287,15 @@ final class DashboardService: @unchecked Sendable {
         let procResult = try await proc
         let systemdResult = try await systemd
         let sftpResult = try await sftp
-        let loadavgResult = try await loadavg
-        let meminfoResult = try await meminfo
-        let diskResult = try await disk
-        let cpuResult = try await cpu
-        let networkResult = try await network
-        let processesResult = try await processes
+        let optionalResults = await [
+            loadavg,
+            meminfo,
+            disk,
+            cpu,
+            network,
+            processes,
+        ]
+        let warnings = optionalResults.compactMap(\.warning)
 
         let detectedAt = now()
         let capabilities = ServerCapabilities(
@@ -306,26 +309,26 @@ final class DashboardService: @unchecked Sendable {
         )
 
         var metrics: [DashboardMetric] = []
-        if let load = Self.parseLoadAverage(loadavgResult.stdout) {
+        if let load = Self.parseLoadAverage(optionalResults[0].stdout) {
             metrics.append(DashboardMetric(name: "Load Average", value: load, unit: "1m 5m 15m", source: "SSH"))
         }
-        if let memory = Self.parseMemoryUsage(meminfoResult.stdout) {
+        if let memory = Self.parseMemoryUsage(optionalResults[1].stdout) {
             metrics.append(DashboardMetric(name: "Memory", value: memory, unit: nil, source: "SSH"))
         }
-        if let disk = Self.parseRootDiskUsage(diskResult.stdout) {
+        if let disk = Self.parseRootDiskUsage(optionalResults[2].stdout) {
             metrics.append(DashboardMetric(name: "Root Disk", value: disk, unit: nil, source: "SSH"))
         }
-        if let cpuCount = Self.parseCPUCount(cpuResult.stdout) {
+        if let cpuCount = Self.parseCPUCount(optionalResults[3].stdout) {
             metrics.append(DashboardMetric(name: "CPU Cores", value: cpuCount, unit: "online", source: "SSH"))
         }
-        if let networkSummary = Self.parseNetworkTotals(networkResult.stdout) {
+        if let networkSummary = Self.parseNetworkTotals(optionalResults[4].stdout) {
             metrics.append(DashboardMetric(name: "Network", value: networkSummary, unit: "rx / tx", source: "SSH"))
         }
-        if let processSummary = Self.parseProcessSummary(processesResult.stdout) {
+        if let processSummary = Self.parseProcessSummary(optionalResults[5].stdout) {
             metrics.append(DashboardMetric(name: "Processes", value: processSummary, unit: "total / running / zombie", source: "SSH"))
         }
 
-        return ServerDashboardSnapshot(capabilities: capabilities, metrics: metrics, capturedAt: detectedAt)
+        return ServerDashboardSnapshot(capabilities: capabilities, metrics: metrics, warnings: warnings, capturedAt: detectedAt)
     }
 
     private func runDashboardCommand(
@@ -335,6 +338,23 @@ final class DashboardService: @unchecked Sendable {
     ) async throws -> CommandResult {
         try await CloudProviderRequestRunner.withTimeout(8) {
             try await sshClient.execute(command, profile: profile)
+        }
+    }
+
+    private func runOptionalDashboardCommand(
+        _ source: String,
+        command: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async -> DashboardCommandOutput {
+        do {
+            let result = try await runDashboardCommand(command, profile: profile, sshClient: sshClient)
+            return DashboardCommandOutput(stdout: result.stdout, warning: nil)
+        } catch {
+            return DashboardCommandOutput(
+                stdout: "",
+                warning: DashboardWarning(source: source, message: error.localizedDescription)
+            )
         }
     }
 
@@ -438,6 +458,11 @@ final class DashboardService: @unchecked Sendable {
         }
         return String(format: "%.1f GiB", mib / 1024)
     }
+}
+
+private struct DashboardCommandOutput: Sendable {
+    var stdout: String
+    var warning: DashboardWarning?
 }
 
 final class RemoteFileService: @unchecked Sendable {

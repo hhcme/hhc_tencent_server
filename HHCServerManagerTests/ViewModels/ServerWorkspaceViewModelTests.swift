@@ -230,6 +230,27 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.hasSystemd)
         XCTAssertTrue(snapshot.capabilities.hasSFTP)
         XCTAssertEqual(snapshot.metrics.map(\.name), ["Load Average", "Memory", "Root Disk", "CPU Cores", "Network", "Processes"])
+        XCTAssertTrue(snapshot.warnings.isEmpty)
+        XCTAssertNil(viewModel.dashboardErrorMessage)
+    }
+
+    func testRefreshDashboardKeepsPartialSnapshotWhenOptionalMetricFails() async throws {
+        let profile = makeProfile()
+        let client = DashboardPartialFailureMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.refreshDashboard(
+            profile: profile,
+            sshClient: client,
+            dashboardService: DashboardService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        )
+        try await waitUntil { viewModel.isRefreshingDashboard == false && viewModel.dashboardSnapshot != nil }
+
+        let snapshot = try XCTUnwrap(viewModel.dashboardSnapshot)
+        XCTAssertEqual(snapshot.metrics.map(\.name), ["Load Average", "Memory", "Root Disk", "CPU Cores", "Processes"])
+        XCTAssertEqual(snapshot.warnings, [
+            DashboardWarning(source: "Network", message: "network unavailable"),
+        ])
         XCTAssertNil(viewModel.dashboardErrorMessage)
     }
 
@@ -465,6 +486,23 @@ private final class DashboardMockSSHClient: SSHClient, @unchecked Sendable {
             stdout = ""
         }
         return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class DashboardPartialFailureMockSSHClient: SSHClient, @unchecked Sendable {
+    private let successClient = DashboardMockSSHClient()
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        if command.contains("/proc/net/dev") {
+            throw SSHClientError.processFailed("network unavailable")
+        }
+        return try await successClient.execute(command, profile: profile)
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}

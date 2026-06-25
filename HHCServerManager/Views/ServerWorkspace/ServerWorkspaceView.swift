@@ -240,6 +240,16 @@ struct ServerWorkspaceView: View {
             if let snapshot = viewModel.dashboardSnapshot {
                 capabilityPanel(snapshot.capabilities)
 
+                if !snapshot.warnings.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(snapshot.warnings) { warning in
+                            Label("\(warning.source): \(warning.message)", systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
                     ForEach(snapshot.metrics) { metric in
                         DashboardMetricTile(metric: metric)
