@@ -36,7 +36,7 @@ public sealed class WindowsPhase8CoreTests
     public async Task SqliteRepositoryFileDoesNotContainCredentialMaterial()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"hhc-windows-phase8-{Guid.NewGuid():N}.sqlite");
-        var connectionString = $"Data Source={databasePath}";
+        var connectionString = $"Data Source={databasePath};Pooling=False";
         var password = "phase8-password-should-not-be-in-sqlite";
         var privateKey = """
             -----BEGIN OPENSSH PRIVATE KEY-----
