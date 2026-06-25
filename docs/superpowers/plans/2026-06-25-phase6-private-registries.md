@@ -106,10 +106,10 @@ CREATE TABLE registry_backups (
 
 ### Task 4：反向代理
 
-- [ ] 复用 Phase 4 Nginx 配置能力。
-- [ ] 生成 Verdaccio proxy 配置。
-- [ ] 执行 `nginx -t` 后 reload。
-- [ ] HTTPS 只提供配置协助，不自动申请证书。
+- [x] 复用 Phase 4 Nginx 配置能力：已通过 `NginxConfigManager.upsertConfig` 支持新建/更新 `.conf`，保存后执行 `nginx -t`，失败时恢复已有文件或删除新文件。
+- [x] 生成 Verdaccio proxy 配置：已支持生成独立 Nginx vhost，包含 `proxy_pass`、Host/IP/Forwarded headers、Upgrade header 和 body size。
+- [x] 执行 `nginx -t` 后 reload：proxy 配置写入复用 Nginx 测试流程，reload 复用既有 `NginxConfigManager.reload`；真实服务器写入/reload 仍待手动验收。
+- [x] HTTPS 只提供配置协助，不自动申请证书：生成配置中只保留 TLS/ACME 提示注释，不申请或写入证书。
 
 ### Task 5：备份与恢复
 
@@ -133,6 +133,7 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 安装命令和 health check 状态机测试。
 - [x] Verdaccio 状态、日志脱敏和配置保存前备份测试。
 - [x] Verdaccio 上游 registry 和权限策略配置生成/保存测试。
+- [x] Verdaccio Nginx proxy 生成、写入、`nginx -t` 和 reload contract 测试。
 - [x] 备份归档命令测试。
 - [x] 恢复状态机测试：已覆盖恢复成功、health check 失败回滚、恢复命令失败回滚和非法备份路径拒绝。
 - [x] 日志脱敏测试：当前已覆盖 Verdaccio journal status 日志脱敏和安装失败输出脱敏。

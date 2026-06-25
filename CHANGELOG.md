@@ -79,6 +79,7 @@ All notable changes to this project will be documented in this file.
 - Added Verdaccio backup restore flow with restricted archive paths, service stop/start, rollback archive creation, health checks, failure rollback attempts, and contract tests.
 - Added SQLite-backed private registry instance and backup history persistence for Verdaccio backup and restore events.
 - Added Verdaccio config policy generation for htpasswd auth, upstream registry URLs, and package access/publish modes with backup-before-save support.
+- Added Verdaccio Nginx proxy config generation plus controlled Nginx config upsert with test-and-rollback behavior.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -153,3 +154,4 @@ All notable changes to this project will be documented in this file.
 - 添加 Verdaccio 备份恢复流程，包含受限归档路径、服务停止/启动、恢复前 rollback 归档、健康检查、失败回滚尝试和 contract 测试。
 - 添加 SQLite 私有仓库实例和备份历史持久化，用于记录 Verdaccio 备份与恢复事件。
 - 添加 Verdaccio 配置策略生成能力，支持 htpasswd auth、上游 registry URL、包访问/发布模式，并复用保存前备份流程。
+- 添加 Verdaccio Nginx 反向代理配置生成，以及带 `nginx -t` 和失败回滚的新建/更新 Nginx 配置流程。

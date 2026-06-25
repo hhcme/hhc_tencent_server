@@ -709,6 +709,63 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testVerdaccioConfigurationBuilderGeneratesNginxProxyConfig() throws {
+        let proxy = VerdaccioNginxProxyDraft(
+            serverName: "registry.example.com",
+            configPath: "/www/server/nginx/conf/vhost/verdaccio.conf",
+            clientMaxBodySize: "200m"
+        )
+        let config = try VerdaccioConfigurationBuilder.nginxProxyConfig(
+            for: VerdaccioInstallDraft(listenHost: "0.0.0.0", listenPort: 4873),
+            proxy: proxy
+        )
+        let file = try VerdaccioConfigurationBuilder.nginxProxyConfigFile(for: proxy)
+
+        XCTAssertEqual(file.path, "/www/server/nginx/conf/vhost/verdaccio.conf")
+        XCTAssertTrue(config.contains("server_name registry.example.com;"))
+        XCTAssertTrue(config.contains("client_max_body_size 200m;"))
+        XCTAssertTrue(config.contains("proxy_pass http://127.0.0.1:4873;"))
+        XCTAssertTrue(config.contains("HTTPS is intentionally not managed here"))
+        XCTAssertTrue(config.contains("proxy_set_header X-Forwarded-Proto $scheme;"))
+    }
+
+    func testVerdaccioConfigurationBuilderRejectsUnsafeNginxProxyConfig() {
+        XCTAssertThrowsError(
+            try VerdaccioConfigurationBuilder.nginxProxyConfig(
+                for: VerdaccioInstallDraft(),
+                proxy: VerdaccioNginxProxyDraft(
+                    serverName: "registry.example.com;rm",
+                    configPath: "/www/server/nginx/conf/vhost/verdaccio.conf"
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidProxyServerName)
+        }
+
+        XCTAssertThrowsError(
+            try VerdaccioConfigurationBuilder.nginxProxyConfig(
+                for: VerdaccioInstallDraft(),
+                proxy: VerdaccioNginxProxyDraft(
+                    serverName: "registry.example.com",
+                    configPath: "/tmp/verdaccio.conf"
+                )
+            )
+        )
+
+        XCTAssertThrowsError(
+            try VerdaccioConfigurationBuilder.nginxProxyConfig(
+                for: VerdaccioInstallDraft(),
+                proxy: VerdaccioNginxProxyDraft(
+                    serverName: "registry.example.com",
+                    configPath: "/www/server/nginx/conf/vhost/verdaccio.conf",
+                    clientMaxBodySize: "0m"
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidProxyBodySize)
+        }
+    }
+
     func testRegistryPreflightCheckerParsesReadyReport() async throws {
         let profile = makeServiceTestProfile()
         let client = RecordingSSHClient(responses: [
@@ -1372,6 +1429,47 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(rolledBack.rolledBack)
         XCTAssertFalse(rolledBack.testResult.succeeded)
         XCTAssertEqual(client.configs["/www/server/nginx/conf/nginx.conf"], "user nginx;\n")
+    }
+
+    func testNginxConfigManagerUpsertsVerdaccioProxyConfigAndReloads() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingNginxSSHClient()
+        let manager = NginxConfigManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let proxy = VerdaccioNginxProxyDraft(
+            serverName: "registry.example.com",
+            configPath: "/www/server/nginx/conf/vhost/verdaccio.conf"
+        )
+        let content = try VerdaccioConfigurationBuilder.nginxProxyConfig(
+            for: VerdaccioInstallDraft(),
+            proxy: proxy
+        )
+
+        let upserted = try await manager.upsertConfig(
+            path: proxy.configPath,
+            content: content,
+            profile: profile,
+            sshClient: client
+        )
+        _ = try await manager.reload(profile: profile, sshClient: client)
+
+        XCTAssertTrue(upserted.createdNewFile)
+        XCTAssertFalse(upserted.rolledBack)
+        XCTAssertNil(upserted.backupPath)
+        XCTAssertEqual(client.configs[proxy.configPath], content)
+        XCTAssertTrue(client.commands.contains { $0.contains("install -d -m 0755 \"$parent\"") })
+        XCTAssertTrue(client.commands.contains("nginx -t"))
+        XCTAssertTrue(client.commands.contains("systemctl reload nginx 2>/dev/null || nginx -s reload"))
+
+        client.testSucceeds = false
+        let rolledBack = try await manager.upsertConfig(
+            path: "/www/server/nginx/conf/vhost/broken-verdaccio.conf",
+            content: "server {",
+            profile: profile,
+            sshClient: client
+        )
+        XCTAssertTrue(rolledBack.createdNewFile)
+        XCTAssertTrue(rolledBack.rolledBack)
+        XCTAssertNil(client.configs["/www/server/nginx/conf/vhost/broken-verdaccio.conf"])
     }
 
     func testFirewallManagerParsesAndLoadsSupportedBackends() async throws {
@@ -2665,11 +2763,15 @@ private final class RecordingNginxSSHClient: SSHClient, @unchecked Sendable {
             let path = Self.extractShellValue(named: "path", from: command) ?? "/www/server/nginx/conf/nginx.conf"
             let previous = configs[path]
             let next = Self.decodeConfig(from: command)
+            let isUpsert = command.contains("__HHC_NGINX_CREATED__")
+            let createdNew = previous == nil
+            let backup = createdNew ? "" : (Self.extractShellValue(named: "backup", from: command) ?? "\(path).hhc-backup")
+            let markers = isUpsert ? "__HHC_NGINX_CREATED__\(createdNew ? 1 : 0)\n__HHC_NGINX_BACKUP__\(backup)\n" : ""
             if testSucceeds {
                 configs[path] = next
                 return CommandResult(
                     command: command,
-                    stdout: "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n",
+                    stdout: markers + "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n",
                     stderr: "",
                     exitCode: 0,
                     duration: 0
@@ -2678,7 +2780,7 @@ private final class RecordingNginxSSHClient: SSHClient, @unchecked Sendable {
             configs[path] = previous
             return CommandResult(
                 command: command,
-                stdout: "nginx: [emerg] invalid number of arguments in \"server\" directive\nnginx: configuration file /www/server/nginx/conf/nginx.conf test failed\n",
+                stdout: markers + "nginx: [emerg] invalid number of arguments in \"server\" directive\nnginx: configuration file /www/server/nginx/conf/nginx.conf test failed\n",
                 stderr: "",
                 exitCode: 4,
                 duration: 0
