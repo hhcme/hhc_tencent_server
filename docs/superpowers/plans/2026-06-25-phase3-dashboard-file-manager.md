@@ -27,7 +27,7 @@
 - 指标命令必须有超时；解析失败时展示“能力不可用”而不是崩溃。
 - 云监控指标必须标明来源：Cloud API。
 - SSH 指标必须标明来源：SSH。
-- SwiftNIO/libssh2 正式 SFTP 和真正断点续传队列未落地前，文件管理器只能宣称支持 OpenSSH bootstrap 批量传输；当前队列支持有限并发，失败/取消/中断任务可从历史记录重试，rsync 路径可提供运行中字节进度和部分文件保留，OpenSSH `sftp -b` fallback 在 rsync 不可用时完成普通上传/下载，scp 最终回退路径只保证开始/完成进度。
+- SwiftNIO/libssh2 正式 SFTP 和 native 级断点续传队列未落地前，文件管理器只能宣称支持 OpenSSH bootstrap 批量传输；当前队列支持有限并发，失败/取消/中断任务可从历史记录原地恢复，rsync 路径可提供运行中字节进度和部分文件保留，OpenSSH `sftp -b` fallback 在 rsync 不可用时完成普通上传/下载，scp 最终回退路径只保证开始/完成进度。
 - 文件编辑保存必须先写临时文件，再原子替换或备份原文件。
 
 ## 4. 数据模型

@@ -4374,7 +4374,7 @@ private struct RemoteTransferJobsView: View {
                             Image(systemName: "arrow.clockwise")
                         }
                         .buttonStyle(.borderless)
-                        .help("Retry transfer")
+                        .help("Resume transfer")
                     }
                 }
                 .padding(8)

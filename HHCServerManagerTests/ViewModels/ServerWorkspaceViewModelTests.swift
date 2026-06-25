@@ -1194,7 +1194,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.remoteFileErrorMessage)
     }
 
-    func testRetryRemoteFileTransferQueuesNewUploadJobFromFailedHistory() async throws {
+    func testResumeRemoteFileTransferReusesFailedUploadJobHistory() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
         let client = RemoteFileTransferMockSSHClient()
@@ -1236,7 +1236,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(persisted.first?.status, .succeeded)
     }
 
-    func testRetryRemoteFileTransferQueuesNewDownloadJobFromInterruptedHistory() async throws {
+    func testResumeRemoteFileTransferReusesInterruptedDownloadJobHistory() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
         let client = RemoteFileTransferMockSSHClient()
