@@ -136,7 +136,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 ### Task 5：Windows UI
 
 - [x] 服务器列表骨架。
-- [x] 添加服务器 dialog：支持密码认证服务器配置写入 repository 和 Credential Manager 边界。
+- [x] 添加服务器 dialog：支持密码和私钥认证服务器配置写入 repository 和 Credential Manager 边界；私钥/passphrase 不进入 SQLite。
 - [x] 单服务器工作台骨架。
 - [x] 服务器切换器入口骨架：左侧服务器列表选择即切换当前工作台上下文。
 - [x] Host key trust dialog：连接遇到未知或变更指纹时弹出确认 dialog，工作台侧栏也展示 presented fingerprint，并提供 trust/reject 操作。
@@ -150,6 +150,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] SQLite 凭据隔离测试：使用真实临时 SQLite 文件验证密码、私钥内容和 passphrase 不会写入业务库。
 - [x] Host key trust 测试。
 - [x] SSH 状态机测试：覆盖首次 host key trust、确认后 smoke test、mismatch 阻断和 reject。
+- [x] Windows 添加私钥服务器 ViewModel 测试：覆盖私钥/passphrase 进入 Credential Store、profile 记录为 `PrivateKey`、SQLite 不保存私钥材料、空私钥拒绝。
 - [x] GitHub Actions Windows core tests：Windows runner 运行 `scripts/ci-windows-core.ps1`，覆盖不依赖 WinUI/XAML 编译器的核心层。
 - [ ] 可选真实 SSH 集成测试。
 

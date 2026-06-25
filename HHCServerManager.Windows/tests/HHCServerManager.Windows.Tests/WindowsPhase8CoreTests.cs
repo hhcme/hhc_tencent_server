@@ -180,6 +180,83 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task MainWindowViewModelAddsPrivateKeyServerWithoutPersistingKeyMaterialToSqlite()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hhc-windows-private-key-{Guid.NewGuid():N}.sqlite");
+        var connectionString = $"Data Source={databasePath};Pooling=False";
+        var privateKey = """
+            -----BEGIN OPENSSH PRIVATE KEY-----
+            phase8-viewmodel-private-key
+            -----END OPENSSH PRIVATE KEY-----
+            """;
+        var passphrase = "phase8-viewmodel-passphrase";
+
+        try
+        {
+            await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+            await using var repository = new SqliteServerRepository(connectionString);
+            var credentials = new InMemoryCredentialStore();
+            var service = new ServerManagementService(repository, hostKeys, credentials);
+            var ssh = new FakeWindowsSshClient(
+                new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+                new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4)));
+            var viewModel = new MainWindowViewModel(repository, service, ssh);
+
+            await viewModel.AddPrivateKeyServerAsync(
+                "Private Key Host",
+                "key.example.internal",
+                22,
+                "deploy",
+                privateKey,
+                passphrase,
+                "ops");
+
+            var profile = Assert.Single(viewModel.Servers);
+            Assert.Same(profile, viewModel.SelectedServer);
+            Assert.Equal(SshAuthType.PrivateKey, profile.AuthType);
+            Assert.Equal("ops", profile.GroupName);
+            Assert.Equal("Added Private Key Host.", viewModel.StatusMessage);
+            Assert.Null(viewModel.ErrorMessage);
+
+            var storedCredential = await credentials.ReadAsync(profile.CredentialRef);
+            var storedKey = Assert.IsType<CredentialInput.PrivateKey>(storedCredential);
+            Assert.Equal(privateKey.Trim(), System.Text.Encoding.UTF8.GetString(storedKey.Data));
+            Assert.Equal(passphrase, storedKey.Passphrase);
+
+            var databaseText = System.Text.Encoding.UTF8.GetString(await File.ReadAllBytesAsync(databasePath));
+            Assert.DoesNotContain("phase8-viewmodel-private-key", databaseText);
+            Assert.DoesNotContain(passphrase, databaseText);
+            Assert.DoesNotContain("BEGIN OPENSSH PRIVATE KEY", databaseText);
+        }
+        finally
+        {
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task MainWindowViewModelRejectsBlankPrivateKeyServer()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+
+        await viewModel.AddPrivateKeyServerAsync("Private Key Host", "key.example.internal", 22, "deploy", "   ");
+
+        Assert.Empty(viewModel.Servers);
+        Assert.Equal("Could not add server.", viewModel.StatusMessage);
+        Assert.Contains("Private key data is required", viewModel.ErrorMessage ?? "");
+    }
+
+    [Fact]
     public async Task MainWindowViewModelBlocksMismatchedHostKeyUntilUserReviewsIt()
     {
         await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");

@@ -4,7 +4,7 @@
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。它的目标是以 SSH 为核心管理多台 Linux 服务器，提供类似宝塔面板的桌面端体验，并在用户主动配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-当前仓库处于 macOS 活跃实现阶段，Windows 原生版 Phase 8 技术验证已经启动。macOS 应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/sftp/scp 排队批量传输文件并展示运行中字节进度、有限并发，以及失败/取消/中断传输原地恢复、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，并支持按运行时权限失败自动降级云能力，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力并完成隔离真实生命周期验证，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。Windows 目录已加入 WinUI 3 / Windows App SDK / .NET solution 骨架，并通过 CI 覆盖领域模型、SQLite、Credential Manager 边界、主机指纹信任、SSH adapter、MVVM、依赖注入和连接状态机基础测试；完整 WinUI/MSIX/runtime 验证仍需 Windows 主机。
+当前仓库处于 macOS 活跃实现阶段，Windows 原生版 Phase 8 技术验证已经启动。macOS 应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/sftp/scp 排队批量传输文件并展示运行中字节进度、有限并发，以及失败/取消/中断传输原地恢复、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，并支持按运行时权限失败自动降级云能力，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力并完成隔离真实生命周期验证，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。Windows 目录已加入 WinUI 3 / Windows App SDK / .NET solution 骨架，并通过 CI 覆盖领域模型、SQLite、Credential Manager 边界、主机指纹信任、SSH adapter、MVVM、依赖注入、连接状态机以及密码/私钥添加服务器基础测试；完整 WinUI/MSIX/runtime 验证仍需 Windows 主机。
 
 ## 为什么做这个项目
 
@@ -43,7 +43,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 - GitLab 风格部署：项目管理、命令预览、日志、回滚、本地 webhook listener 和运行中日志刷新。
 - Verdaccio npm 私有仓库管理：preflight、安装、服务控制、用户、包列表、备份/恢复、Nginx proxy 和 npm smoke test，并提供 Dart/Flutter 外部 Hosted Pub Repository 配置辅助。
 - Verdaccio 已有受保护的真实服务器生命周期覆盖：隔离安装、用户创建、npm publish/install smoke、重启、配置备份和备份/恢复；生产环境部署和 proxy 暴露仍需按目标环境单独验收。
-- Windows 原生版 Phase 8 solution 骨架：WinUI 3、Windows App SDK、.NET、CI 覆盖的 SQLite/核心层测试、Windows Credential Manager 边界、主机指纹信任和 SSH adapter 基础。
+- Windows 原生版 Phase 8 solution 骨架：WinUI 3、Windows App SDK、.NET、CI 覆盖的 SQLite/核心层测试、Windows Credential Manager 边界、密码/私钥添加服务器流程、主机指纹信任和 SSH adapter 基础。
 
 ## 技术方向
 

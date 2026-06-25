@@ -22,7 +22,30 @@ public sealed partial class MainWindow : Window
         var hostBox = new TextBox { PlaceholderText = "server.example.com" };
         var portBox = new NumberBox { Value = 22, Minimum = 1, Maximum = 65535 };
         var usernameBox = new TextBox { PlaceholderText = "root" };
+        var authBox = new ComboBox { SelectedIndex = 0 };
+        authBox.Items.Add("Password");
+        authBox.Items.Add("Private key");
         var passwordBox = new PasswordBox { PlaceholderText = "Password" };
+        var privateKeyBox = new TextBox
+        {
+            PlaceholderText = "-----BEGIN OPENSSH PRIVATE KEY-----",
+            AcceptsReturn = true,
+            MinHeight = 140,
+            TextWrapping = TextWrapping.NoWrap,
+            Visibility = Visibility.Collapsed
+        };
+        var passphraseBox = new PasswordBox
+        {
+            PlaceholderText = "Passphrase (optional)",
+            Visibility = Visibility.Collapsed
+        };
+        authBox.SelectionChanged += (_, _) =>
+        {
+            var usePrivateKey = authBox.SelectedIndex == 1;
+            passwordBox.Visibility = usePrivateKey ? Visibility.Collapsed : Visibility.Visible;
+            privateKeyBox.Visibility = usePrivateKey ? Visibility.Visible : Visibility.Collapsed;
+            passphraseBox.Visibility = usePrivateKey ? Visibility.Visible : Visibility.Collapsed;
+        };
         var content = new StackPanel { Spacing = 10 };
         content.Children.Add(new TextBlock { Text = "Name" });
         content.Children.Add(nameBox);
@@ -32,8 +55,12 @@ public sealed partial class MainWindow : Window
         content.Children.Add(portBox);
         content.Children.Add(new TextBlock { Text = "Username" });
         content.Children.Add(usernameBox);
-        content.Children.Add(new TextBlock { Text = "Password" });
+        content.Children.Add(new TextBlock { Text = "Authentication" });
+        content.Children.Add(authBox);
+        content.Children.Add(new TextBlock { Text = "Password or private key" });
         content.Children.Add(passwordBox);
+        content.Children.Add(privateKeyBox);
+        content.Children.Add(passphraseBox);
 
         var dialog = new ContentDialog
         {
@@ -47,12 +74,25 @@ public sealed partial class MainWindow : Window
 
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
-            await ViewModel.AddPasswordServerAsync(
-                nameBox.Text,
-                hostBox.Text,
-                double.IsNaN(portBox.Value) ? 22 : (int)portBox.Value,
-                usernameBox.Text,
-                passwordBox.Password);
+            if (authBox.SelectedIndex == 1)
+            {
+                await ViewModel.AddPrivateKeyServerAsync(
+                    nameBox.Text,
+                    hostBox.Text,
+                    double.IsNaN(portBox.Value) ? 22 : (int)portBox.Value,
+                    usernameBox.Text,
+                    privateKeyBox.Text,
+                    passphraseBox.Password);
+            }
+            else
+            {
+                await ViewModel.AddPasswordServerAsync(
+                    nameBox.Text,
+                    hostBox.Text,
+                    double.IsNaN(portBox.Value) ? 22 : (int)portBox.Value,
+                    usernameBox.Text,
+                    passwordBox.Password);
+            }
         }
     }
 

@@ -6,9 +6,9 @@ HHC Server Manager is an open-source macOS native server management client. It a
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，目标是以 SSH 为核心提供类似宝塔面板的桌面端体验，并在用户配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-> Project status: active macOS implementation, with Windows native Phase 8 technical validation started. The macOS app can already store server profiles, keep SSH and cloud credentials in Keychain, verify SSH host keys, run real OpenSSH smoke tests, execute single remote commands, browse and edit remote files, queue rsync/sftp/scp-backed batch transfers with running byte progress, limited concurrency, and in-place resume for failed/cancelled/interrupted transfers, show SSH and linked-cloud dashboard metrics, inspect and mutate selected cloud/security resources with runtime permission-based capability downgrade, manage systemd/Cron/Nginx/Firewall/Environment foundations, run GitLab-style deployment workflows, manage Verdaccio npm registry foundations with real isolated lifecycle validation, and persist command/cloud/deployment/registry/remote-change metadata in SQLite. The Windows tree now has a WinUI 3 / Windows App SDK / .NET solution skeleton plus CI-covered domain, SQLite, Credential Manager boundary, host-key trust, SSH adapter, MVVM, DI, and connection-state foundations; full WinUI/MSIX/runtime validation still requires a Windows host.
+> Project status: active macOS implementation, with Windows native Phase 8 technical validation started. The macOS app can already store server profiles, keep SSH and cloud credentials in Keychain, verify SSH host keys, run real OpenSSH smoke tests, execute single remote commands, browse and edit remote files, queue rsync/sftp/scp-backed batch transfers with running byte progress, limited concurrency, and in-place resume for failed/cancelled/interrupted transfers, show SSH and linked-cloud dashboard metrics, inspect and mutate selected cloud/security resources with runtime permission-based capability downgrade, manage systemd/Cron/Nginx/Firewall/Environment foundations, run GitLab-style deployment workflows, manage Verdaccio npm registry foundations with real isolated lifecycle validation, and persist command/cloud/deployment/registry/remote-change metadata in SQLite. The Windows tree now has a WinUI 3 / Windows App SDK / .NET solution skeleton plus CI-covered domain, SQLite, Credential Manager boundary, host-key trust, SSH adapter, MVVM, DI, connection-state foundations, and password/private-key add-server flows; full WinUI/MSIX/runtime validation still requires a Windows host.
 >
-> 项目状态：macOS 活跃实现阶段，Windows 原生版 Phase 8 技术验证已经启动。macOS 应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/sftp/scp 排队批量传输文件并展示运行中字节进度、有限并发，以及失败/取消/中断传输原地恢复、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，并支持按运行时权限失败自动降级云能力，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力并完成隔离真实生命周期验证，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。Windows 目录已加入 WinUI 3 / Windows App SDK / .NET solution 骨架，并通过 CI 覆盖领域模型、SQLite、Credential Manager 边界、主机指纹信任、SSH adapter、MVVM、依赖注入和连接状态机基础测试；完整 WinUI/MSIX/runtime 验证仍需 Windows 主机。
+> 项目状态：macOS 活跃实现阶段，Windows 原生版 Phase 8 技术验证已经启动。macOS 应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/sftp/scp 排队批量传输文件并展示运行中字节进度、有限并发，以及失败/取消/中断传输原地恢复、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，并支持按运行时权限失败自动降级云能力，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力并完成隔离真实生命周期验证，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。Windows 目录已加入 WinUI 3 / Windows App SDK / .NET solution 骨架，并通过 CI 覆盖领域模型、SQLite、Credential Manager 边界、主机指纹信任、SSH adapter、MVVM、依赖注入、连接状态机以及密码/私钥添加服务器基础测试；完整 WinUI/MSIX/runtime 验证仍需 Windows 主机。
 
 ## Highlights / 亮点
 
@@ -22,7 +22,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - Cloud account metadata and cloud credential storage foundation are in place.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper are in place.
 - Tencent Cloud, Alibaba Cloud, and Huawei Cloud adapters now cover instance discovery, selected power/disk/snapshot/security-group operations, and linked dashboard metrics with mock-backed tests.
-- Windows native Phase 8 has started with a WinUI 3 / Windows App SDK / .NET solution skeleton and CI-covered core layers; Windows-host validation is still pending.
+- Windows native Phase 8 has started with a WinUI 3 / Windows App SDK / .NET solution skeleton, password/private-key add-server flows, and CI-covered core layers; Windows-host validation is still pending.
 - Bilingual README for the project introduction; detailed design and implementation documents are maintained in Chinese.
 - MIT licensed.
 
@@ -36,7 +36,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - 云账号元数据和云凭据存储基础已经落地。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装已经落地。
 - 腾讯云、阿里云和华为云 adapter 已覆盖实例发现、部分电源/云盘/快照/安全组操作，以及已关联实例 Dashboard 指标，并有 mock 测试覆盖。
-- Windows 原生版 Phase 8 已启动，加入 WinUI 3 / Windows App SDK / .NET solution 骨架和 CI 覆盖的核心层；Windows 主机验收仍待补齐。
+- Windows 原生版 Phase 8 已启动，加入 WinUI 3 / Windows App SDK / .NET solution 骨架、密码/私钥添加服务器流程和 CI 覆盖的核心层；Windows 主机验收仍待补齐。
 - README 作为项目介绍保留中英文；详细设计和实施计划默认使用中文维护。
 - 使用 MIT 开源协议。
 

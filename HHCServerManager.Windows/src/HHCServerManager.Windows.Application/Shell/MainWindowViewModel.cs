@@ -186,6 +186,39 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    public async Task AddPrivateKeyServerAsync(
+        string name,
+        string host,
+        int port,
+        string username,
+        string privateKey,
+        string? passphrase = null,
+        string? groupName = null,
+        CancellationToken cancellationToken = default)
+    {
+        ErrorMessage = null;
+        try
+        {
+            var profile = await _serverManagement.AddServerAsync(
+                name,
+                host,
+                port,
+                username,
+                SshAuthType.PrivateKey,
+                groupName,
+                new CredentialInput.PrivateKey(System.Text.Encoding.UTF8.GetBytes(privateKey.Trim()), passphrase),
+                cancellationToken);
+            Servers.Add(profile);
+            SelectedServer = profile;
+            StatusMessage = $"Added {profile.Name}.";
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            ErrorMessage = error.Message;
+            StatusMessage = "Could not add server.";
+        }
+    }
+
     public async Task DeleteSelectedServerAsync(CancellationToken cancellationToken = default)
     {
         if (SelectedServer is null)
