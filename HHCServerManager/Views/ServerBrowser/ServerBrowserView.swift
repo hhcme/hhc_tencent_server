@@ -102,10 +102,11 @@ struct ServerBrowserView: View {
         let servers = viewModel.filteredServers(from: appState.servers, links: appState.cloudInstanceLinks)
         return Group {
             if servers.isEmpty {
+                let emptyState = viewModel.emptyState(for: appState.servers, links: appState.cloudInstanceLinks)
                 ContentUnavailableView(
-                    "No Servers",
-                    systemImage: "server.rack",
-                    description: Text("Add a server to start the SSH workflow.")
+                    emptyState.title,
+                    systemImage: emptyState.systemImage,
+                    description: Text(emptyState.description)
                 )
             } else {
                 List(servers, selection: $viewModel.selectedServerId) { profile in

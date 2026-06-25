@@ -513,7 +513,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 
 验收：
 
-- [ ] 空状态清晰。
+- [x] 空状态清晰：`ServerBrowserViewModel.emptyState(for:links:)` 为首次启动无服务器、搜索无结果、手动来源为空和云来源为空提供明确标题、图标和描述；`AddServerViewModelTests.testServerBrowserEmptyStatesDescribeFirstRunSearchAndSourceFilters` 覆盖这些状态，`ServerBrowserView` 使用同一状态对象渲染 `ContentUnavailableView`。
 - [x] 首屏是服务器列表，不是单服务器详情：`ContentView` 在没有 `selectedServer` 时显示 `ServerBrowserView`。
 - [x] 点击 Open 后进入该服务器工作台：`ServerManagementServiceTests.testAppStateOpensClosesAndSwitchesWorkspaceSelection` 覆盖 `AppState.openWorkspace(for:)` 设置当前工作台服务器。
 - [x] 工作台内可以通过服务器切换器切换服务器：`ServerManagementServiceTests.testAppStateOpensClosesAndSwitchesWorkspaceSelection` 覆盖从当前服务器切换到第二台服务器，并验证关闭工作台会清空选择。

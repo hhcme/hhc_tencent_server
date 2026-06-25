@@ -9,6 +9,12 @@ enum ServerSourceFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+struct ServerBrowserEmptyState: Equatable {
+    let title: String
+    let systemImage: String
+    let description: String
+}
+
 @MainActor
 final class ServerBrowserViewModel: ObservableObject {
     @Published var searchText = ""
@@ -38,6 +44,47 @@ final class ServerBrowserViewModel: ObservableObject {
 
     func cloudLink(for profile: ServerProfile, links: [CloudInstanceLink]) -> CloudInstanceLink? {
         links.first { $0.serverId == profile.id }
+    }
+
+    func emptyState(for servers: [ServerProfile], links: [CloudInstanceLink]) -> ServerBrowserEmptyState {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if servers.isEmpty {
+            return ServerBrowserEmptyState(
+                title: "No Servers",
+                systemImage: "server.rack",
+                description: "Add a server to start the SSH workflow."
+            )
+        }
+        if !query.isEmpty {
+            return ServerBrowserEmptyState(
+                title: "No Matching Servers",
+                systemImage: "magnifyingglass",
+                description: "Adjust the search text or choose another source."
+            )
+        }
+        switch sourceFilter {
+        case .all:
+            return ServerBrowserEmptyState(
+                title: "No Servers",
+                systemImage: "server.rack",
+                description: "Add a server to start the SSH workflow."
+            )
+        case .manual:
+            return ServerBrowserEmptyState(
+                title: "No Manual SSH Servers",
+                systemImage: "terminal",
+                description: "Add a manual SSH server or switch to all sources."
+            )
+        case .cloud:
+            let hasCloudLinks = !links.isEmpty
+            return ServerBrowserEmptyState(
+                title: "No Cloud Servers",
+                systemImage: "cloud",
+                description: hasCloudLinks
+                    ? "Import a synced cloud instance as an SSH server or switch to all sources."
+                    : "Add a cloud account, sync instances, then import one as an SSH server."
+            )
+        }
     }
 }
 

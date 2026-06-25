@@ -145,6 +145,53 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.selectedInstanceId)
     }
 
+    func testServerBrowserEmptyStatesDescribeFirstRunSearchAndSourceFilters() {
+        let viewModel = ServerBrowserViewModel()
+
+        XCTAssertEqual(
+            viewModel.emptyState(for: [], links: []),
+            ServerBrowserEmptyState(
+                title: "No Servers",
+                systemImage: "server.rack",
+                description: "Add a server to start the SSH workflow."
+            )
+        )
+
+        let manualServer = makeProfile(name: "Manual SSH", host: "manual.example.internal")
+        viewModel.searchText = "missing"
+        XCTAssertEqual(
+            viewModel.emptyState(for: [manualServer], links: []),
+            ServerBrowserEmptyState(
+                title: "No Matching Servers",
+                systemImage: "magnifyingglass",
+                description: "Adjust the search text or choose another source."
+            )
+        )
+
+        viewModel.searchText = ""
+        viewModel.sourceFilter = .cloud
+        XCTAssertEqual(
+            viewModel.emptyState(for: [manualServer], links: []),
+            ServerBrowserEmptyState(
+                title: "No Cloud Servers",
+                systemImage: "cloud",
+                description: "Add a cloud account, sync instances, then import one as an SSH server."
+            )
+        )
+
+        viewModel.sourceFilter = .manual
+        let cloudServer = makeProfile(name: "Cloud SSH", host: "cloud.example.internal")
+        let cloudLink = makeCloudInstanceLink(serverId: cloudServer.id)
+        XCTAssertEqual(
+            viewModel.emptyState(for: [cloudServer], links: [cloudLink]),
+            ServerBrowserEmptyState(
+                title: "No Manual SSH Servers",
+                systemImage: "terminal",
+                description: "Add a manual SSH server or switch to all sources."
+            )
+        )
+    }
+
     func testCloudImportViewModelDoesNotCreateAccountWhenValidationFails() async throws {
         let repository = ServerRepository(database: try AppDatabase.inMemory())
         let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.cloud-import-failure.\(UUID().uuidString)")
@@ -483,10 +530,18 @@ final class AddServerViewModelTests: XCTestCase {
     }
 
     private func makeProfile(authType: SSHAuthType) -> ServerProfile {
+        makeProfile(name: "Tencent", host: "example.internal", authType: authType)
+    }
+
+    private func makeProfile(
+        name: String,
+        host: String,
+        authType: SSHAuthType = .password
+    ) -> ServerProfile {
         ServerProfile(
             id: UUID(),
-            name: "Tencent",
-            host: "example.internal",
+            name: name,
+            host: host,
             port: 22,
             username: "root",
             authType: authType,
@@ -494,6 +549,27 @@ final class AddServerViewModelTests: XCTestCase {
             groupName: "prod",
             createdAt: Date(),
             updatedAt: Date()
+        )
+    }
+
+    private func makeCloudInstanceLink(serverId: UUID?) -> CloudInstanceLink {
+        CloudInstanceLink(
+            id: UUID(),
+            serverId: serverId,
+            accountId: UUID(),
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-test",
+            displayName: "Cloud SSH",
+            publicIp: "203.0.113.10",
+            privateIp: nil,
+            status: "RUNNING",
+            instanceType: "S5.SMALL1",
+            zoneId: nil,
+            vpcId: nil,
+            securityGroupIds: [],
+            rawJSON: nil,
+            lastSyncedAt: Date()
         )
     }
 }
