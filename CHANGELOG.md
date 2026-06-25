@@ -86,6 +86,7 @@ All notable changes to this project will be documented in this file.
 - Added a macOS Registries workspace section for Verdaccio preflight, service status, package listing, backup creation, and Dart/Flutter hosted repository direction.
 - Added a guarded Verdaccio install action to the macOS Registries workspace with preflight gating, confirmation, health-check handling, and status refresh.
 - Added Verdaccio user management controls to the macOS Registries workspace for htpasswd create, password update, and confirmed delete actions.
+- Added Verdaccio backup restore controls to the macOS Registries workspace with restore-path capture, destructive confirmation, health-check handling, and status refresh.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -167,3 +168,4 @@ All notable changes to this project will be documented in this file.
 - 添加 macOS Registries 工作台入口，支持 Verdaccio preflight、服务状态、包列表、备份创建，以及 Dart/Flutter hosted repository 方向展示。
 - 在 macOS Registries 工作台加入带 preflight gating 和确认弹窗的 Verdaccio 安装动作，安装后处理 health check 并刷新状态。
 - 在 macOS Registries 工作台加入 Verdaccio 用户管理控件，支持 htpasswd 创建用户、更新密码和确认删除。
+- 在 macOS Registries 工作台加入 Verdaccio 备份恢复控件，支持恢复路径回填、危险确认、health check 处理和状态刷新。

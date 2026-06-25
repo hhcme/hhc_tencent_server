@@ -1142,7 +1142,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.cloudSecurityGroupErrorMessage)
     }
 
-    func testPrivateRegistriesWorkspaceLoadsVerdaccioStateAndCreatesBackup() async throws {
+    func testPrivateRegistriesWorkspaceLoadsVerdaccioStateAndCreatesBackupAndRestore() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
         let viewModel = ServerWorkspaceViewModel()
@@ -1175,11 +1175,28 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.verdaccioStatusSnapshot?.isRunning == true)
         XCTAssertEqual(viewModel.verdaccioPackages.first?.name, "@scope/pkg")
         XCTAssertEqual(viewModel.verdaccioBackupResult?.sizeBytes, 2048)
+        XCTAssertEqual(viewModel.verdaccioRestorePathDraft, "/srv/verdaccio/backups/verdaccio-2023-11-14T22-13-20.000Z.tar.gz")
         XCTAssertTrue(viewModel.registryActionMessage?.contains("Created Verdaccio backup") == true)
         XCTAssertTrue(client.commands.contains { $0.contains("command -v htpasswd") })
         XCTAssertTrue(client.commands.contains { $0.contains("journalctl -u") })
         XCTAssertTrue(client.commands.contains { $0.contains("find \"$data_path\"") })
         XCTAssertTrue(client.commands.contains { $0.contains("tar -czf") })
+
+        viewModel.restoreVerdaccioBackup(
+            profile: profile,
+            sshClient: client,
+            verdaccioManager: manager,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isRestoringVerdaccioBackup == false && viewModel.verdaccioRestoreResult != nil }
+
+        XCTAssertEqual(viewModel.verdaccioRestoreResult?.backupPath, "/srv/verdaccio/backups/verdaccio-2023-11-14T22-13-20.000Z.tar.gz")
+        XCTAssertTrue(viewModel.verdaccioRestoreResult?.rollbackBackupPath.hasPrefix("/srv/verdaccio/backups/restore-rollback-") == true)
+        XCTAssertTrue(viewModel.registryActionMessage?.contains("Restored Verdaccio backup") == true)
+        XCTAssertTrue(viewModel.verdaccioStatusSnapshot?.isRunning == true)
+        XCTAssertTrue(client.commands.contains { $0.contains("tar -xzf \"$archive_path\" -C \"$restore_dir\"") })
+        XCTAssertTrue(client.commands.contains { $0.contains("systemctl stop \"$service\"") })
+        XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_ACTIVE_STATE__") })
     }
 
     func testPrivateRegistriesWorkspaceInstallsVerdaccioAndRefreshesStatus() async throws {
@@ -2050,6 +2067,9 @@ private final class RegistryViewModelMockSSHClient: SSHClient, @unchecked Sendab
                 exitCode: 0,
                 duration: 0
             )
+        }
+        if command.contains("tar -xzf \"$archive_path\" -C \"$restore_dir\"") {
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
         }
         if command.contains("tar -czf") {
             return CommandResult(command: command, stdout: "2048\n", stderr: "", exitCode: 0, duration: 0)

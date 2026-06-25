@@ -22,6 +22,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingDeploymentRollback: DeploymentRollbackRequest?
     @State private var pendingVerdaccioInstall = false
     @State private var pendingVerdaccioUserDelete = false
+    @State private var pendingVerdaccioRestore = false
     @State private var securityGroupDraftDirection: CloudSecurityGroupRuleDirection = .ingress
     @State private var securityGroupDraftProtocol = "TCP"
     @State private var securityGroupDraftPort = "22"
@@ -212,6 +213,19 @@ struct ServerWorkspaceView: View {
             }
         } message: {
             Text(verdaccioUserDeleteConfirmationMessage)
+        }
+        .alert("Restore Verdaccio Backup?", isPresented: $pendingVerdaccioRestore) {
+            Button("Cancel", role: .cancel) {}
+            Button("Restore", role: .destructive) {
+                viewModel.restoreVerdaccioBackup(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    verdaccioManager: appState.verdaccioManager,
+                    repository: appState.repository
+                )
+            }
+        } message: {
+            Text(verdaccioRestoreConfirmationMessage)
         }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
@@ -773,6 +787,7 @@ struct ServerWorkspaceView: View {
                 registryPreflightSection
                 verdaccioStatusSection
                 verdaccioUsersSection
+                verdaccioBackupSection
                 verdaccioPackagesSection
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -838,6 +853,75 @@ struct ServerWorkspaceView: View {
                     .frame(maxWidth: .infinity, minHeight: 140)
             }
         }
+    }
+
+    private var verdaccioBackupSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Backups")
+                .font(.headline)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Restore Path")
+                        .foregroundStyle(.secondary)
+                    TextField("/srv/verdaccio/backups/verdaccio-2026-06-25T12-00-00Z.tar.gz", text: $viewModel.verdaccioRestorePathDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 560)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.createVerdaccioBackup(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        verdaccioManager: appState.verdaccioManager,
+                        repository: appState.repository
+                    )
+                } label: {
+                    if viewModel.isCreatingVerdaccioBackup {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Create Backup", systemImage: "archivebox")
+                    }
+                }
+                .disabled(isRegistryBusy)
+
+                Button(role: .destructive) {
+                    pendingVerdaccioRestore = true
+                } label: {
+                    if viewModel.isRestoringVerdaccioBackup {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Restore", systemImage: "arrow.counterclockwise")
+                    }
+                }
+                .disabled(isRegistryBusy || !isVerdaccioRestorePathReady)
+            }
+
+            if let backup = viewModel.verdaccioBackupResult {
+                Label(
+                    "Created \(backup.backupPath) · \(backup.sizeBytes.map(formatBytes) ?? "unknown")",
+                    systemImage: "archivebox"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+
+            if let restore = viewModel.verdaccioRestoreResult {
+                Label(
+                    "Restored \(restore.backupPath) · rollback \(restore.rollbackBackupPath)",
+                    systemImage: "checkmark.arrow.trianglehead.counterclockwise"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var verdaccioUsersSection: some View {
@@ -2859,6 +2943,7 @@ struct ServerWorkspaceView: View {
             viewModel.isLoadingVerdaccioStatus ||
             viewModel.isLoadingVerdaccioPackages ||
             viewModel.isCreatingVerdaccioBackup ||
+            viewModel.isRestoringVerdaccioBackup ||
             viewModel.isMutatingVerdaccioUser
     }
 
@@ -2874,6 +2959,10 @@ struct ServerWorkspaceView: View {
         isVerdaccioUserReady && viewModel.verdaccioPasswordDraft.count >= 8
     }
 
+    private var isVerdaccioRestorePathReady: Bool {
+        !viewModel.verdaccioRestorePathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var verdaccioInstallConfirmationMessage: String {
         """
         This will create or reuse the \(viewModel.registryDraft.serviceName) system user, write \(viewModel.registryDraft.installPath)/config.yaml, write /etc/systemd/system/\(viewModel.registryDraft.serviceName).service, enable and restart the service, then run a health check.
@@ -2885,6 +2974,12 @@ struct ServerWorkspaceView: View {
     private var verdaccioUserDeleteConfirmationMessage: String {
         """
         This will remove \(viewModel.verdaccioUsernameDraft.trimmingCharacters(in: .whitespacesAndNewlines)) from \(viewModel.registryDraft.installPath)/htpasswd, create a backup first, and restart \(viewModel.registryDraft.serviceName).service.
+        """
+    }
+
+    private var verdaccioRestoreConfirmationMessage: String {
+        """
+        This will stop \(viewModel.registryDraft.serviceName).service, restore config.yaml and storage from \(viewModel.verdaccioRestorePathDraft.trimmingCharacters(in: .whitespacesAndNewlines)), create a rollback archive first, restart the service, and run a health check. If restore or health check fails, the command will attempt rollback.
         """
     }
 

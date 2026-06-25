@@ -93,14 +93,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var verdaccioStatusSnapshot: VerdaccioStatusSnapshot?
     @Published var verdaccioPackages: [VerdaccioPackageSummary] = []
     @Published var verdaccioBackupResult: VerdaccioRegistryBackupResult?
+    @Published var verdaccioRestoreResult: VerdaccioRegistryRestoreResult?
     @Published var verdaccioUserMutationResult: VerdaccioUserMutationResult?
     @Published var verdaccioUsernameDraft = ""
     @Published var verdaccioPasswordDraft = ""
+    @Published var verdaccioRestorePathDraft = ""
     @Published var isRunningRegistryPreflight = false
     @Published var isInstallingVerdaccio = false
     @Published var isLoadingVerdaccioStatus = false
     @Published var isLoadingVerdaccioPackages = false
     @Published var isCreatingVerdaccioBackup = false
+    @Published var isRestoringVerdaccioBackup = false
     @Published var isMutatingVerdaccioUser = false
     @Published var registryErrorMessage: String?
     @Published var registryActionMessage: String?
@@ -1865,6 +1868,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 )
                 await MainActor.run {
                     self.verdaccioBackupResult = result
+                    self.verdaccioRestorePathDraft = result.backupPath
                     self.registryActionMessage = "Created Verdaccio backup at \(result.backupPath)."
                     self.isCreatingVerdaccioBackup = false
                 }
@@ -1872,6 +1876,50 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isCreatingVerdaccioBackup = false
+                }
+            }
+        }
+    }
+
+    func restoreVerdaccioBackup(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager,
+        repository: ServerRepository
+    ) {
+        guard !isRestoringVerdaccioBackup else { return }
+        isRestoringVerdaccioBackup = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+        let backupPath = verdaccioRestorePathDraft
+
+        Task {
+            do {
+                let result = try await verdaccioManager.restoreBackup(
+                    draft: registryDraft,
+                    backupPath: backupPath,
+                    profile: profile,
+                    sshClient: sshClient,
+                    repository: repository
+                )
+                var snapshot: VerdaccioStatusSnapshot?
+                snapshot = try? await verdaccioManager.loadStatus(
+                    draft: registryDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.verdaccioRestoreResult = result
+                    if let snapshot {
+                        self.verdaccioStatusSnapshot = snapshot
+                    }
+                    self.registryActionMessage = "Restored Verdaccio backup from \(result.backupPath). Health check: \(result.healthCheckOutput)."
+                    self.isRestoringVerdaccioBackup = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isRestoringVerdaccioBackup = false
                 }
             }
         }
