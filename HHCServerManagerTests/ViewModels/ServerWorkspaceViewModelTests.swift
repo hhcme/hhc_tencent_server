@@ -1739,6 +1739,39 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.cloudSecurityGroupList)
     }
 
+    func testCloudSecurityGroupsUnavailableWithoutCloudLinkDoesNotAffectSSHState() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.security-unlinked.\(UUID().uuidString)")
+        let service = CloudSecurityGroupService(
+            repository: repository,
+            keychain: keychain,
+            registry: CloudProviderRegistry(adapters: [
+                SecurityGroupViewModelMockCloudAdapter(providerId: .tencentCloud)
+            ]),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        let viewModel = ServerWorkspaceViewModel()
+        viewModel.connectionState = .connected
+        viewModel.commandResult = CommandResult(
+            command: "printf hhc-ssh-ok",
+            stdout: "hhc-ssh-ok",
+            stderr: "",
+            exitCode: 0,
+            duration: 0.1
+        )
+
+        viewModel.loadCloudSecurityGroups(profile: profile, cloudSecurityGroupService: service)
+        try await waitUntil { viewModel.isLoadingCloudSecurityGroups == false && viewModel.cloudSecurityGroupErrorMessage != nil }
+
+        XCTAssertEqual(viewModel.connectionState, .connected)
+        XCTAssertEqual(viewModel.commandResult?.stdout, "hhc-ssh-ok")
+        XCTAssertTrue(viewModel.cloudSecurityGroupErrorMessage?.contains("This server is not linked to a cloud instance.") == true)
+        XCTAssertNil(viewModel.cloudSecurityGroupList)
+        XCTAssertNil(viewModel.selectedCloudSecurityGroup)
+        XCTAssertNil(viewModel.cloudSecurityGroupPolicySnapshot)
+    }
+
     func testCloudSecurityGroupRuleChangeAppliesRefreshesAndAudits() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
