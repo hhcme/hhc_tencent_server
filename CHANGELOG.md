@@ -69,6 +69,7 @@ All notable changes to this project will be documented in this file.
 - Added GitLab webhook core handling with Keychain-backed secrets, constant-time token checks, repo/branch filtering, webhook-triggered deployment runs, and macOS webhook settings.
 - Added a local GitLab webhook HTTP listener foundation with `/webhooks/gitlab` request parsing, synchronous trigger responses, and operation audit logs for webhook deployment starts and finishes.
 - Added macOS controls for starting/stopping the local GitLab webhook listener, displaying the listener URL and offline limitation, plus risk confirmation before deployment rollback.
+- Added live deployment run/log refresh in the macOS Deployments workspace while manual deploys and rollbacks are running.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -133,3 +134,4 @@ All notable changes to this project will be documented in this file.
 - 添加 GitLab webhook 核心处理，支持 Keychain secret、常量时间 token 校验、repo/branch 过滤、webhook 触发部署 run，以及 macOS webhook 设置项。
 - 添加本地 GitLab webhook HTTP listener 基础，支持 `/webhooks/gitlab` 请求解析、按触发结果返回状态，并为 webhook 部署开始和结束写入操作审计日志。
 - 添加 macOS 本地 GitLab webhook listener 启停控件、监听 URL 和离线限制提示，并在部署回滚前接入风险确认。
+- 添加 macOS Deployments 工作台运行中部署 run/log 自动刷新，手动部署和回滚执行时可持续看到日志推进。

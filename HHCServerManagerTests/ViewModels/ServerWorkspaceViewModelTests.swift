@@ -322,6 +322,37 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'origin/main'") })
     }
 
+    func testRunDeploymentRefreshesLogsWhileRunning() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = SlowSSHClient()
+        let runner = DeploymentRunner(repository: repository)
+
+        viewModel.startNewDeploymentProject(serverId: profile.id)
+        viewModel.deploymentName = "API"
+        viewModel.deploymentRepositoryURL = "git@gitlab.com:hhc/api.git"
+        viewModel.deploymentBranch = "main"
+        viewModel.deploymentPath = "/srv/api"
+
+        viewModel.runDeployment(
+            profile: profile,
+            sshClient: client,
+            deploymentRunner: runner,
+            repository: repository
+        )
+
+        try await waitUntil { viewModel.isRunningDeployment }
+        try await waitUntil {
+            viewModel.selectedDeploymentRun?.status == .running &&
+                viewModel.deploymentLogs.contains { $0.stepName == "plan" }
+        }
+
+        viewModel.cancelDeployment()
+        try await waitUntil { viewModel.isRunningDeployment == false }
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.status, .cancelled)
+    }
+
     func testCancelCommandStopsRunningStateAndShowsCancellationSummary() async throws {
         let profile = makeProfile()
         let client = SlowSSHClient()

@@ -96,6 +96,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     private var pendingHostKeyAction: PendingHostKeyAction?
     private var commandTask: Task<Void, Never>?
     private var deploymentTask: Task<Void, Never>?
+    private var deploymentLogRefreshTask: Task<Void, Never>?
     private var runningCommand: String?
     private var dashboardAutoRefreshTask: Task<Void, Never>?
     private var transferTask: Task<Void, Never>?
@@ -106,6 +107,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         dashboardAutoRefreshTask?.cancel()
         commandTask?.cancel()
         deploymentTask?.cancel()
+        deploymentLogRefreshTask?.cancel()
         transferTask?.cancel()
     }
 
@@ -1463,6 +1465,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         isRunningDeployment = true
         deploymentErrorMessage = nil
         deploymentActionMessage = "Deployment started."
+        startDeploymentLogRefresh(project: project, repository: repository)
 
         deploymentTask = Task {
             do {
@@ -1471,12 +1474,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.selectedDeploymentRun = run
                     self.deploymentActionMessage = run.summary
                     self.isRunningDeployment = false
+                    self.stopDeploymentLogRefresh()
                     self.reloadDeploymentRunState(project: project, runId: run.id, repository: repository)
                 }
             } catch {
                 await MainActor.run {
                     self.deploymentErrorMessage = error.localizedDescription
                     self.isRunningDeployment = false
+                    self.stopDeploymentLogRefresh()
                     self.reloadDeploymentRunState(project: project, runId: nil, repository: repository)
                 }
             }
@@ -1502,6 +1507,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         isRunningDeployment = true
         deploymentErrorMessage = nil
         deploymentActionMessage = "Rollback started."
+        startDeploymentLogRefresh(project: project, repository: repository)
 
         deploymentTask = Task {
             do {
@@ -1515,12 +1521,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.selectedDeploymentRun = run
                     self.deploymentActionMessage = run.summary
                     self.isRunningDeployment = false
+                    self.stopDeploymentLogRefresh()
                     self.reloadDeploymentRunState(project: project, runId: run.id, repository: repository)
                 }
             } catch {
                 await MainActor.run {
                     self.deploymentErrorMessage = error.localizedDescription
                     self.isRunningDeployment = false
+                    self.stopDeploymentLogRefresh()
                     self.reloadDeploymentRunState(project: project, runId: nil, repository: repository)
                 }
             }
@@ -1617,6 +1625,31 @@ final class ServerWorkspaceViewModel: ObservableObject {
         } catch {
             deploymentErrorMessage = error.localizedDescription
         }
+    }
+
+    private func startDeploymentLogRefresh(project: DeploymentProject, repository: ServerRepository) {
+        deploymentLogRefreshTask?.cancel()
+        deploymentLogRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await MainActor.run {
+                    self?.reloadDeploymentRunState(
+                        project: project,
+                        runId: self?.selectedDeploymentRun?.id,
+                        repository: repository
+                    )
+                }
+                do {
+                    try await Task.sleep(nanoseconds: 150_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func stopDeploymentLogRefresh() {
+        deploymentLogRefreshTask?.cancel()
+        deploymentLogRefreshTask = nil
     }
 
     private func saveRemoteChangeLog(

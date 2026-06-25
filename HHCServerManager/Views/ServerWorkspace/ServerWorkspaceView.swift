@@ -885,8 +885,16 @@ struct ServerWorkspaceView: View {
 
     private var deploymentLogView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Logs")
-                .font(.subheadline.weight(.semibold))
+            HStack {
+                Text("Logs")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if viewModel.isRunningDeployment {
+                    Label("Live", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                }
+            }
             if viewModel.deploymentLogs.isEmpty {
                 Text("No logs captured for this run.")
                     .foregroundStyle(.secondary)
