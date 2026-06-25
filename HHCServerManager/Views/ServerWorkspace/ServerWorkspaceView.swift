@@ -53,6 +53,7 @@ struct ServerWorkspaceView: View {
         }
         .onAppear {
             viewModel.configure(initialState: appState.connectionState(for: profile))
+            viewModel.loadCommandHistory(profile: profile, repository: appState.repository)
         }
         .onChange(of: viewModel.connectionState) { _, newState in
             appState.setConnectionState(newState, for: profile)
@@ -213,21 +214,56 @@ struct ServerWorkspaceView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    if viewModel.commandHistory.isEmpty {
+                    if viewModel.commandHistory.isEmpty && viewModel.persistedCommandHistory.isEmpty {
                         ContentUnavailableView(
                             "No Commands Yet",
                             systemImage: "terminal",
                             description: Text("Run a command to see stdout, stderr, exit code, and duration.")
                         )
                         .frame(maxWidth: .infinity, minHeight: 240)
-                    } else {
+                    } else if !viewModel.commandHistory.isEmpty {
                         ForEach(Array(viewModel.commandHistory.enumerated()), id: \.offset) { _, result in
                             CommandResultView(result: result)
                         }
                     }
+
+                    if !viewModel.persistedCommandHistory.isEmpty {
+                        Divider()
+                            .padding(.vertical, 4)
+                        persistedHistorySection
+                    }
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var persistedHistorySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Command History")
+                .font(.headline)
+
+            ForEach(viewModel.persistedCommandHistory) { entry in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: entry.exitCode == 0 ? "checkmark.circle" : "clock.badge.exclamationmark")
+                        .foregroundStyle(entry.exitCode == 0 ? .green : .secondary)
+                        .frame(width: 18)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(entry.command)
+                            .font(.system(.body, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(historyMetadata(entry))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                }
+                .padding(10)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
             }
         }
     }
@@ -244,7 +280,26 @@ struct ServerWorkspaceView: View {
     private func runCommand() {
         let command = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else { return }
-        viewModel.executeCommand(command, profile: profile, sshClient: appState.sshClient)
+        viewModel.executeCommand(
+            command,
+            profile: profile,
+            sshClient: appState.sshClient,
+            repository: appState.repository
+        )
+    }
+
+    private func historyMetadata(_ entry: CommandHistoryEntry) -> String {
+        var parts: [String] = []
+        if let exitCode = entry.exitCode {
+            parts.append("exit \(exitCode)")
+        } else {
+            parts.append("failed before exit")
+        }
+        if let duration = entry.duration {
+            parts.append(String(format: "%.2fs", duration))
+        }
+        parts.append(entry.createdAt.formatted(date: .abbreviated, time: .shortened))
+        return parts.joined(separator: " · ")
     }
 
     private var currentServerBinding: Binding<UUID> {

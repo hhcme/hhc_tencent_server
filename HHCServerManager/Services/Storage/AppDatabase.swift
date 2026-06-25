@@ -147,6 +147,35 @@ final class AppDatabase: @unchecked Sendable {
                 UNIQUE(server_id, algorithm, fingerprint_sha256)
             )
         """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS command_history (
+                id TEXT PRIMARY KEY NOT NULL,
+                server_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
+                command TEXT NOT NULL,
+                exit_code INTEGER,
+                duration_ms INTEGER,
+                created_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_command_history_server_created_at
+            ON command_history(server_id, created_at DESC)
+        """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS operation_logs (
+                id TEXT PRIMARY KEY NOT NULL,
+                scope TEXT NOT NULL,
+                action TEXT NOT NULL,
+                target_id TEXT,
+                status TEXT NOT NULL,
+                message TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_operation_logs_created_at
+            ON operation_logs(created_at DESC)
+        """)
     }
 
     private var lastErrorMessage: String {

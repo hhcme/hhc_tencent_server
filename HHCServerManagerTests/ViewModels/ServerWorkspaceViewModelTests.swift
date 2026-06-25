@@ -116,6 +116,48 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.didTrustHostKey)
     }
 
+    func testExecuteCommandPersistsHistoryAndOperationLog() async throws {
+        let profile = makeProfile()
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        let client = MockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.executeCommand("whoami", profile: profile, sshClient: client, repository: repository)
+        try await waitUntil { viewModel.isRunningCommand == false && !viewModel.persistedCommandHistory.isEmpty }
+
+        let persistedHistory = try repository.fetchCommandHistory(serverId: profile.id)
+        XCTAssertEqual(persistedHistory.map(\.command), ["whoami"])
+        XCTAssertEqual(persistedHistory[0].exitCode, 0)
+        XCTAssertEqual(viewModel.persistedCommandHistory.map(\.command), ["whoami"])
+
+        let logs = try repository.fetchOperationLogs()
+        XCTAssertEqual(logs.count, 1)
+        XCTAssertEqual(logs[0].scope, "ssh")
+        XCTAssertEqual(logs[0].action, "execute_command")
+        XCTAssertEqual(logs[0].status, "success")
+        XCTAssertEqual(logs[0].targetId, profile.id.uuidString)
+    }
+
+    func testLoadCommandHistoryReadsPersistedEntries() throws {
+        let profile = makeProfile()
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        try repository.saveCommandHistory(CommandHistoryEntry(
+            id: UUID(),
+            serverId: profile.id,
+            command: "uptime",
+            exitCode: 0,
+            duration: 0.5,
+            createdAt: Date()
+        ))
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.loadCommandHistory(profile: profile, repository: repository)
+
+        XCTAssertEqual(viewModel.persistedCommandHistory.map(\.command), ["uptime"])
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),

@@ -32,6 +32,7 @@ All notable changes to this project will be documented in this file.
 - Added shared local and GitHub Actions macOS build-test automation.
 - Added a simplified workspace command panel that executes single SSH commands and keeps per-session command history.
 - Updated the README status to reflect the active macOS implementation.
+- Added SQLite-backed command metadata history and operation logs without persisting command output.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -59,3 +60,4 @@ All notable changes to this project will be documented in this file.
 - 添加本地与 GitHub Actions 共用的 macOS 构建测试自动化。
 - 添加工作台简化命令面板，支持执行单条 SSH 命令并保留本次会话命令历史。
 - 更新 README 项目状态，使其反映当前 macOS 已进入实现阶段。
+- 添加基于 SQLite 的命令元数据历史和操作日志，不持久化命令输出。

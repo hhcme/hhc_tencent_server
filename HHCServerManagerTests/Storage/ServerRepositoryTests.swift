@@ -65,6 +65,68 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertTrue(try repository.fetchTrustedHostKeys(serverId: server.id).isEmpty)
     }
 
+    func testCommandHistoryPersistsOrdersAndCascadesWithServer() throws {
+        let repository = try makeRepository()
+        let server = makeServer()
+        try repository.upsert(server)
+
+        let first = CommandHistoryEntry(
+            id: UUID(),
+            serverId: server.id,
+            command: "whoami",
+            exitCode: 0,
+            duration: 0.123,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let second = CommandHistoryEntry(
+            id: UUID(),
+            serverId: server.id,
+            command: "uptime",
+            exitCode: 1,
+            duration: 1.5,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_010)
+        )
+
+        try repository.saveCommandHistory(first)
+        try repository.saveCommandHistory(second)
+
+        let history = try repository.fetchCommandHistory(serverId: server.id)
+        XCTAssertEqual(history.map(\.command), ["uptime", "whoami"])
+        XCTAssertEqual(history[0].exitCode, 1)
+        XCTAssertEqual(try XCTUnwrap(history[0].duration), 1.5, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(history[1].duration), 0.123, accuracy: 0.001)
+
+        try repository.deleteServer(id: server.id)
+        XCTAssertTrue(try repository.fetchCommandHistory(serverId: server.id).isEmpty)
+    }
+
+    func testOperationLogsPersistInReverseChronologicalOrder() throws {
+        let repository = try makeRepository()
+        try repository.saveOperationLog(OperationLogEntry(
+            id: UUID(),
+            scope: "ssh",
+            action: "execute_command",
+            targetId: "server-a",
+            status: "success",
+            message: "exit_code=0",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+        try repository.saveOperationLog(OperationLogEntry(
+            id: UUID(),
+            scope: "ssh",
+            action: "execute_command",
+            targetId: "server-b",
+            status: "failed",
+            message: "timeout",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_020)
+        ))
+
+        let logs = try repository.fetchOperationLogs()
+        XCTAssertEqual(logs.map(\.targetId), ["server-b", "server-a"])
+        XCTAssertEqual(logs[0].status, "failed")
+        XCTAssertEqual(logs[1].message, "exit_code=0")
+    }
+
     private func makeRepository() throws -> ServerRepository {
         ServerRepository(database: try AppDatabase.inMemory())
     }

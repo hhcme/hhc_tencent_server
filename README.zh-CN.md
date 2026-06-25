@@ -4,7 +4,7 @@
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。它的目标是以 SSH 为核心管理多台 Linux 服务器，提供类似宝塔面板的桌面端体验，并在用户主动配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-当前仓库处于 macOS 早期实现阶段。应用已经可以保存服务器配置、将凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test，并在简化命令面板中执行单条远程命令。
+当前仓库处于 macOS 早期实现阶段。应用已经可以保存服务器配置、将凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test，并在简化命令面板中执行单条远程命令和持久化命令元数据历史。
 
 ## 为什么做这个项目
 
@@ -22,7 +22,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 - 密码和私钥认证。
 - macOS Keychain 保存敏感凭据。
 - SSH 主机指纹首次确认和后续校验。
-- 真实 OpenSSH smoke test 和简化单条命令面板。
+- 真实 OpenSSH smoke test、简化单条命令面板和命令元数据历史。
 - 可选云账号接入：腾讯云、阿里云、华为云等通过 adapter 扩展。
 - 云实例发现、云资源元数据、云监控、安全组和电源操作。
 - 简化命令面板和服务器 Dashboard。
@@ -74,7 +74,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 
 ## 开发状态
 
-macOS 应用已经进入实现阶段。Phase 1 基础已经落地：SwiftUI 应用结构、本地 SQLite 持久化、Keychain 凭据、主机指纹信任、基于 OpenSSH 的真实命令执行、单元测试和 GitHub Actions CI。云厂商接入、Dashboard、SFTP、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
+macOS 应用已经进入实现阶段。Phase 1 基础已经落地：SwiftUI 应用结构、本地 SQLite 持久化、Keychain 凭据、主机指纹信任、基于 OpenSSH 的真实命令执行、命令元数据历史、操作日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。云厂商接入、Dashboard、SFTP、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
 
 ## 参与贡献
 

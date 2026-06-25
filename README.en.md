@@ -4,7 +4,7 @@ English | [中文](README.zh-CN.md)
 
 HHC Server Manager is an open-source macOS native server management client. It aims to manage multiple Linux servers through SSH and provide a desktop experience similar to Baota Panel, with optional cloud provider API enhancements for instance discovery, cloud-side metrics, security groups, and power operations.
 
-The repository is in early macOS implementation. The app can already save server profiles, store credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, and execute single remote commands from a simplified command panel.
+The repository is in early macOS implementation. The app can already save server profiles, store credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, and execute single remote commands from a simplified command panel with persisted metadata history.
 
 ## Why
 
@@ -22,7 +22,7 @@ Target users include:
 - Password and private-key authentication.
 - Sensitive credentials stored in macOS Keychain.
 - First-use SSH host key trust and follow-up verification.
-- Real OpenSSH smoke test and simplified single-command panel.
+- Real OpenSSH smoke test, simplified single-command panel, and persisted command metadata history.
 - Optional cloud account integration through provider adapters.
 - Cloud instance discovery, resource metadata, cloud metrics, security groups, and power operations.
 - Simplified command panel and server dashboard.
@@ -75,7 +75,7 @@ Target users include:
 
 ## Development Status
 
-The macOS app is now under active implementation. Phase 1 foundations are in place: SwiftUI app structure, local SQLite persistence, Keychain-backed credentials, host-key trust, OpenSSH-based real command execution, unit tests, and GitHub Actions CI. Cloud provider integration, dashboard, SFTP, deployment, package registry, and Windows native work remain planned later phases.
+The macOS app is now under active implementation. Phase 1 foundations are in place: SwiftUI app structure, local SQLite persistence, Keychain-backed credentials, host-key trust, OpenSSH-based real command execution, command metadata history, operation logs, unit tests, and GitHub Actions CI. Command output remains session-scoped and is not persisted by default. Cloud provider integration, dashboard, SFTP, deployment, package registry, and Windows native work remain planned later phases.
 
 ## Contributing
 

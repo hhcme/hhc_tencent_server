@@ -60,6 +60,25 @@ struct CommandResult: Equatable, Hashable {
     var duration: TimeInterval
 }
 
+struct CommandHistoryEntry: Identifiable, Codable, Equatable, Hashable {
+    var id: UUID
+    var serverId: UUID
+    var command: String
+    var exitCode: Int32?
+    var duration: TimeInterval?
+    var createdAt: Date
+}
+
+struct OperationLogEntry: Identifiable, Codable, Equatable, Hashable {
+    var id: UUID
+    var scope: String
+    var action: String
+    var targetId: String?
+    var status: String
+    var message: String?
+    var createdAt: Date
+}
+
 enum SSHConnectionState: Equatable, Hashable {
     case disconnected
     case connecting

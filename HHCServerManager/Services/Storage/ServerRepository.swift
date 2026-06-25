@@ -91,6 +91,65 @@ final class ServerRepository: @unchecked Sendable {
         ])
     }
 
+    func saveCommandHistory(_ entry: CommandHistoryEntry) throws {
+        try database.execute("""
+            INSERT INTO command_history (
+                id, server_id, command, exit_code, duration_ms, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        """, bindings: [
+            .text(entry.id.uuidString),
+            .text(entry.serverId.uuidString),
+            .text(entry.command),
+            entry.exitCode.map { .int(Int($0)) } ?? .null,
+            entry.duration.map { .int(Int(($0 * 1_000).rounded())) } ?? .null,
+            .text(AppDatabase.string(from: entry.createdAt)),
+        ])
+    }
+
+    func fetchCommandHistory(serverId: UUID, limit: Int = 50) throws -> [CommandHistoryEntry] {
+        try database.query("""
+            SELECT id, server_id, command, exit_code, duration_ms, created_at
+            FROM command_history
+            WHERE server_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, bindings: [
+            .text(serverId.uuidString),
+            .int(max(1, limit)),
+        ]) { statement in
+            try Self.mapCommandHistoryEntry(statement)
+        }
+    }
+
+    func saveOperationLog(_ entry: OperationLogEntry) throws {
+        try database.execute("""
+            INSERT INTO operation_logs (
+                id, scope, action, target_id, status, message, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, bindings: [
+            .text(entry.id.uuidString),
+            .text(entry.scope),
+            .text(entry.action),
+            entry.targetId.map(SQLiteValue.text) ?? .null,
+            .text(entry.status),
+            entry.message.map(SQLiteValue.text) ?? .null,
+            .text(AppDatabase.string(from: entry.createdAt)),
+        ])
+    }
+
+    func fetchOperationLogs(limit: Int = 100) throws -> [OperationLogEntry] {
+        try database.query("""
+            SELECT id, scope, action, target_id, status, message, created_at
+            FROM operation_logs
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, bindings: [
+            .int(max(1, limit)),
+        ]) { statement in
+            try Self.mapOperationLogEntry(statement)
+        }
+    }
+
     private static func mapServer(_ statement: OpaquePointer) throws -> ServerProfile {
         let id = UUID(uuidString: string(statement, 0)) ?? UUID()
         let authType = SSHAuthType(rawValue: string(statement, 5)) ?? .privateKey
@@ -121,6 +180,29 @@ final class ServerRepository: @unchecked Sendable {
         )
     }
 
+    private static func mapCommandHistoryEntry(_ statement: OpaquePointer) throws -> CommandHistoryEntry {
+        CommandHistoryEntry(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            serverId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            command: string(statement, 2),
+            exitCode: optionalInt32(statement, 3),
+            duration: optionalDuration(statement, 4),
+            createdAt: date(statement, 5)
+        )
+    }
+
+    private static func mapOperationLogEntry(_ statement: OpaquePointer) throws -> OperationLogEntry {
+        OperationLogEntry(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            scope: string(statement, 1),
+            action: string(statement, 2),
+            targetId: optionalString(statement, 3),
+            status: string(statement, 4),
+            message: optionalString(statement, 5),
+            createdAt: date(statement, 6)
+        )
+    }
+
     private static func string(_ statement: OpaquePointer, _ index: Int32) -> String {
         guard let cString = sqlite3_column_text(statement, index) else { return "" }
         return String(cString: cString)
@@ -134,5 +216,15 @@ final class ServerRepository: @unchecked Sendable {
 
     private static func date(_ statement: OpaquePointer, _ index: Int32) -> Date {
         AppDatabase.date(from: string(statement, index)) ?? Date()
+    }
+
+    private static func optionalInt32(_ statement: OpaquePointer, _ index: Int32) -> Int32? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return sqlite3_column_int(statement, index)
+    }
+
+    private static func optionalDuration(_ statement: OpaquePointer, _ index: Int32) -> TimeInterval? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return TimeInterval(sqlite3_column_int(statement, index)) / 1_000
     }
 }

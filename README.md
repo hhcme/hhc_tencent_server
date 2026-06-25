@@ -6,9 +6,9 @@ HHC Server Manager is an open-source macOS native server management client. It a
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，目标是以 SSH 为核心提供类似宝塔面板的桌面端体验，并在用户配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-> Project status: early macOS implementation. The app can already store server profiles, keep credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, and execute single remote commands from a simplified command panel.
+> Project status: early macOS implementation. The app can already store server profiles, keep credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, and execute single remote commands from a simplified command panel with persisted metadata history.
 >
-> 项目状态：macOS 早期实现阶段。当前应用已经可以保存服务器配置、将凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test，并通过简化命令面板执行单条远程命令。
+> 项目状态：macOS 早期实现阶段。当前应用已经可以保存服务器配置、将凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test，并通过简化命令面板执行单条远程命令和持久化命令元数据历史。
 
 ## Highlights / 亮点
 
@@ -16,7 +16,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - SSH-first server management with optional cloud API enhancement.
 - Credentials stored in macOS Keychain.
 - Host key verification as a first-class security requirement.
-- Server browser, dedicated server workspace, real smoke test, and simplified command panel are underway.
+- Server browser, dedicated server workspace, real smoke test, simplified command panel, and command metadata history are underway.
 - Bilingual README for the project introduction; detailed design and implementation documents are maintained in Chinese.
 - MIT licensed.
 
@@ -24,7 +24,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - SSH-first 服务器管理，云 API 作为可选增强能力。
 - SSH 密码、私钥等敏感信息存入 macOS Keychain。
 - 把主机指纹验证作为基础安全能力。
-- 服务器列表、单服务器工作台、真实 smoke test 和简化命令面板已进入实现。
+- 服务器列表、单服务器工作台、真实 smoke test、简化命令面板和命令元数据历史已进入实现。
 - README 作为项目介绍保留中英文；详细设计和实施计划默认使用中文维护。
 - 使用 MIT 开源协议。
 

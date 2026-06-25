@@ -110,9 +110,11 @@ CREATE TABLE operation_logs (
 
 ### Task 1：数据迁移
 
-- [ ] 添加云账号、云实例关联、命令历史、操作日志表。
+- [x] 添加 `command_history` 和 `operation_logs` 表，先支撑简化命令面板历史和审计基础。
+- [ ] 添加云账号和云实例关联表。
 - [ ] 为 provider/account/region/instance 建唯一约束。
-- [ ] 添加 repository 单元测试。
+- [x] 添加命令历史和操作日志 repository 单元测试。
+- [ ] 添加云账号和云实例关联 repository 单元测试。
 
 ### Task 2：云凭据存储
 
@@ -148,6 +150,8 @@ CREATE TABLE operation_logs (
 ### Task 6：简化命令面板
 
 - [ ] 实现命令输入、执行状态、取消、输出展示。
+- [x] 持久化 command、exit code、duration、created at 等命令元数据。
+- [x] 明确 stdout/stderr 默认只保留在本次会话中，不写入 SQLite。
 - [ ] stdout/stderr 分开展示。
 - [ ] 保存命令历史，不保存包含疑似密钥的命令输出。
 - [ ] 支持重复执行历史命令。

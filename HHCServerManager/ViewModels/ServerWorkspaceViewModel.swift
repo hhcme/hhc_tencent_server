@@ -7,6 +7,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var connectionState: SSHConnectionState = .disconnected
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
+    @Published var persistedCommandHistory: [CommandHistoryEntry] = []
     @Published var errorMessage: String?
     @Published var pendingHostKey: HostKeyInfo?
     private var pendingHostKeyAction: PendingHostKeyAction?
@@ -29,6 +30,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
         runSmokeTest(profile: profile, sshClient: sshClient, action: .smokeTest)
     }
 
+    func loadCommandHistory(profile: ServerProfile, repository: ServerRepository) {
+        do {
+            persistedCommandHistory = try repository.fetchCommandHistory(serverId: profile.id)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func runSmokeTest(
         profile: ServerProfile,
         sshClient: SSHClient,
@@ -43,7 +52,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 let result = try await sshClient.runSmokeTest(profile: profile)
                 await MainActor.run {
                     self.storeCommandResult(result)
-                    if action == .connect {
+                    if case .connect = action {
                         self.connectionState = result.exitCode == 0 ? .connected : .failed("Smoke test exited with \(result.exitCode).")
                     }
                     self.isRunningSmokeTest = false
@@ -57,7 +66,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
-                    if action == .connect {
+                    if case .connect = action {
                         self.connectionState = .failed(error.localizedDescription)
                     }
                     self.isRunningSmokeTest = false
@@ -66,7 +75,12 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
-    func executeCommand(_ command: String, profile: ServerProfile, sshClient: SSHClient) {
+    func executeCommand(
+        _ command: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        repository: ServerRepository? = nil
+    ) {
         let trimmedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCommand.isEmpty else {
             errorMessage = "Command cannot be empty."
@@ -82,16 +96,23 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 let result = try await sshClient.execute(trimmedCommand, profile: profile)
                 await MainActor.run {
                     self.storeCommandResult(result)
+                    self.persistCommandResult(result, profile: profile, repository: repository)
                     self.isRunningCommand = false
                 }
             } catch SSHClientError.unknownHostKey(let hostKeyInfo) {
                 await MainActor.run {
                     self.pendingHostKey = hostKeyInfo
-                    self.pendingHostKeyAction = .command(trimmedCommand)
+                    self.pendingHostKeyAction = .command(trimmedCommand, repository)
                     self.isRunningCommand = false
                 }
             } catch {
                 await MainActor.run {
+                    self.persistCommandFailure(
+                        command: trimmedCommand,
+                        error: error,
+                        profile: profile,
+                        repository: repository
+                    )
                     self.errorMessage = error.localizedDescription
                     self.isRunningCommand = false
                 }
@@ -111,8 +132,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 connect(profile: profile, sshClient: sshClient)
             case .smokeTest:
                 runSmokeTest(profile: profile, sshClient: sshClient)
-            case .command(let command):
-                executeCommand(command, profile: profile, sshClient: sshClient)
+            case let .command(command, repository):
+                executeCommand(command, profile: profile, sshClient: sshClient, repository: repository)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -132,10 +153,72 @@ final class ServerWorkspaceViewModel: ObservableObject {
         commandResult = result
         commandHistory.insert(result, at: 0)
     }
+
+    private func persistCommandResult(
+        _ result: CommandResult,
+        profile: ServerProfile,
+        repository: ServerRepository?
+    ) {
+        guard let repository else { return }
+        let entry = CommandHistoryEntry(
+            id: UUID(),
+            serverId: profile.id,
+            command: result.command,
+            exitCode: result.exitCode,
+            duration: result.duration,
+            createdAt: Date()
+        )
+        do {
+            try repository.saveCommandHistory(entry)
+            try repository.saveOperationLog(OperationLogEntry(
+                id: UUID(),
+                scope: "ssh",
+                action: "execute_command",
+                targetId: profile.id.uuidString,
+                status: result.exitCode == 0 ? "success" : "failed",
+                message: "exit_code=\(result.exitCode)",
+                createdAt: Date()
+            ))
+            persistedCommandHistory.insert(entry, at: 0)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func persistCommandFailure(
+        command: String,
+        error: Error,
+        profile: ServerProfile,
+        repository: ServerRepository?
+    ) {
+        guard let repository else { return }
+        do {
+            try repository.saveCommandHistory(CommandHistoryEntry(
+                id: UUID(),
+                serverId: profile.id,
+                command: command,
+                exitCode: nil,
+                duration: nil,
+                createdAt: Date()
+            ))
+            try repository.saveOperationLog(OperationLogEntry(
+                id: UUID(),
+                scope: "ssh",
+                action: "execute_command",
+                targetId: profile.id.uuidString,
+                status: "failed",
+                message: error.localizedDescription,
+                createdAt: Date()
+            ))
+            persistedCommandHistory = try repository.fetchCommandHistory(serverId: profile.id)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 }
 
-private enum PendingHostKeyAction: Equatable {
+private enum PendingHostKeyAction {
     case connect
     case smokeTest
-    case command(String)
+    case command(String, ServerRepository?)
 }
