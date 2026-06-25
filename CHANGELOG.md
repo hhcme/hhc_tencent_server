@@ -102,6 +102,7 @@ All notable changes to this project will be documented in this file.
 - Added Huawei Cloud VPC `security-groups` and `security-group-rules` support for read-only security group and rule inspection.
 - Generalized the macOS cloud import sheet so Tencent Cloud, Alibaba Cloud, and Huawei Cloud accounts can be selected, verified, loaded, synced, and imported through one flow.
 - Added Tencent Cloud CBS snapshot create/delete actions with provider capability gating, risk confirmation, local cache updates, remote change audit logs, and fixture-backed API tests.
+- Added Alibaba Cloud ECS snapshot create/delete actions with provider-aware delete status gating, local cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Tencent Cloud CBS disk attach/detach actions with status gating, risk confirmation, local transition cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Tencent Cloud CVM start/stop/reboot actions with status gating, risk confirmation, local transition cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Dashboard snapshot persistence so successful refreshes are cached in SQLite and restored when reopening a server workspace.
@@ -205,6 +206,7 @@ All notable changes to this project will be documented in this file.
 - 添加华为云 VPC `security-groups` 和 `security-group-rules` 安全组只读同步能力，可查看安全组和规则。
 - 泛化 macOS 云导入入口，腾讯云、阿里云和华为云账号现在可通过同一流程选择、验证、加载地域/项目、同步实例并导入 SSH profile。
 - 添加腾讯云 CBS 快照创建/删除操作，包含 provider capability gating、风险确认、本地缓存更新、远程变更审计日志和 API fixture 测试。
+- 添加阿里云 ECS 快照创建/删除操作，包含按厂商区分删除状态门禁、本地缓存更新、远程变更审计日志和 API fixture 测试。
 - 添加腾讯云 CBS 云盘挂载/卸载操作，包含状态门禁、风险确认、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。
 - 添加腾讯云 CVM 实例启动/停止/重启操作，包含状态门禁、风险确认、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。
 - 添加 Dashboard 快照持久化，成功刷新会缓存到 SQLite，重新打开服务器工作台时恢复最近快照。

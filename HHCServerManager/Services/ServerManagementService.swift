@@ -360,8 +360,8 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         guard account.enabled else {
             throw CloudProviderError.providerFailure("Cloud account is disabled.")
         }
-        if let currentStatus, currentStatus.uppercased() != "NORMAL" {
-            throw CloudProviderError.providerFailure("Only NORMAL snapshots can be deleted safely. Current status: \(currentStatus).")
+        if let currentStatus, !Self.canDeleteSnapshot(providerId: account.providerId, status: currentStatus) {
+            throw CloudProviderError.providerFailure("Only completed snapshots can be deleted safely. Current status: \(currentStatus).")
         }
         try registry.require(.snapshotActions, providerId: account.providerId)
         let capturedAt = now()
@@ -792,6 +792,18 @@ final class CloudInstanceSyncService: @unchecked Sendable {
             throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
         }
         return credential
+    }
+
+    private static func canDeleteSnapshot(providerId: CloudProviderID, status: String) -> Bool {
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch providerId {
+        case .tencentCloud:
+            return normalized == "NORMAL"
+        case .alibabaCloud:
+            return normalized == "ACCOMPLISHED"
+        case .huaweiCloud:
+            return normalized == "AVAILABLE"
+        }
     }
 }
 
@@ -5930,6 +5942,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudSnapshots,
         .cloudBilling,
         .securityGroups,
+        .snapshotActions,
     ]
 
     private let transport: AlibabaCloudHTTPTransport
@@ -6215,7 +6228,32 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         snapshotName: String,
         capturedAt: Date
     ) async throws -> CloudSnapshot {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+        let response: AlibabaCreateSnapshotResponse = try await request(
+            credential: credential,
+            host: "ecs.\(regionId).aliyuncs.com",
+            action: "CreateSnapshot",
+            queryItems: [
+                URLQueryItem(name: "DiskId", value: diskId),
+                URLQueryItem(name: "SnapshotName", value: snapshotName),
+            ]
+        )
+        guard let snapshotId = response.snapshotId, !snapshotId.isEmpty else {
+            throw CloudProviderError.providerFailure("Alibaba Cloud did not return a snapshot id.")
+        }
+        return CloudSnapshot(
+            id: UUID(),
+            accountId: accountId,
+            providerId: .alibabaCloud,
+            regionId: regionId,
+            snapshotId: snapshotId,
+            diskId: diskId,
+            name: snapshotName,
+            status: "CREATING",
+            sizeGB: nil,
+            createdAtProvider: capturedAt,
+            rawJSON: nil,
+            lastSyncedAt: capturedAt
+        )
     }
 
     func deleteSnapshot(
@@ -6223,7 +6261,14 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         snapshotId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+        let _: AlibabaDeleteSnapshotResponse = try await request(
+            credential: credential,
+            host: "ecs.\(regionId).aliyuncs.com",
+            action: "DeleteSnapshot",
+            queryItems: [
+                URLQueryItem(name: "SnapshotId", value: snapshotId),
+            ]
+        )
     }
 
     func attachDisk(
@@ -7081,6 +7126,24 @@ private struct AlibabaSnapshot: Decodable {
         case size = "Size"
         case creationTime = "CreationTime"
         case createTime = "CreateTime"
+    }
+}
+
+private struct AlibabaCreateSnapshotResponse: Decodable {
+    var snapshotId: String?
+    var requestId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case snapshotId = "SnapshotId"
+        case requestId = "RequestId"
+    }
+}
+
+private struct AlibabaDeleteSnapshotResponse: Decodable {
+    var requestId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case requestId = "RequestId"
     }
 }
 

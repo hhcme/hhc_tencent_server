@@ -2386,6 +2386,50 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(deleteLog.status, "success")
     }
 
+    func testCloudSnapshotDeleteAllowsAlibabaCompletedStatus() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .alibabaCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudSnapshots, .snapshotActions]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_350)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .alibabaCloud,
+            displayName: "Alibaba",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        try harness.repository.upsertCloudSnapshot(
+            CloudSnapshot(
+                id: UUID(),
+                accountId: account.id,
+                providerId: .alibabaCloud,
+                regionId: "ap-southeast-1",
+                snapshotId: "snap-created",
+                diskId: "disk-123",
+                name: "before-upgrade",
+                status: "accomplished",
+                sizeGB: 50,
+                createdAtProvider: capturedAt,
+                rawJSON: nil,
+                lastSyncedAt: capturedAt
+            )
+        )
+
+        try await harness.cloudInstanceSyncService.deleteSnapshot(
+            account: account,
+            regionId: "ap-southeast-1",
+            snapshotId: "snap-created",
+            currentStatus: "accomplished"
+        )
+
+        XCTAssertTrue(try harness.repository.fetchCloudSnapshots(accountId: account.id).isEmpty)
+        let logs = try harness.repository.fetchRemoteChangeLogs()
+        let deleteLog = try XCTUnwrap(logs.first { $0.action == "delete_snapshot" })
+        XCTAssertEqual(deleteLog.providerId, .alibabaCloud)
+        XCTAssertEqual(deleteLog.targetId, "snap-created")
+        XCTAssertEqual(deleteLog.status, "success")
+    }
+
     func testCloudDiskAttachmentActionsPersistCacheAndAuditLogs() async throws {
         let adapter = MockCloudProviderAdapter(
             providerId: .tencentCloud,
@@ -3561,6 +3605,70 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].queryValue("PageNumber"), "1")
         XCTAssertEqual(transport.requests[0].queryValue("PageSize"), "100")
         XCTAssertEqual(transport.requests[1].queryValue("PageNumber"), "2")
+    }
+
+    func testAlibabaCloudAdapterCreatesAndDeletesSnapshotsUsesSignedECSAPI() async throws {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockAlibabaCloudTransport(responses: [
+            """
+            {
+              "RequestId": "aliyun-create-snapshot",
+              "SnapshotId": "s-created"
+            }
+            """,
+            """
+            {
+              "RequestId": "aliyun-delete-snapshot"
+            }
+            """,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            nonce: { "nonce-snapshot-action" },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK")
+
+        let snapshot = try await adapter.createSnapshot(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-southeast-1",
+            diskId: "d-1",
+            snapshotName: "before-upgrade",
+            capturedAt: capturedAt
+        )
+        try await adapter.deleteSnapshot(
+            credential: credential,
+            regionId: "ap-southeast-1",
+            snapshotId: "s-created"
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.snapshotActions))
+        XCTAssertEqual(snapshot.snapshotId, "s-created")
+        XCTAssertEqual(snapshot.accountId, accountId)
+        XCTAssertEqual(snapshot.providerId, .alibabaCloud)
+        XCTAssertEqual(snapshot.regionId, "ap-southeast-1")
+        XCTAssertEqual(snapshot.diskId, "d-1")
+        XCTAssertEqual(snapshot.name, "before-upgrade")
+        XCTAssertEqual(snapshot.status, "CREATING")
+        XCTAssertEqual(snapshot.createdAtProvider, capturedAt)
+        XCTAssertEqual(snapshot.lastSyncedAt, capturedAt)
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-action"), "CreateSnapshot")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-version"), "2014-05-26")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-signature-nonce"), "nonce-snapshot-action")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("ACS3-HMAC-SHA256 Credential=ALIYUNAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("DiskId"), "d-1")
+        XCTAssertEqual(transport.requests[0].queryValue("SnapshotName"), "before-upgrade")
+        XCTAssertNil(transport.requests[0].queryValue("Force"))
+        XCTAssertEqual(transport.requests[1].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "x-acs-action"), "DeleteSnapshot")
+        XCTAssertEqual(transport.requests[1].queryValue("SnapshotId"), "s-created")
+        XCTAssertNil(transport.requests[1].queryValue("Force"))
     }
 
     func testAlibabaCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedECSAPI() async throws {
