@@ -2430,6 +2430,50 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(deleteLog.status, "success")
     }
 
+    func testCloudSnapshotDeleteAllowsHuaweiAvailableStatus() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .huaweiCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudSnapshots, .snapshotActions]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_360)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .huaweiCloud,
+            displayName: "Huawei",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        try harness.repository.upsertCloudSnapshot(
+            CloudSnapshot(
+                id: UUID(),
+                accountId: account.id,
+                providerId: .huaweiCloud,
+                regionId: "ap-southeast-1|project-1",
+                snapshotId: "snap-created",
+                diskId: "vol-1",
+                name: "before-upgrade",
+                status: "available",
+                sizeGB: 50,
+                createdAtProvider: capturedAt,
+                rawJSON: nil,
+                lastSyncedAt: capturedAt
+            )
+        )
+
+        try await harness.cloudInstanceSyncService.deleteSnapshot(
+            account: account,
+            regionId: "ap-southeast-1|project-1",
+            snapshotId: "snap-created",
+            currentStatus: "available"
+        )
+
+        XCTAssertTrue(try harness.repository.fetchCloudSnapshots(accountId: account.id).isEmpty)
+        let logs = try harness.repository.fetchRemoteChangeLogs()
+        let deleteLog = try XCTUnwrap(logs.first { $0.action == "delete_snapshot" })
+        XCTAssertEqual(deleteLog.providerId, .huaweiCloud)
+        XCTAssertEqual(deleteLog.targetId, "snap-created")
+        XCTAssertEqual(deleteLog.status, "success")
+    }
+
     func testCloudDiskAttachmentActionsPersistCacheAndAuditLogs() async throws {
         let adapter = MockCloudProviderAdapter(
             providerId: .tencentCloud,
@@ -4001,6 +4045,77 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].queryValue("limit"), "10")
         XCTAssertEqual(transport.requests[0].queryValue("offset"), "0")
         XCTAssertEqual(transport.requests[1].queryValue("offset"), "10")
+    }
+
+    func testHuaweiCloudAdapterCreatesAndDeletesSnapshotsUsesSignedEVSAPI() async throws {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockHuaweiCloudTransport(responses: [
+            """
+            {
+              "snapshot": {
+                "id": "snap-created",
+                "name": "before-upgrade",
+                "volume_id": "vol-1",
+                "size": 80,
+                "status": "creating",
+                "created_at": "2026-07-01T00:00:00Z"
+              }
+            }
+            """,
+            """
+            {
+              "job_id": "job-delete"
+            }
+            """,
+        ])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        let snapshot = try await adapter.createSnapshot(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-southeast-1|project-1",
+            diskId: "vol-1",
+            snapshotName: "before-upgrade",
+            capturedAt: capturedAt
+        )
+        try await adapter.deleteSnapshot(
+            credential: credential,
+            regionId: "ap-southeast-1|project-1",
+            snapshotId: "snap-created"
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.snapshotActions))
+        XCTAssertEqual(snapshot.snapshotId, "snap-created")
+        XCTAssertEqual(snapshot.accountId, accountId)
+        XCTAssertEqual(snapshot.providerId, .huaweiCloud)
+        XCTAssertEqual(snapshot.regionId, "ap-southeast-1|project-1")
+        XCTAssertEqual(snapshot.diskId, "vol-1")
+        XCTAssertEqual(snapshot.name, "before-upgrade")
+        XCTAssertEqual(snapshot.status, "creating")
+        XCTAssertEqual(snapshot.sizeGB, 80)
+        XCTAssertNotNil(snapshot.createdAtProvider)
+        XCTAssertEqual(snapshot.lastSyncedAt, capturedAt)
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].httpMethod, "POST")
+        XCTAssertEqual(transport.requests[0].url?.host, "evs.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[0].url?.path, "/v2/project-1/cloudsnapshots")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-Sdk-Date"), "20231114T221320Z")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("SDK-HMAC-SHA256 Access=HUAWEIAK") == true)
+        let createBody = try XCTUnwrap(transport.requests[0].jsonBody?["snapshot"] as? [String: Any])
+        XCTAssertEqual(createBody["name"] as? String, "before-upgrade")
+        XCTAssertEqual(createBody["volume_id"] as? String, "vol-1")
+        XCTAssertEqual(transport.requests[1].httpMethod, "DELETE")
+        XCTAssertEqual(transport.requests[1].url?.host, "evs.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[1].url?.path, "/v2/project-1/cloudsnapshots/snap-created")
+        XCTAssertNil(transport.requests[1].httpBody)
     }
 
     func testHuaweiCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedVPCAPI() async throws {

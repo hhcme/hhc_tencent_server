@@ -6478,12 +6478,14 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudDisks,
         .cloudSnapshots,
         .securityGroups,
+        .snapshotActions,
     ]
 
     private let transport: HuaweiCloudHTTPTransport
     private let now: @Sendable () -> Date
     private let timeout: TimeInterval
     private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
 
     init(
         transport: HuaweiCloudHTTPTransport = URLSessionHuaweiCloudHTTPTransport(),
@@ -6765,7 +6767,35 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         snapshotName: String,
         capturedAt: Date
     ) async throws -> CloudSnapshot {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+        let region = Self.decodeRegionId(regionId)
+        let payload = HuaweiCreateSnapshotPayload(
+            snapshot: HuaweiCreateSnapshotPayload.Snapshot(name: snapshotName, volumeId: diskId)
+        )
+        let response: HuaweiCreateSnapshotResponse = try await request(
+            credential: credential,
+            host: "evs.\(region.regionName).myhuaweicloud.com",
+            path: "/v2/\(CloudSignature.percentEncode(region.projectId))/cloudsnapshots",
+            queryItems: [],
+            method: "POST",
+            body: try encoder.encode(payload)
+        )
+        guard let snapshot = response.snapshot, !snapshot.id.isEmpty else {
+            throw CloudProviderError.providerFailure("Huawei Cloud did not return a snapshot id.")
+        }
+        return CloudSnapshot(
+            id: UUID(),
+            accountId: accountId,
+            providerId: .huaweiCloud,
+            regionId: regionId,
+            snapshotId: snapshot.id,
+            diskId: snapshot.volumeId ?? diskId,
+            name: snapshot.name ?? snapshotName,
+            status: snapshot.status ?? "creating",
+            sizeGB: snapshot.size,
+            createdAtProvider: snapshot.createdAt.flatMap(Self.parseHuaweiDate) ?? capturedAt,
+            rawJSON: nil,
+            lastSyncedAt: capturedAt
+        )
     }
 
     func deleteSnapshot(
@@ -6773,7 +6803,14 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         snapshotId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+        let region = Self.decodeRegionId(regionId)
+        let _: HuaweiDeleteSnapshotResponse = try await request(
+            credential: credential,
+            host: "evs.\(region.regionName).myhuaweicloud.com",
+            path: "/v2/\(CloudSignature.percentEncode(region.projectId))/cloudsnapshots/\(CloudSignature.percentEncode(snapshotId))",
+            queryItems: [],
+            method: "DELETE"
+        )
     }
 
     func attachDisk(
@@ -6821,9 +6858,11 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         credential: CloudProviderCredential,
         host: String,
         path: String,
-        queryItems: [URLQueryItem]
+        queryItems: [URLQueryItem],
+        method: String = "GET",
+        body: Data = Data()
     ) async throws -> Response {
-        let request = try signedRequest(credential: credential, host: host, path: path, queryItems: queryItems)
+        let request = try signedRequest(credential: credential, host: host, path: path, queryItems: queryItems, method: method, body: body)
         let (data, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
             try await self.transport.send(request)
         }
@@ -6841,7 +6880,9 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         credential: CloudProviderCredential,
         host: String,
         path: String,
-        queryItems: [URLQueryItem]
+        queryItems: [URLQueryItem],
+        method: String = "GET",
+        body: Data = Data()
     ) throws -> URLRequest {
         var components = URLComponents()
         components.scheme = "https"
@@ -6857,13 +6898,14 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         let canonicalURI = path.hasSuffix("/") ? path : "\(path)"
         let signedHeaders = "host;x-sdk-date"
         let canonicalHeaders = "host:\(host)\nx-sdk-date:\(date)\n"
+        let payloadHash = CloudSignature.sha256Hex(body)
         let canonicalRequest = [
-            "GET",
+            method,
             canonicalURI,
             canonicalQuery,
             canonicalHeaders,
             signedHeaders,
-            CloudSignature.sha256Hex(Data()),
+            payloadHash,
         ].joined(separator: "\n")
         let stringToSign = [
             "SDK-HMAC-SHA256",
@@ -6874,10 +6916,14 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         let authorization = "SDK-HMAC-SHA256 Access=\(credential.secretId), SignedHeaders=\(signedHeaders), Signature=\(signature)"
 
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        request.httpMethod = method
         request.setValue(host, forHTTPHeaderField: "Host")
         request.setValue(date, forHTTPHeaderField: "X-Sdk-Date")
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        if !body.isEmpty {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         return request
     }
 
@@ -7341,6 +7387,32 @@ private struct HuaweiVolumesDetailResponse: Decodable {
 
 private struct HuaweiSnapshotsDetailResponse: Decodable {
     var snapshots: [HuaweiSnapshot]
+}
+
+private struct HuaweiCreateSnapshotPayload: Encodable {
+    var snapshot: Snapshot
+
+    struct Snapshot: Encodable {
+        var name: String
+        var volumeId: String
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case volumeId = "volume_id"
+        }
+    }
+}
+
+private struct HuaweiCreateSnapshotResponse: Decodable {
+    var snapshot: HuaweiSnapshot?
+}
+
+private struct HuaweiDeleteSnapshotResponse: Decodable {
+    var jobId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case jobId = "job_id"
+    }
 }
 
 private struct HuaweiSecurityGroupsResponse: Decodable {
