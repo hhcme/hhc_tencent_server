@@ -193,6 +193,145 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testTencentCloudAdapterFetchRegionsSignsRequestAndParsesResponse() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "TotalCount": 2,
+                "RegionSet": [
+                  {"Region": "ap-guangzhou", "RegionName": "South China (Guangzhou)", "RegionState": "AVAILABLE"},
+                  {"Region": "ap-shanghai", "RegionName": "East China (Shanghai)", "RegionState": "UNAVAILABLE"}
+                ],
+                "RequestId": "request-1"
+              }
+            }
+            """
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+
+        let regions = try await adapter.fetchRegions(credential: CloudProviderCredential(
+            secretId: "AKIDEXAMPLE",
+            secretKey: "SECRETEXAMPLE"
+        ))
+
+        XCTAssertEqual(regions, [
+            CloudRegion(id: "ap-guangzhou", displayName: "South China (Guangzhou)", available: true),
+            CloudRegion(id: "ap-shanghai", displayName: "East China (Shanghai)", available: false),
+        ])
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.host, "region.intl.tencentcloudapi.com")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-TC-Action"), "DescribeRegions")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-TC-Version"), "2022-06-27")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Host"), "region.intl.tencentcloudapi.com")
+        XCTAssertNil(request.value(forHTTPHeaderField: "X-TC-Region"))
+        XCTAssertTrue(request.value(forHTTPHeaderField: "Authorization")?.contains(
+            "Credential=AKIDEXAMPLE/2019-02-25/region/tc3_request"
+        ) == true)
+
+        let payload = try XCTUnwrap(request.jsonBody)
+        XCTAssertEqual(payload["Product"] as? String, "cvm")
+        XCTAssertEqual(payload["Scene"] as? Int, 1)
+    }
+
+    func testTencentCloudAdapterFetchInstancesPaginatesAndParsesResponse() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "TotalCount": 2,
+                "InstanceSet": [
+                  {
+                    "InstanceId": "ins-1",
+                    "InstanceName": "prod-1",
+                    "InstanceState": "RUNNING",
+                    "InstanceType": "S5.SMALL1",
+                    "PublicIpAddresses": ["203.0.113.1"],
+                    "PrivateIpAddresses": ["10.0.0.2"],
+                    "Placement": {"Zone": "ap-guangzhou-3"},
+                    "VirtualPrivateCloud": {"VpcId": "vpc-1"}
+                  }
+                ],
+                "RequestId": "request-1"
+              }
+            }
+            """,
+            """
+            {
+              "Response": {
+                "TotalCount": 2,
+                "InstanceSet": [
+                  {
+                    "InstanceId": "ins-2",
+                    "InstanceName": "prod-2",
+                    "InstanceState": "STOPPED",
+                    "InstanceType": "S5.MEDIUM2",
+                    "PublicIpAddresses": [],
+                    "PrivateIpAddresses": ["10.0.0.3"],
+                    "Placement": {"Zone": "ap-guangzhou-4"},
+                    "VirtualPrivateCloud": {"VpcId": "vpc-2"}
+                  }
+                ],
+                "RequestId": "request-2"
+              }
+            }
+            """
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+
+        let instances = try await adapter.fetchInstances(
+            credential: CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE"),
+            regionId: "ap-guangzhou"
+        )
+
+        XCTAssertEqual(instances.map(\.id), ["ins-1", "ins-2"])
+        XCTAssertEqual(instances[0].publicIp, "203.0.113.1")
+        XCTAssertEqual(instances[0].privateIp, "10.0.0.2")
+        XCTAssertEqual(instances[0].zoneId, "ap-guangzhou-3")
+        XCTAssertEqual(instances[1].publicIp, nil)
+        XCTAssertEqual(instances[1].status, "STOPPED")
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Region"), "ap-guangzhou")
+        XCTAssertEqual(transport.requests[0].jsonBody?["Offset"] as? Int, 0)
+        XCTAssertEqual(transport.requests[1].jsonBody?["Offset"] as? Int, 1)
+    }
+
+    func testTencentCloudAdapterMapsProviderErrors() async {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "Error": {
+                  "Code": "AuthFailure.SecretIdNotFound",
+                  "Message": "secret id not found"
+                },
+                "RequestId": "request-error"
+              }
+            }
+            """
+        ])
+        let adapter = TencentCloudAdapter(transport: transport, timeout: 1)
+
+        do {
+            _ = try await adapter.fetchRegions(credential: CloudProviderCredential(
+                secretId: "AKIDEXAMPLE",
+                secretKey: "SECRETEXAMPLE"
+            ))
+            XCTFail("Expected authentication failure.")
+        } catch {
+            XCTAssertEqual(error as? CloudProviderError, .authenticationFailed("secret id not found"))
+        }
+    }
+
     private final class Harness {
         let repository: ServerRepository
         let keychain: KeychainService
@@ -237,5 +376,33 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
                 rawJSON: nil
             ),
         ]
+    }
+}
+
+private final class MockTencentCloudTransport: TencentCloudHTTPTransport, @unchecked Sendable {
+    private var responses: [String]
+    private(set) var requests: [URLRequest] = []
+
+    init(responses: [String]) {
+        self.responses = responses
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let body = responses.isEmpty ? #"{"Response":{"RequestId":"empty"}}"# : responses.removeFirst()
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: [:]
+        )!
+        return (Data(body.utf8), response)
+    }
+}
+
+private extension URLRequest {
+    var jsonBody: [String: Any]? {
+        guard let httpBody else { return nil }
+        return try? JSONSerialization.jsonObject(with: httpBody) as? [String: Any]
     }
 }

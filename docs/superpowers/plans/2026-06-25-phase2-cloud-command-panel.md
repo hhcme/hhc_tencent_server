@@ -133,12 +133,12 @@ CREATE TABLE operation_logs (
 
 ### Task 4：Tencent Cloud 只读 adapter
 
-- [ ] 验证当前 Tencent Cloud API/SDK 方案。
-- [ ] 实现凭据校验。
-- [ ] 实现地域列表。
-- [ ] 实现 CVM 实例列表和分页。
-- [ ] 归一化实例状态、IP、规格、地域、可用区、VPC。
-- [ ] 为 API 响应解析添加 fixture 测试，不提交真实凭据。
+- [x] 验证当前 Tencent Cloud API/SDK 方案，采用 API 3.0 + TC3-HMAC-SHA256 直接签名请求。
+- [x] 实现凭据校验入口，当前通过 Region 查询验证。
+- [x] 实现地域列表。
+- [x] 实现 CVM 实例列表和分页。
+- [x] 归一化实例状态、IP、规格、地域、可用区、VPC。
+- [x] 为 API 响应解析添加 fixture 测试，不提交真实凭据。
 
 ### Task 5：实例同步和关联
 
@@ -162,7 +162,7 @@ CREATE TABLE operation_logs (
 
 - [x] 云账号 repository 测试。
 - [x] 云凭据 Keychain 测试。
-- [ ] Tencent Cloud response parser 测试。
+- [x] Tencent Cloud response parser 测试。
 - [ ] 实例同步 upsert 测试。
 - [ ] 命令历史测试。
 - [ ] 命令面板 ViewModel 测试。

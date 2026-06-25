@@ -21,7 +21,7 @@ final class AppState: ObservableObject {
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
-            cloudProviderRegistry = CloudProviderRegistry()
+            cloudProviderRegistry = CloudProviderRegistry(adapters: [TencentCloudAdapter()])
             sshClient = OpenSSHClient(repository: repository, keychain: keychain)
             reloadServers()
         } catch {
@@ -32,7 +32,7 @@ final class AppState: ObservableObject {
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
-            cloudProviderRegistry = CloudProviderRegistry()
+            cloudProviderRegistry = CloudProviderRegistry(adapters: [TencentCloudAdapter()])
             sshClient = OpenSSHClient(repository: repository, keychain: keychain)
         }
     }

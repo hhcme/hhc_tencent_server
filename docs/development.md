@@ -44,6 +44,7 @@ xcodebuild \
 - KeychainService：SSH password、private key、云 SecretId/SecretKey 写入、读取、覆盖、删除。
 - ServerManagementService / CloudAccountService：服务器与云账号创建、更新、删除、凭据清理。
 - Cloud provider foundation：adapter 协议、provider registry、capability 查询、统一错误、超时包装。
+- TencentCloudAdapter：TC3 签名、Region 查询、CVM DescribeInstances 查询、分页、provider 错误映射、mock transport fixture 测试。
 - AddServerViewModel：表单校验。
 - ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行、本次会话输出历史、持久化命令元数据历史。
 - SSHIntegrationTests：通过环境变量启用，默认跳过。
@@ -97,7 +98,7 @@ export HHC_TEST_SSH_PASSPHRASE=""
 - 当前 SSH 适配层是 bootstrap OpenSSH adapter，用于先打通真实服务器、主机指纹信任、smoke test 和单条命令执行。
 - 命令面板只持久化 command、exit code、duration 和 created at；stdout/stderr 默认只保留在本次工作台会话中，避免把敏感输出写入 SQLite。
 - 云账号当前只实现本地元数据、云实例关联表和 Keychain 云凭据命名空间；真实 Tencent Cloud API 调用仍属于后续 adapter 工作。
-- CloudProviderAdapter 已定义 provider 能力、凭据校验、地域查询和实例查询接口；当前 registry/timeout/error 基础可测试，尚未接入真实腾讯云请求。
+- TencentCloudAdapter 已接入腾讯云 API 3.0 TC3-HMAC-SHA256 签名流程，并实现 Region 与 CVM instance 只读查询；默认测试使用 mock transport，不提交真实 SecretId/SecretKey。
 - `SSHClient` 协议已经隔离 UI/ViewModel 与具体 SSH 实现，后续可以替换为 SwiftNIO SSH。
 - OpenSSH adapter 当前支持私钥认证，也支持通过临时 `SSH_ASKPASS` 脚本进行 password 认证。密码从 Keychain 读出后只注入当前 SSH 子进程环境，脚本执行后立即删除。
 - 后续仍需要把 bootstrap OpenSSH adapter 替换或补齐为 SwiftNIO SSH 正式实现。

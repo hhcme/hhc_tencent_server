@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 final class ServerManagementService: @unchecked Sendable {
@@ -264,6 +265,376 @@ enum CloudProviderRequestRunner {
             group.cancelAll()
             return value
         }
+    }
+}
+
+protocol TencentCloudHTTPTransport: Sendable {
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+}
+
+final class URLSessionTencentCloudHTTPTransport: TencentCloudHTTPTransport, @unchecked Sendable {
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudProviderError.networkFailure("Tencent Cloud returned a non-HTTP response.")
+        }
+        return (data, httpResponse)
+    }
+}
+
+final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
+    let providerId: CloudProviderID = .tencentCloud
+    let displayName = "Tencent Cloud"
+    let capabilities: Set<CloudCapability> = [.regions, .instanceDiscovery, .instanceMetadata]
+
+    private let transport: TencentCloudHTTPTransport
+    private let now: @Sendable () -> Date
+    private let timeout: TimeInterval
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    init(
+        transport: TencentCloudHTTPTransport = URLSessionTencentCloudHTTPTransport(),
+        now: @escaping @Sendable () -> Date = Date.init,
+        timeout: TimeInterval = 15
+    ) {
+        self.transport = transport
+        self.now = now
+        self.timeout = timeout
+    }
+
+    func validateCredential(_ credential: CloudProviderCredential) async throws {
+        _ = try await fetchRegions(credential: credential)
+    }
+
+    func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion] {
+        let payload = TencentDescribeRegionsPayload(product: "cvm", scene: 1)
+        let response: TencentCloudEnvelope<TencentDescribeRegionsResponse> = try await request(
+            credential: credential,
+            endpoint: TencentCloudEndpoint(
+                host: "region.intl.tencentcloudapi.com",
+                service: "region",
+                action: "DescribeRegions",
+                version: "2022-06-27",
+                region: nil
+            ),
+            payload: payload
+        )
+        try throwIfNeeded(response.response.error)
+        return response.response.regionSet?.map {
+            CloudRegion(
+                id: $0.region,
+                displayName: $0.regionName,
+                available: $0.regionState == "AVAILABLE"
+            )
+        } ?? []
+    }
+
+    func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance] {
+        var offset = 0
+        let limit = 100
+        var instances: [CloudProviderInstance] = []
+        var totalCount: Int?
+
+        repeat {
+            let payload = TencentDescribeInstancesPayload(offset: offset, limit: limit)
+            let response: TencentCloudEnvelope<TencentDescribeInstancesResponse> = try await request(
+                credential: credential,
+                endpoint: TencentCloudEndpoint(
+                    host: "cvm.intl.tencentcloudapi.com",
+                    service: "cvm",
+                    action: "DescribeInstances",
+                    version: "2017-03-12",
+                    region: regionId
+                ),
+                payload: payload
+            )
+            try throwIfNeeded(response.response.error)
+
+            let page = response.response.instanceSet ?? []
+            instances.append(contentsOf: page.map { instance in
+                CloudProviderInstance(
+                    id: instance.instanceId,
+                    providerId: .tencentCloud,
+                    regionId: regionId,
+                    displayName: instance.instanceName,
+                    publicIp: instance.publicIpAddresses?.first,
+                    privateIp: instance.privateIpAddresses?.first,
+                    status: instance.instanceState,
+                    instanceType: instance.instanceType,
+                    zoneId: instance.placement?.zone,
+                    vpcId: instance.virtualPrivateCloud?.vpcId,
+                    rawJSON: instance.rawJSONString
+                )
+            })
+            totalCount = response.response.totalCount
+            offset += page.count
+        } while offset < (totalCount ?? 0) && offset > 0
+
+        return instances
+    }
+
+    private func request<Payload: Encodable, Response: Decodable>(
+        credential: CloudProviderCredential,
+        endpoint: TencentCloudEndpoint,
+        payload: Payload
+    ) async throws -> TencentCloudEnvelope<Response> {
+        let body = try encoder.encode(payload)
+        let request = try signedRequest(credential: credential, endpoint: endpoint, body: body)
+        let (data, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
+            try await self.transport.send(request)
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw CloudProviderError.networkFailure("HTTP \(httpResponse.statusCode)")
+        }
+        do {
+            return try decoder.decode(TencentCloudEnvelope<Response>.self, from: data)
+        } catch {
+            throw CloudProviderError.providerFailure("Could not decode Tencent Cloud response: \(error.localizedDescription)")
+        }
+    }
+
+    private func signedRequest(
+        credential: CloudProviderCredential,
+        endpoint: TencentCloudEndpoint,
+        body: Data
+    ) throws -> URLRequest {
+        guard let url = URL(string: "https://\(endpoint.host)/") else {
+            throw CloudProviderError.providerFailure("Invalid Tencent Cloud endpoint: \(endpoint.host)")
+        }
+
+        let timestamp = Int(now().timeIntervalSince1970)
+        let date = Self.utcDateString(timestamp: timestamp)
+        let contentType = "application/json; charset=utf-8"
+        let authorization = Self.authorization(
+            credential: credential,
+            service: endpoint.service,
+            host: endpoint.host,
+            contentType: contentType,
+            body: body,
+            date: date,
+            timestamp: timestamp
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(endpoint.host, forHTTPHeaderField: "Host")
+        request.setValue(endpoint.action, forHTTPHeaderField: "X-TC-Action")
+        request.setValue("\(timestamp)", forHTTPHeaderField: "X-TC-Timestamp")
+        request.setValue(endpoint.version, forHTTPHeaderField: "X-TC-Version")
+        if let region = endpoint.region {
+            request.setValue(region, forHTTPHeaderField: "X-TC-Region")
+        }
+        return request
+    }
+
+    private func throwIfNeeded(_ error: TencentCloudAPIError?) throws {
+        guard let error else { return }
+        if error.code.contains("AuthFailure") {
+            throw CloudProviderError.authenticationFailed(error.message)
+        }
+        if error.code.contains("Unauthorized") || error.code.contains("UnsupportedOperation") {
+            throw CloudProviderError.permissionDenied(error.message)
+        }
+        if error.code.contains("LimitExceeded") || error.code.contains("RequestLimitExceeded") {
+            throw CloudProviderError.rateLimited(error.message)
+        }
+        throw CloudProviderError.providerFailure("\(error.code): \(error.message)")
+    }
+
+    private static func authorization(
+        credential: CloudProviderCredential,
+        service: String,
+        host: String,
+        contentType: String,
+        body: Data,
+        date: String,
+        timestamp: Int
+    ) -> String {
+        let canonicalHeaders = "content-type:\(contentType)\nhost:\(host)\n"
+        let signedHeaders = "content-type;host"
+        let hashedPayload = sha256Hex(body)
+        let canonicalRequest = [
+            "POST",
+            "/",
+            "",
+            canonicalHeaders,
+            signedHeaders,
+            hashedPayload,
+        ].joined(separator: "\n")
+        let credentialScope = "\(date)/\(service)/tc3_request"
+        let stringToSign = [
+            "TC3-HMAC-SHA256",
+            "\(timestamp)",
+            credentialScope,
+            sha256Hex(Data(canonicalRequest.utf8)),
+        ].joined(separator: "\n")
+
+        let secretDate = hmacSHA256(key: Data("TC3\(credential.secretKey)".utf8), data: Data(date.utf8))
+        let secretService = hmacSHA256(key: secretDate, data: Data(service.utf8))
+        let secretSigning = hmacSHA256(key: secretService, data: Data("tc3_request".utf8))
+        let signature = hmacSHA256Hex(key: secretSigning, data: Data(stringToSign.utf8))
+
+        return "TC3-HMAC-SHA256 Credential=\(credential.secretId)/\(credentialScope), SignedHeaders=\(signedHeaders), Signature=\(signature)"
+    }
+
+    private static func utcDateString(timestamp: Int) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func hmacSHA256(key: Data, data: Data) -> Data {
+        let key = SymmetricKey(data: key)
+        return Data(HMAC<SHA256>.authenticationCode(for: data, using: key))
+    }
+
+    private static func hmacSHA256Hex(key: Data, data: Data) -> String {
+        hmacSHA256(key: key, data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private struct TencentCloudEndpoint {
+    var host: String
+    var service: String
+    var action: String
+    var version: String
+    var region: String?
+}
+
+private struct TencentDescribeRegionsPayload: Encodable {
+    var product: String
+    var scene: Int
+
+    enum CodingKeys: String, CodingKey {
+        case product = "Product"
+        case scene = "Scene"
+    }
+}
+
+private struct TencentDescribeInstancesPayload: Encodable {
+    var offset: Int
+    var limit: Int
+
+    enum CodingKeys: String, CodingKey {
+        case offset = "Offset"
+        case limit = "Limit"
+    }
+}
+
+private struct TencentCloudEnvelope<Response: Decodable>: Decodable {
+    var response: Response
+
+    enum CodingKeys: String, CodingKey {
+        case response = "Response"
+    }
+}
+
+private struct TencentCloudAPIError: Decodable, Equatable {
+    var code: String
+    var message: String
+
+    enum CodingKeys: String, CodingKey {
+        case code = "Code"
+        case message = "Message"
+    }
+}
+
+private struct TencentDescribeRegionsResponse: Decodable {
+    var totalCount: Int?
+    var regionSet: [TencentRegionInfo]?
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCount = "TotalCount"
+        case regionSet = "RegionSet"
+        case error = "Error"
+    }
+}
+
+private struct TencentRegionInfo: Decodable {
+    var region: String
+    var regionName: String
+    var regionState: String?
+
+    enum CodingKeys: String, CodingKey {
+        case region = "Region"
+        case regionName = "RegionName"
+        case regionState = "RegionState"
+    }
+}
+
+private struct TencentDescribeInstancesResponse: Decodable {
+    var totalCount: Int?
+    var instanceSet: [TencentInstance]?
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCount = "TotalCount"
+        case instanceSet = "InstanceSet"
+        case error = "Error"
+    }
+}
+
+private struct TencentInstance: Decodable {
+    var instanceId: String
+    var instanceName: String?
+    var instanceState: String?
+    var instanceType: String?
+    var publicIpAddresses: [String]?
+    var privateIpAddresses: [String]?
+    var placement: TencentPlacement?
+    var virtualPrivateCloud: TencentVirtualPrivateCloud?
+    var rawJSONString: String?
+
+    enum CodingKeys: String, CodingKey {
+        case instanceId = "InstanceId"
+        case instanceName = "InstanceName"
+        case instanceState = "InstanceState"
+        case instanceType = "InstanceType"
+        case publicIpAddresses = "PublicIpAddresses"
+        case privateIpAddresses = "PrivateIpAddresses"
+        case placement = "Placement"
+        case virtualPrivateCloud = "VirtualPrivateCloud"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        instanceId = try container.decode(String.self, forKey: .instanceId)
+        instanceName = try container.decodeIfPresent(String.self, forKey: .instanceName)
+        instanceState = try container.decodeIfPresent(String.self, forKey: .instanceState)
+        instanceType = try container.decodeIfPresent(String.self, forKey: .instanceType)
+        publicIpAddresses = try container.decodeIfPresent([String].self, forKey: .publicIpAddresses)
+        privateIpAddresses = try container.decodeIfPresent([String].self, forKey: .privateIpAddresses)
+        placement = try container.decodeIfPresent(TencentPlacement.self, forKey: .placement)
+        virtualPrivateCloud = try container.decodeIfPresent(TencentVirtualPrivateCloud.self, forKey: .virtualPrivateCloud)
+        rawJSONString = nil
+    }
+}
+
+private struct TencentPlacement: Decodable {
+    var zone: String?
+
+    enum CodingKeys: String, CodingKey {
+        case zone = "Zone"
+    }
+}
+
+private struct TencentVirtualPrivateCloud: Decodable {
+    var vpcId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case vpcId = "VpcId"
     }
 }
 

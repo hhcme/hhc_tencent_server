@@ -25,6 +25,7 @@ Target users include:
 - Real OpenSSH smoke test, simplified single-command panel, and persisted command metadata history.
 - Cloud account metadata and cloud credential storage foundation.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper.
+- Tencent Cloud read-only adapter with TC3 request signing plus Region and CVM instance query parsing.
 - Optional cloud account integration through provider adapters.
 - Cloud instance discovery, resource metadata, cloud metrics, security groups, and power operations.
 - Simplified command panel and server dashboard.
@@ -77,7 +78,7 @@ Target users include:
 
 ## Development Status
 
-The macOS app is now under active implementation. Phase 1 foundations are in place, and Phase 2 foundations have started: SwiftUI app structure, local SQLite persistence, Keychain-backed SSH/cloud credentials, host-key trust, OpenSSH-based real command execution, command metadata history, cloud account metadata, cloud instance links, provider adapter registry, normalized cloud errors, operation logs, unit tests, and GitHub Actions CI. Command output remains session-scoped and is not persisted by default. Tencent Cloud API integration, dashboard, SFTP, deployment, package registry, and Windows native work remain planned later phases.
+The macOS app is now under active implementation. Phase 1 foundations are in place, and Phase 2 foundations have started: SwiftUI app structure, local SQLite persistence, Keychain-backed SSH/cloud credentials, host-key trust, OpenSSH-based real command execution, command metadata history, cloud account metadata, cloud instance links, provider adapter registry, normalized cloud errors, Tencent Cloud TC3 request signing, Region/CVM instance response parsing, operation logs, unit tests, and GitHub Actions CI. Command output remains session-scoped and is not persisted by default. Dashboard, SFTP, deployment, package registry, and Windows native work remain planned later phases.
 
 ## Contributing
 
