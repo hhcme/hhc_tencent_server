@@ -55,6 +55,7 @@ All notable changes to this project will be documented in this file.
 - Added Alibaba Cloud CloudMonitor `DescribeMetricList` support for linked ECS Cloud CPU metrics.
 - Added Huawei Cloud Eye `metric-data` support for linked ECS Cloud CPU metrics.
 - Added Huawei Cloud instance and EVS disk billing-state sync derived from ECS/EVS metadata.
+- Hardened Dashboard `/etc/os-release` parsing and added Ubuntu/Debian/CentOS/AlmaLinux fixture coverage.
 - Started Phase 4 Services with systemd unit listing, strict `.service` unit validation, journal reading, confirmed start/stop/restart/reload actions, UI wiring, tests, and read-only real-server validation.
 - Added Cron workspace foundations with crontab reading, entry parsing, add/enable/disable/delete flows, pre-install remote backups, confirmation UI, tests, and read-only real-server validation.
 - Added `remote_change_logs` persistence for remote environment changes and wired systemd/Cron write actions to before/after/status audit records.

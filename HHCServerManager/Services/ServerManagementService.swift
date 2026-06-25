@@ -3423,12 +3423,78 @@ final class DashboardService: @unchecked Sendable {
     }
 
     static func parseOSRelease(_ text: String) -> (name: String?, version: String?) {
-        let values = Dictionary(uniqueKeysWithValues: text.split(separator: "\n").compactMap { line -> (String, String)? in
-            let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { return nil }
-            return (parts[0], parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"")))
-        })
-        return (values["PRETTY_NAME"] ?? values["NAME"], values["VERSION_ID"] ?? values["VERSION"])
+        let values = Self.parseOSReleaseFields(text)
+        let fallbackName = Self.compactOSName(name: values["NAME"], version: values["VERSION"])
+        return (
+            Self.nonEmptyOSReleaseValue(values["PRETTY_NAME"]) ?? fallbackName,
+            Self.nonEmptyOSReleaseValue(values["VERSION_ID"]) ?? Self.nonEmptyOSReleaseValue(values["VERSION"])
+        )
+    }
+
+    private static func parseOSReleaseFields(_ text: String) -> [String: String] {
+        var values: [String: String] = [:]
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty,
+                  !line.hasPrefix("#"),
+                  let separatorIndex = line.firstIndex(of: "=")
+            else { continue }
+
+            let key = String(line[..<separatorIndex]).trimmingCharacters(in: .whitespaces)
+            guard key.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil else { continue }
+
+            let rawValue = String(line[line.index(after: separatorIndex)...]).trimmingCharacters(in: .whitespaces)
+            values[key] = Self.decodeOSReleaseValue(rawValue)
+        }
+        return values
+    }
+
+    private static func decodeOSReleaseValue(_ rawValue: String) -> String {
+        guard rawValue.count >= 2,
+              let first = rawValue.first,
+              let last = rawValue.last,
+              (first == "\"" && last == "\"") || (first == "'" && last == "'")
+        else { return rawValue }
+
+        let body = rawValue.dropFirst().dropLast()
+        guard first == "\"" else { return String(body) }
+
+        var decoded = ""
+        var isEscaping = false
+        for character in body {
+            if isEscaping {
+                switch character {
+                case "\"", "\\", "$", "`":
+                    decoded.append(character)
+                case "n":
+                    decoded.append("\n")
+                case "t":
+                    decoded.append("\t")
+                default:
+                    decoded.append(character)
+                }
+                isEscaping = false
+            } else if character == "\\" {
+                isEscaping = true
+            } else {
+                decoded.append(character)
+            }
+        }
+        if isEscaping {
+            decoded.append("\\")
+        }
+        return decoded
+    }
+
+    private static func compactOSName(name: String?, version: String?) -> String? {
+        [Self.nonEmptyOSReleaseValue(name), Self.nonEmptyOSReleaseValue(version)]
+            .compactMap(\.self)
+            .joined(separator: " ")
+            .nilIfEmpty
+    }
+
+    private static func nonEmptyOSReleaseValue(_ value: String?) -> String? {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
     static func parseYesNo(_ text: String) -> Bool {

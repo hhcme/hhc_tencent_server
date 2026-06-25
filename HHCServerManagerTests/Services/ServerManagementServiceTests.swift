@@ -1719,6 +1719,53 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(disk, "10.0 GiB / 20.0 GiB")
     }
 
+    func testDashboardServiceParsesCommonOSReleaseVariants() {
+        let ubuntu = DashboardService.parseOSRelease("""
+        NAME="Ubuntu"
+        VERSION_ID="24.04"
+        PRETTY_NAME="Ubuntu 24.04.2 LTS"
+        """)
+        XCTAssertEqual(ubuntu.name, "Ubuntu 24.04.2 LTS")
+        XCTAssertEqual(ubuntu.version, "24.04")
+
+        let debian = DashboardService.parseOSRelease("""
+        NAME=Debian GNU/Linux
+        VERSION="12 (bookworm)"
+        VERSION_ID="12"
+        """)
+        XCTAssertEqual(debian.name, "Debian GNU/Linux 12 (bookworm)")
+        XCTAssertEqual(debian.version, "12")
+
+        let centOS = DashboardService.parseOSRelease("""
+        NAME="CentOS Linux"
+        VERSION="7 (Core)"
+        ID="centos"
+        VERSION_ID="7"
+        PRETTY_NAME="CentOS Linux 7 (Core)"
+        """)
+        XCTAssertEqual(centOS.name, "CentOS Linux 7 (Core)")
+        XCTAssertEqual(centOS.version, "7")
+
+        let almaLinux = DashboardService.parseOSRelease("""
+        # AlmaLinux common layout
+        NAME="AlmaLinux"
+        VERSION="9.4 (Seafoam Ocelot)"
+        ID="almalinux"
+        VERSION_ID="9.4"
+        PRETTY_NAME="AlmaLinux 9.4 (Seafoam Ocelot)"
+        """)
+        XCTAssertEqual(almaLinux.name, "AlmaLinux 9.4 (Seafoam Ocelot)")
+        XCTAssertEqual(almaLinux.version, "9.4")
+
+        let escaped = DashboardService.parseOSRelease("""
+        NAME='Custom Linux'
+        VERSION_ID='1.0'
+        PRETTY_NAME="Custom \\"Linux\\""
+        """)
+        XCTAssertEqual(escaped.name, "Custom \"Linux\"")
+        XCTAssertEqual(escaped.version, "1.0")
+    }
+
     func testSystemdServiceManagerParsesUnitListAndValidatesUnitNames() throws {
         let units = SystemdServiceManager.parseUnitList("""
         nginx.service\tloaded\tactive\trunning\tA high performance web server
