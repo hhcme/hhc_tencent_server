@@ -60,6 +60,7 @@ All notable changes to this project will be documented in this file.
 - Added Environment workspace foundations for common `.env`, `/etc/default`, `/etc/sysconfig`, and systemd drop-in env files with guarded discovery, UTF-8 editing, remote backups, confirmation UI, and audit coverage.
 - Added Tencent Cloud security group inspection foundations with VPC security group/rule read APIs, linked-account/region discovery, read-only SwiftUI workspace display, and tests.
 - Added a shared remote operation risk model and wired existing dangerous confirmations to show risk level, target, command preview, impact, recovery, and audit expectations.
+- Added local Tencent Cloud security group rule diff previews with before/after counts, command previews, risk warnings, and disabled write-action affordance.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -115,3 +116,4 @@ All notable changes to this project will be documented in this file.
 - 添加环境变量工作台基础，支持常见 `.env`、`/etc/default`、`/etc/sysconfig` 和 systemd drop-in 环境文件的受限发现、UTF-8 编辑、远端备份、确认 UI 和审计覆盖。
 - 添加腾讯云安全组查看基础，支持 VPC 安全组/规则只读 API、已关联账号/地域发现、SwiftUI 工作台只读展示和测试。
 - 添加统一远程操作风险模型，并将现有危险确认接入风险级别、目标、命令预览、影响范围、恢复说明和审计提示。
+- 添加腾讯云安全组规则本地 diff 预览，支持 before/after 计数、命令预览、风险警告和禁用状态的写操作入口。

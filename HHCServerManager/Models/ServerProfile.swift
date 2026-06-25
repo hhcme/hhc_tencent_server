@@ -540,6 +540,28 @@ enum RemoteOperationRiskFactory {
             auditAction: "save"
         )
     }
+
+    static func securityGroupChange(_ preview: CloudSecurityGroupRuleChangePreview) -> RemoteOperationRisk {
+        let level: RemoteOperationRiskLevel
+        if preview.warnings.contains(where: { $0.lowercased().contains("public internet") }) {
+            level = .critical
+        } else if preview.proposedRule.direction == .ingress && preview.proposedRule.action == "ACCEPT" {
+            level = .high
+        } else {
+            level = .medium
+        }
+        return RemoteOperationRisk(
+            id: "security-group-\(preview.action.rawValue)-\(preview.group.securityGroupId)-\(preview.proposedRule.id)",
+            level: level,
+            title: "\(preview.action.displayName) Security Group Rule",
+            target: "\(preview.group.name) (\(preview.group.securityGroupId))",
+            commandPreview: preview.commandPreview,
+            impact: preview.impact,
+            recovery: "Review the generated diff before enabling future write operations. No cloud-side change is executed by this preview.",
+            auditTargetType: "security_group",
+            auditAction: preview.action.rawValue
+        )
+    }
 }
 
 enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -688,6 +710,151 @@ struct CloudSecurityGroupPolicySnapshot: Equatable, Hashable, Sendable {
     var ingress: [CloudSecurityGroupRule]
     var egress: [CloudSecurityGroupRule]
     var capturedAt: Date
+}
+
+enum CloudSecurityGroupRuleChangeAction: String, Codable, CaseIterable, Identifiable, Sendable {
+    case add
+    case remove
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .add:
+            "Add"
+        case .remove:
+            "Remove"
+        }
+    }
+}
+
+struct CloudSecurityGroupRuleDraft: Equatable, Hashable, Sendable {
+    var direction: CloudSecurityGroupRuleDirection
+    var protocolName: String
+    var port: String
+    var cidrBlock: String
+    var action: String
+    var description: String
+
+    func makeRule() -> CloudSecurityGroupRule {
+        CloudSecurityGroupRule(
+            direction: direction,
+            policyIndex: nil,
+            protocolName: normalized(protocolName, fallback: "ALL"),
+            port: normalized(port, fallback: "ALL"),
+            cidrBlock: normalized(cidrBlock, fallback: "0.0.0.0/0"),
+            ipv6CidrBlock: nil,
+            referencedSecurityGroupId: nil,
+            action: normalized(action, fallback: "ACCEPT"),
+            description: description.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            modifiedTime: nil
+        )
+    }
+
+    private func normalized(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed.uppercased()
+    }
+}
+
+struct CloudSecurityGroupRuleChangePreview: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { "\(action.rawValue)-\(group.securityGroupId)-\(proposedRule.id)" }
+    var group: CloudSecurityGroup
+    var action: CloudSecurityGroupRuleChangeAction
+    var proposedRule: CloudSecurityGroupRule
+    var beforeIngressCount: Int
+    var beforeEgressCount: Int
+    var afterIngressCount: Int
+    var afterEgressCount: Int
+    var warnings: [String]
+
+    var impact: [String] {
+        [
+            "Ingress rules: \(beforeIngressCount) -> \(afterIngressCount).",
+            "Egress rules: \(beforeEgressCount) -> \(afterEgressCount).",
+        ] + warnings
+    }
+
+    var commandPreview: String {
+        let operation = action == .add ? "Authorize" : "Revoke"
+        let suffix = proposedRule.direction == .ingress ? "Ingress" : "Egress"
+        return "Tencent Cloud \(operation)SecurityGroup\(suffix) \(proposedRule.summary)"
+    }
+
+    static func adding(
+        draft: CloudSecurityGroupRuleDraft,
+        to snapshot: CloudSecurityGroupPolicySnapshot
+    ) -> CloudSecurityGroupRuleChangePreview {
+        let rule = draft.makeRule()
+        return CloudSecurityGroupRuleChangePreview(
+            group: snapshot.group,
+            action: .add,
+            proposedRule: rule,
+            beforeIngressCount: snapshot.ingress.count,
+            beforeEgressCount: snapshot.egress.count,
+            afterIngressCount: snapshot.ingress.count + (rule.direction == .ingress ? 1 : 0),
+            afterEgressCount: snapshot.egress.count + (rule.direction == .egress ? 1 : 0),
+            warnings: warnings(for: rule, action: .add)
+        )
+    }
+
+    static func removing(
+        rule: CloudSecurityGroupRule,
+        from snapshot: CloudSecurityGroupPolicySnapshot
+    ) -> CloudSecurityGroupRuleChangePreview {
+        CloudSecurityGroupRuleChangePreview(
+            group: snapshot.group,
+            action: .remove,
+            proposedRule: rule,
+            beforeIngressCount: snapshot.ingress.count,
+            beforeEgressCount: snapshot.egress.count,
+            afterIngressCount: max(0, snapshot.ingress.count - (rule.direction == .ingress ? 1 : 0)),
+            afterEgressCount: max(0, snapshot.egress.count - (rule.direction == .egress ? 1 : 0)),
+            warnings: warnings(for: rule, action: .remove)
+        )
+    }
+
+    private static func warnings(
+        for rule: CloudSecurityGroupRule,
+        action: CloudSecurityGroupRuleChangeAction
+    ) -> [String] {
+        var results: [String] = []
+        let target = rule.cidrBlock ?? rule.ipv6CidrBlock ?? rule.referencedSecurityGroupId ?? ""
+        let exposesPublicInternet = ["0.0.0.0/0", "::/0"].contains(target)
+        if action == .add,
+           rule.direction == .ingress,
+           rule.action == "ACCEPT",
+           exposesPublicInternet {
+            results.append("This ingress ACCEPT rule exposes the target to the public internet.")
+        }
+        if action == .add,
+           rule.direction == .ingress,
+           ["22", "3389"].contains(rule.port ?? "") {
+            results.append("Management ports should be restricted to trusted source CIDR ranges.")
+        }
+        if action == .remove {
+            results.append("Removing a rule can interrupt existing traffic that depends on it.")
+        }
+        return results
+    }
+}
+
+extension CloudSecurityGroupRule {
+    var summary: String {
+        [
+            direction.displayName,
+            protocolName ?? "ALL",
+            port ?? "all",
+            cidrBlock ?? ipv6CidrBlock ?? referencedSecurityGroupId ?? "any",
+            action ?? "unknown",
+        ].joined(separator: " ")
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
 }
 
 extension CloudInstanceLink {

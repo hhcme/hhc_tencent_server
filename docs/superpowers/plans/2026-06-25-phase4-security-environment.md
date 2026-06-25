@@ -93,7 +93,7 @@ CREATE TABLE environment_profiles (
 
 - [x] 扩展 CloudProviderAdapter 支持安全组读取：当前 provider capability 已包含 `securityGroups`，并接入 `CloudSecurityGroupService`。
 - [x] 腾讯云安全组规则读取：当前通过 VPC `DescribeSecurityGroups` / `DescribeSecurityGroupPolicies` 读取账号地域下的安全组和规则。
-- [ ] 规则 diff 和预览。
+- [x] 规则 diff 和预览：当前已支持本地生成安全组规则新增/删除 diff、before/after 计数、风险级别、命令预览和警告；尚不执行云端写入。
 - [ ] 有限写操作：新增/删除单条规则。
 - [ ] 权限不足时明确提示。
 
@@ -141,7 +141,7 @@ CREATE TABLE environment_profiles (
 
 - [ ] 无云账号时安全组页不可用但 SSH 功能正常。
 - [ ] 腾讯云安全组可读取。当前 mock/contract 测试已通过，真实腾讯云账号手动验收待执行。
-- [ ] 新增安全组规则前显示预览和确认。
+- [x] 新增安全组规则前显示预览和确认基础：当前安全组详情页可生成拟新增规则预览并展示风险，写操作按钮保持禁用。
 - [ ] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，重启操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
 - [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，真实配置写入/reload 待谨慎手动验收。
 - [x] 防火墙后端只读探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作待后续谨慎验收。
@@ -150,7 +150,7 @@ CREATE TABLE environment_profiles (
 
 ## 8. 完成标志
 
-1. 云安全组只读基础已可用；规则 diff 和写操作仍待后续接入。
+1. 云安全组只读基础和规则 diff/preview 已可用；云端写操作仍待后续接入。
 2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。当前 systemd、Nginx、Cron、Environment 已有工作台基础，Firewall 已有只读探测。
 3. 所有远程写操作有确认和审计。当前 systemd、Cron、Nginx、Environment 已接入审计；现有危险确认已接入统一风险模型，安全组/防火墙写操作待实现后接入。
 4. Nginx 等配置类操作有备份和回滚。当前 Nginx 已具备读取、编辑、保存前备份、保存后测试、失败回滚和 reload 前保护。

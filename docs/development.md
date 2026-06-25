@@ -115,7 +115,7 @@ export HHC_TEST_SSH_PASSPHRASE=""
 - Cron 当前为 Phase 4 bootstrap：用户级 crontab 通过 SSH 即时读取，添加/启用/禁用/删除操作需要 UI 确认并在远端创建备份，同时会写入 `remote_change_logs` 审计表；真实服务器已完成只读 crontab 验证，真实写操作由 mock/contract 测试覆盖，仍需谨慎手动验收。尚未支持系统级 `/etc/cron*` 管理。
 - Nginx 当前为 Phase 4 bootstrap：配置路径通过 `nginx -V` 动态探测，已覆盖 `/etc/nginx` 和 `/www/server/nginx/conf` 这类非标准安装路径；配置文件可浏览和编辑，保存时会先创建 `.hhc-backup-*` 远端备份，再写入配置并执行 `nginx -t`，测试失败会自动恢复备份；reload 需要 UI 确认并写入 `remote_change_logs` 审计表。真实服务器已完成 `nginx -t` 和配置目录只读验证；真实配置写入/reload 仍需谨慎手动验收。
 - Firewall 当前为 Phase 4 bootstrap：只读探测 firewalld、ufw、nftables、iptables 并展示规则输出；真实服务器已验证 firewalld 安装但未运行的降级状态。新增/删除规则等写操作仍待规则 diff、风险确认和审计流程接入。
-- Security Groups 当前为 Phase 4 bootstrap：仅对已关联云实例的账号和地域启用，使用腾讯云 VPC `DescribeSecurityGroups` / `DescribeSecurityGroupPolicies` 只读查询并展示安全组规则；当前尚未持久化实例与安全组的精确关联，因此先展示该账号地域下的安全组列表，后续补实例过滤、规则 diff、写操作确认和审计。
+- Security Groups 当前为 Phase 4 bootstrap：仅对已关联云实例的账号和地域启用，使用腾讯云 VPC `DescribeSecurityGroups` / `DescribeSecurityGroupPolicies` 只读查询并展示安全组规则；当前支持本地生成安全组规则新增/删除 diff、before/after 计数、风险级别、命令预览和警告，但不执行云端写入。当前尚未持久化实例与安全组的精确关联，因此先展示该账号地域下的安全组列表，后续补实例过滤、云端写操作确认和审计。
 - Environment 当前为 Phase 4 bootstrap：只发现受限范围内的常见 env 文件，包括用户/应用目录 `.env` 和 `*.env`、`/etc/default`、`/etc/sysconfig`、`/etc/systemd/system/*.service.d/*.conf`；单文件限制 256 KiB，要求 UTF-8，保存前创建 `.hhc-backup-*` 远端备份并写入 `remote_change_logs`。暂不自动解析 shell profile，不扫描私钥/凭据目录，不做跨文件变量合并。
 - 云账号当前已实现本地元数据、云实例关联表、Keychain 云凭据命名空间、Tencent Cloud adapter、云实例同步服务、基础导入 UI、已关联 CVM 的 CPU 云监控查询和账号地域级安全组只读查询；真实腾讯云账号手动验收仍在后续任务中。
 - TencentCloudAdapter 已接入腾讯云 API 3.0 TC3-HMAC-SHA256 签名流程，并实现 Region、CVM instance、Cloud Monitor `GetMonitorData` CPU 指标、VPC `DescribeSecurityGroups` 和 `DescribeSecurityGroupPolicies` 只读查询；默认测试使用 mock transport，不提交真实 SecretId/SecretKey。

@@ -19,6 +19,13 @@ struct ServerWorkspaceView: View {
     @State private var pendingNginxReload = false
     @State private var pendingNginxSave = false
     @State private var pendingEnvironmentSave = false
+    @State private var securityGroupDraftDirection: CloudSecurityGroupRuleDirection = .ingress
+    @State private var securityGroupDraftProtocol = "TCP"
+    @State private var securityGroupDraftPort = "22"
+    @State private var securityGroupDraftCIDR = "0.0.0.0/0"
+    @State private var securityGroupDraftAction = "ACCEPT"
+    @State private var securityGroupDraftDescription = ""
+    @State private var securityGroupRulePreview: CloudSecurityGroupRuleChangePreview?
 
     let profile: ServerProfile
 
@@ -1256,6 +1263,7 @@ struct ServerWorkspaceView: View {
                         FirewallSummaryTile(title: "Version", value: snapshot.version ?? "unknown", systemImage: "number")
                     }
 
+                    cloudSecurityGroupPreviewPanel(snapshot)
                     cloudSecurityRuleSection(title: "Ingress", rules: snapshot.ingress)
                     cloudSecurityRuleSection(title: "Egress", rules: snapshot.egress)
                 } else {
@@ -1268,6 +1276,70 @@ struct ServerWorkspaceView: View {
             }
         }
         .padding(20)
+    }
+
+    private func cloudSecurityGroupPreviewPanel(_ snapshot: CloudSecurityGroupPolicySnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Rule Preview")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    securityGroupRulePreview = CloudSecurityGroupRuleChangePreview.adding(
+                        draft: CloudSecurityGroupRuleDraft(
+                            direction: securityGroupDraftDirection,
+                            protocolName: securityGroupDraftProtocol,
+                            port: securityGroupDraftPort,
+                            cidrBlock: securityGroupDraftCIDR,
+                            action: securityGroupDraftAction,
+                            description: securityGroupDraftDescription
+                        ),
+                        to: snapshot
+                    )
+                } label: {
+                    Label("Preview", systemImage: "doc.text.magnifyingglass")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
+                GridRow {
+                    Picker("Direction", selection: $securityGroupDraftDirection) {
+                        ForEach(CloudSecurityGroupRuleDirection.allCases) { direction in
+                            Text(direction.displayName).tag(direction)
+                        }
+                    }
+                    TextField("Protocol", text: $securityGroupDraftProtocol)
+                    TextField("Port", text: $securityGroupDraftPort)
+                    TextField("CIDR", text: $securityGroupDraftCIDR)
+                    TextField("Action", text: $securityGroupDraftAction)
+                }
+            }
+            .textFieldStyle(.roundedBorder)
+
+            TextField("Description", text: $securityGroupDraftDescription)
+                .textFieldStyle(.roundedBorder)
+
+            if let preview = securityGroupRulePreview,
+               preview.group.id == snapshot.group.id {
+                VStack(alignment: .leading, spacing: 8) {
+                    RiskPreviewView(risk: RemoteOperationRiskFactory.securityGroupChange(preview))
+                    HStack(spacing: 12) {
+                        FirewallSummaryTile(title: "Ingress After", value: "\(preview.afterIngressCount)", systemImage: "arrow.down.to.line")
+                        FirewallSummaryTile(title: "Egress After", value: "\(preview.afterEgressCount)", systemImage: "arrow.up.to.line")
+                    }
+                    CloudSecurityGroupRuleRow(rule: preview.proposedRule)
+                    Button {
+                    } label: {
+                        Label("Apply Later", systemImage: "lock")
+                    }
+                    .disabled(true)
+                    .help("Write operations are intentionally disabled until security group API mutation and audit flow are implemented.")
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func cloudSecurityRuleSection(title: String, rules: [CloudSecurityGroupRule]) -> some View {

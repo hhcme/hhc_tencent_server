@@ -49,6 +49,65 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(environmentRisk.confirmationMessage.contains("Environment changes"))
     }
 
+    func testCloudSecurityGroupRuleChangePreviewBuildsDiffAndRisk() {
+        let group = CloudSecurityGroup(
+            accountId: UUID(),
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            securityGroupId: "sg-123",
+            name: "prod",
+            description: nil,
+            projectId: nil,
+            isDefault: false,
+            createdTime: nil,
+            updatedTime: nil
+        )
+        let existingRule = CloudSecurityGroupRule(
+            direction: .ingress,
+            policyIndex: 0,
+            protocolName: "TCP",
+            port: "443",
+            cidrBlock: "10.0.0.0/8",
+            ipv6CidrBlock: nil,
+            referencedSecurityGroupId: nil,
+            action: "ACCEPT",
+            description: nil,
+            modifiedTime: nil
+        )
+        let snapshot = CloudSecurityGroupPolicySnapshot(
+            group: group,
+            version: "1",
+            ingress: [existingRule],
+            egress: [],
+            capturedAt: Date()
+        )
+        let draft = CloudSecurityGroupRuleDraft(
+            direction: .ingress,
+            protocolName: "tcp",
+            port: "22",
+            cidrBlock: "0.0.0.0/0",
+            action: "accept",
+            description: "ssh"
+        )
+
+        let preview = CloudSecurityGroupRuleChangePreview.adding(draft: draft, to: snapshot)
+        let risk = RemoteOperationRiskFactory.securityGroupChange(preview)
+
+        XCTAssertEqual(preview.beforeIngressCount, 1)
+        XCTAssertEqual(preview.afterIngressCount, 2)
+        XCTAssertEqual(preview.afterEgressCount, 0)
+        XCTAssertEqual(preview.proposedRule.protocolName, "TCP")
+        XCTAssertEqual(preview.proposedRule.action, "ACCEPT")
+        XCTAssertTrue(preview.commandPreview.contains("AuthorizeSecurityGroupIngress"))
+        XCTAssertTrue(preview.warnings.contains { $0.contains("public internet") })
+        XCTAssertEqual(risk.level, .critical)
+        XCTAssertTrue(risk.confirmationMessage.contains("Ingress rules: 1 -> 2"))
+
+        let removePreview = CloudSecurityGroupRuleChangePreview.removing(rule: existingRule, from: snapshot)
+        XCTAssertEqual(removePreview.afterIngressCount, 0)
+        XCTAssertTrue(removePreview.warnings.contains { $0.contains("interrupt") })
+    }
+
     func testConnectSuccessUpdatesConnectionStateAndStoresResult() async throws {
         let profile = makeProfile()
         let client = MockSSHClient(result: CommandResult(
