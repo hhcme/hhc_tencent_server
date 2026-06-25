@@ -120,10 +120,10 @@ CREATE TABLE registry_backups (
 
 ### Task 6：Dart/Flutter pub 方案验证
 
-- [ ] 重新调研候选方案：unpub、其他 pub server、自建代理、私有 Git 依赖。
-- [ ] 验证 Dart SDK 和 Flutter 工作流兼容性。
-- [ ] 输出技术结论。
-- [ ] 只有通过验证才进入实现。
+- [x] 重新调研候选方案：已覆盖官方 Hosted Pub Repository v2 / custom package repositories、unpub、dart-lang/pub_server 参考实现和私有 Git 依赖。
+- [x] 验证 Dart SDK 和 Flutter 工作流兼容性：当前可安全接入的是官方 `hosted-url` / `publish_to` / token 凭据工作流；私有 Git 依赖只适合作为项目依赖方案，不等价于 registry。
+- [x] 输出技术结论：Phase 6 不实现 Dart/Flutter 自托管 pub registry installer，先做外部 Hosted Pub Repository 配置辅助。
+- [x] 只有通过验证才进入实现：自托管 unpub / pub_server 安装能力未通过产品化验证，不进入实现；后续如要恢复，必须先补真实 Dart/Flutter 项目 publish/get 验收。
 
 ### Task 7：测试
 
@@ -146,7 +146,7 @@ CREATE TABLE registry_backups (
 - [ ] 修改配置前有备份。
 - [ ] Nginx proxy 配置测试通过后 reload。
 - [ ] 备份和恢复可用。
-- [ ] Dart/Flutter pub 方案有明确验证结论。
+- [x] Dart/Flutter pub 方案有明确验证结论：暂不做自托管 installer，保留外部 Hosted Pub Repository 配置辅助方向。
 
 ## 8. 完成标志
 
@@ -157,7 +157,22 @@ CREATE TABLE registry_backups (
 5. Dart/Flutter pub 仓库方案有结论，未验证通过时不进入实现。
 6. 测试和手动验收通过。
 
-## 9. 后续 Phase 边界
+## 9. Dart/Flutter pub 技术结论
+
+调研依据：
+
+- Dart 官方 custom package repositories 文档支持在 `pubspec.yaml` 中使用 `hosted` / `url`、`publish_to` 和 token 凭据接入自定义 hosted repository。
+- Dart Hosted Pub Repository v2 规范说明了服务端协议，但这代表需要维护一个完整 registry 服务端，不适合作为当前 Phase 6 的默认安装目标。
+- unpub 属于社区自托管方案，后续兼容性和维护节奏需要真实项目验证后才能产品化。
+- 私有 Git 依赖适合少量内部包依赖，但缺少 registry 的发布、发现、版本索引和管理体验。
+
+当前产品决策：
+
+- 不在 Phase 6 实现 Dart/Flutter 自托管 pub registry installer。
+- 允许后续在 UI 中提供外部 Hosted Pub Repository 配置辅助：`publish_to`、hosted URL、token 设置说明、项目配置检查。
+- 如果未来要支持 unpub 或其他自托管 pub server，必须先新增真实 Dart/Flutter 项目验收：`dart pub publish`、`dart pub get`、Flutter 项目依赖解析、token 登录、升级兼容性和备份恢复。
+
+## 10. 后续 Phase 边界
 
 - Phase 7 才做云盘、快照、计费、更多云厂商和高级资源操作。
 - Windows 版本不在 Phase 6 开始。

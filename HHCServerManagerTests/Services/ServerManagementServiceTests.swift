@@ -766,6 +766,28 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testPubRegistryResearchHarnessKeepsSelfHostedPubAsResearchOnly() {
+        let report = PubRegistryResearchHarness.currentReport(
+            evaluatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        XCTAssertFalse(report.shouldImplementSelfHostedInstaller)
+        XCTAssertTrue(report.implementationDecision.contains("Do not implement"))
+        XCTAssertTrue(report.supportedProductPath.contains("Hosted Pub Repository"))
+        XCTAssertEqual(report.evaluatedAt, Date(timeIntervalSince1970: 1_700_000_000))
+
+        let hosted = report.candidates.first { $0.kind == .hostedRepository }
+        XCTAssertEqual(hosted?.verdict, .supportedIntegration)
+        XCTAssertTrue(hosted?.reasons.joined(separator: " ").contains("official toolchain") == true)
+
+        let selfHosted = report.candidates.filter { $0.kind == .selfHostedServer }
+        XCTAssertFalse(selfHosted.isEmpty)
+        XCTAssertTrue(selfHosted.allSatisfy { $0.verdict == .researchOnly })
+
+        let git = report.candidates.first { $0.kind == .privateGitDependency }
+        XCTAssertEqual(git?.verdict, .notARegistry)
+    }
+
     func testRegistryPreflightCheckerParsesReadyReport() async throws {
         let profile = makeServiceTestProfile()
         let client = RecordingSSHClient(responses: [

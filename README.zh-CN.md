@@ -41,7 +41,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 - SFTP 文件管理器。
 - systemd、Nginx、防火墙、Cron、环境变量管理。
 - GitLab 项目部署、日志和回滚。
-- Verdaccio npm 私有仓库和 Dart/Flutter 私有 pub 仓库管理。
+- Verdaccio npm 私有仓库管理，以及 Dart/Flutter 外部 Hosted Pub Repository 配置辅助。
 
 ## 技术方向
 
@@ -68,7 +68,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 5. **Phase 5：GitLab 部署**
    手动部署、部署日志、回滚和 webhook 自动部署。
 6. **Phase 6：私有包仓库**
-   Verdaccio 和 Dart/Flutter 私有仓库管理。
+   Verdaccio 管理，以及 Dart/Flutter 外部 Hosted Pub Repository 配置辅助；自托管 pub registry 安装在真实 publish/get 验收通过前只保留为研究项。
 7. **Phase 7：高级云资源管理**
    更多云厂商、快照、云盘、计费状态和高级资源操作。
 8. **Phase 8：Windows 原生版技术验证**

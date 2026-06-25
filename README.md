@@ -53,7 +53,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 3. Phase 3: Dashboard combining SSH metrics and cloud metrics, plus SFTP technical validation and file manager.
 4. Phase 4: security group management, systemd, Nginx, firewall, cron, and environment management.
 5. Phase 5: GitLab deployment workflows.
-6. Phase 6: private npm and Dart/Flutter package registries.
+6. Phase 6: private npm registry management and Dart/Flutter external Hosted Pub Repository configuration assistance.
 7. Phase 7: additional cloud providers, snapshots, disks, billing, and advanced cloud resource management.
 8. Phase 8: Windows native client technical validation with WinUI 3, Windows App SDK, and .NET.
 

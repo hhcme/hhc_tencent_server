@@ -80,6 +80,8 @@ All notable changes to this project will be documented in this file.
 - Added SQLite-backed private registry instance and backup history persistence for Verdaccio backup and restore events.
 - Added Verdaccio config policy generation for htpasswd auth, upstream registry URLs, and package access/publish modes with backup-before-save support.
 - Added Verdaccio Nginx proxy config generation plus controlled Nginx config upsert with test-and-rollback behavior.
+- Added a Dart/Flutter pub registry research harness and documented the Phase 6 decision to avoid self-hosted pub installers until real publish/get validation passes.
+- Disabled parallel Xcode test workers in the shared CI script to reduce duplicate app-host icons during macOS app-hosted tests.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -155,3 +157,5 @@ All notable changes to this project will be documented in this file.
 - 添加 SQLite 私有仓库实例和备份历史持久化，用于记录 Verdaccio 备份与恢复事件。
 - 添加 Verdaccio 配置策略生成能力，支持 htpasswd auth、上游 registry URL、包访问/发布模式，并复用保存前备份流程。
 - 添加 Verdaccio Nginx 反向代理配置生成，以及带 `nginx -t` 和失败回滚的新建/更新 Nginx 配置流程。
+- 添加 Dart/Flutter pub registry 调研结论模型，并记录 Phase 6 暂不实现自托管 pub installer，需等待真实 publish/get 验收通过后再开放。
+- 在共享 CI 脚本中关闭 Xcode 并行测试 worker，减少 macOS app-hosted tests 期间 Dock 同时出现多个测试宿主图标。

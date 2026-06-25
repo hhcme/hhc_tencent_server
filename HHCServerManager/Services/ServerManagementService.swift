@@ -1100,6 +1100,84 @@ enum RegistryKind: String, Equatable, Sendable {
     case verdaccio
 }
 
+enum PubRegistryCandidateKind: String, Equatable, Sendable {
+    case hostedRepository
+    case selfHostedServer
+    case privateGitDependency
+}
+
+enum PubRegistryCandidateVerdict: String, Equatable, Sendable {
+    case supportedIntegration
+    case researchOnly
+    case notARegistry
+}
+
+struct PubRegistryCandidateEvaluation: Equatable, Sendable {
+    var kind: PubRegistryCandidateKind
+    var name: String
+    var verdict: PubRegistryCandidateVerdict
+    var reasons: [String]
+}
+
+struct PubRegistryResearchReport: Equatable, Sendable {
+    var candidates: [PubRegistryCandidateEvaluation]
+    var implementationDecision: String
+    var shouldImplementSelfHostedInstaller: Bool
+    var supportedProductPath: String
+    var evaluatedAt: Date
+}
+
+enum PubRegistryResearchHarness {
+    static func currentReport(evaluatedAt: Date = Date()) -> PubRegistryResearchReport {
+        PubRegistryResearchReport(
+            candidates: [
+                PubRegistryCandidateEvaluation(
+                    kind: .hostedRepository,
+                    name: "Dart Hosted Pub Repository v2",
+                    verdict: .supportedIntegration,
+                    reasons: [
+                        "Dart supports custom hosted repositories through hosted-url, publish_to, credentials, and token workflows.",
+                        "The protocol is suitable for integrating existing providers without HHC owning server maintenance.",
+                        "This path keeps Flutter and dart pub workflows closest to the official toolchain.",
+                    ]
+                ),
+                PubRegistryCandidateEvaluation(
+                    kind: .selfHostedServer,
+                    name: "unpub",
+                    verdict: .researchOnly,
+                    reasons: [
+                        "It is a community self-hosted pub server, not an official deployable Dart service.",
+                        "Maintenance and compatibility risk are too high to ship as a one-click server installer before live validation.",
+                        "Use as a reference candidate only; do not expose install actions in the product yet.",
+                    ]
+                ),
+                PubRegistryCandidateEvaluation(
+                    kind: .selfHostedServer,
+                    name: "dart-lang/pub_server",
+                    verdict: .researchOnly,
+                    reasons: [
+                        "It is useful as protocol/reference material, but not a committed production server target for this app.",
+                        "Owning a compliant Hosted Pub Repository implementation would expand Phase 6 beyond the current scope.",
+                    ]
+                ),
+                PubRegistryCandidateEvaluation(
+                    kind: .privateGitDependency,
+                    name: "Private Git dependencies",
+                    verdict: .notARegistry,
+                    reasons: [
+                        "Private Git works for selected package dependencies but does not provide package publishing, discovery, or registry management.",
+                        "Keep it as guidance in project documentation, not as a registry installer.",
+                    ]
+                ),
+            ],
+            implementationDecision: "Do not implement a Dart/Flutter self-hosted pub registry installer in Phase 6.",
+            shouldImplementSelfHostedInstaller: false,
+            supportedProductPath: "Support external Hosted Pub Repository configuration assistance first: hosted-url, publish_to, token setup notes, and project-level validation.",
+            evaluatedAt: evaluatedAt
+        )
+    }
+}
+
 enum RegistryPreflightStatus: String, Equatable, Sendable {
     case passed
     case warning

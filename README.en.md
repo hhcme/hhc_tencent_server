@@ -41,7 +41,7 @@ Target users include:
 - SFTP file manager.
 - systemd, Nginx, firewall, cron, and environment management.
 - GitLab deployment, logs, rollback, and webhook automation.
-- Verdaccio npm registry and Dart/Flutter private pub registry management.
+- Verdaccio npm registry management, plus Dart/Flutter external Hosted Pub Repository configuration assistance.
 
 ## Technology Direction
 
@@ -68,7 +68,7 @@ Target users include:
 5. **Phase 5: GitLab deployment**
    Manual deployment, deployment logs, rollback, and webhook automation.
 6. **Phase 6: Private package registries**
-   Verdaccio and Dart/Flutter private package registry management.
+   Verdaccio management and Dart/Flutter external Hosted Pub Repository configuration assistance; self-hosted pub registry installation stays research-only until real publish/get validation passes.
 7. **Phase 7: Advanced cloud resource management**
    More providers, snapshots, disks, billing status, and advanced cloud operations.
 8. **Phase 8: Windows native technical validation**

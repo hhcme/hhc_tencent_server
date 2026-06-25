@@ -13,5 +13,6 @@ xcodebuild \
   -scheme "$SCHEME" \
   -configuration "$CONFIGURATION" \
   -destination "$DESTINATION" \
+  -parallel-testing-enabled NO \
   CODE_SIGNING_ALLOWED=NO \
   test
