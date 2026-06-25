@@ -84,4 +84,5 @@ export HHC_TEST_SSH_PASSPHRASE=""
 
 - 当前 SSH 适配层是 bootstrap OpenSSH adapter，用于先打通真实服务器、主机指纹信任和 smoke test。
 - `SSHClient` 协议已经隔离 UI/ViewModel 与具体 SSH 实现，后续可以替换为 SwiftNIO SSH。
-- OpenSSH adapter 当前支持私钥认证；密码认证 UI 和 Keychain 存储已具备，真实密码认证留给后续 SwiftNIO SSH 实现。
+- OpenSSH adapter 当前支持私钥认证，也支持通过临时 `SSH_ASKPASS` 脚本进行 password 认证。密码从 Keychain 读出后只注入当前 SSH 子进程环境，脚本执行后立即删除。
+- 后续仍需要把 bootstrap OpenSSH adapter 替换或补齐为 SwiftNIO SSH 正式实现。

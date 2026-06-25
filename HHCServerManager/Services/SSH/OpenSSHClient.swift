@@ -4,7 +4,7 @@ enum SSHClientError: LocalizedError {
     case unknownHostKey(HostKeyInfo)
     case hostKeyChanged(current: HostKeyInfo, trusted: TrustedHostKey)
     case missingPrivateKey
-    case passwordAuthNeedsNativeClient
+    case missingPassword
     case processFailed(String)
     case invalidHostKeyScan
 
@@ -16,8 +16,8 @@ enum SSHClientError: LocalizedError {
             "Host key changed. Trusted \(trusted.fingerprintSHA256), current \(current.fingerprintSHA256)."
         case .missingPrivateKey:
             "Private key data was not found in Keychain."
-        case .passwordAuthNeedsNativeClient:
-            "Password authentication is not available in the bootstrap OpenSSH adapter yet. Use a private key for this first slice."
+        case .missingPassword:
+            "Password was not found in Keychain."
         case let .processFailed(message):
             message
         case .invalidHostKeyScan:
@@ -47,35 +47,55 @@ final class OpenSSHClient: SSHClient, @unchecked Sendable {
         let knownHostsURL = try knownHostsURL()
 
         var temporaryKeyURL: URL?
-        if profile.authType == .privateKey {
+        var temporaryAskpassURL: URL?
+        var environment: [String: String] = [:]
+        var arguments = [
+            "-p", "\(profile.port)",
+            "-o", "ConnectTimeout=10",
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", "UserKnownHostsFile=\(knownHostsURL.path)",
+        ]
+
+        switch profile.authType {
+        case .privateKey:
             guard let keyData = try keychain.readPrivateKey(keychainRef: profile.keychainRef) else {
                 throw SSHClientError.missingPrivateKey
             }
             temporaryKeyURL = try materializePrivateKey(keyData, serverId: profile.id)
-        } else {
-            throw SSHClientError.passwordAuthNeedsNativeClient
+            arguments.append(contentsOf: [
+                "-o", "BatchMode=yes",
+                "-i", temporaryKeyURL!.path,
+            ])
+        case .password:
+            guard let password = try keychain.readPassword(keychainRef: profile.keychainRef) else {
+                throw SSHClientError.missingPassword
+            }
+            temporaryAskpassURL = try materializeAskpassScript(serverId: profile.id)
+            environment["SSH_ASKPASS"] = temporaryAskpassURL!.path
+            environment["SSH_ASKPASS_REQUIRE"] = "force"
+            environment["HHC_SSH_PASSWORD"] = password
+            environment["DISPLAY"] = environment["DISPLAY"] ?? "localhost:0"
+            arguments.append(contentsOf: [
+                "-o", "BatchMode=no",
+                "-o", "NumberOfPasswordPrompts=1",
+                "-o", "PreferredAuthentications=password",
+                "-o", "PubkeyAuthentication=no",
+            ])
         }
         defer {
             if let temporaryKeyURL {
                 try? fileManager.removeItem(at: temporaryKeyURL)
             }
+            if let temporaryAskpassURL {
+                try? fileManager.removeItem(at: temporaryAskpassURL)
+            }
         }
 
         let start = Date()
-        var arguments = [
-            "-p", "\(profile.port)",
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=10",
-            "-o", "StrictHostKeyChecking=yes",
-            "-o", "UserKnownHostsFile=\(knownHostsURL.path)",
-        ]
-        if let temporaryKeyURL {
-            arguments.append(contentsOf: ["-i", temporaryKeyURL.path])
-        }
         arguments.append("\(profile.username)@\(profile.host)")
         arguments.append(command)
 
-        let processResult = try await runProcess("/usr/bin/ssh", arguments: arguments)
+        let processResult = try await runProcess("/usr/bin/ssh", arguments: arguments, environment: environment)
         return CommandResult(
             command: command,
             stdout: processResult.stdout,
@@ -171,6 +191,18 @@ final class OpenSSHClient: SSHClient, @unchecked Sendable {
         return url
     }
 
+    private func materializeAskpassScript(serverId: UUID) throws -> URL {
+        let url = fileManager.temporaryDirectory
+            .appendingPathComponent("hhc-ssh-askpass-\(serverId.uuidString)-\(UUID().uuidString).sh")
+        let body = """
+        #!/bin/sh
+        printf '%s' "$HHC_SSH_PASSWORD"
+        """
+        try body.write(to: url, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+        return url
+    }
+
     private func appSupportURL() throws -> URL {
         let supportURL = try fileManager.url(
             for: .applicationSupportDirectory,
@@ -185,11 +217,18 @@ final class OpenSSHClient: SSHClient, @unchecked Sendable {
         try appSupportURL().appendingPathComponent("known_hosts")
     }
 
-    private func runProcess(_ executable: String, arguments: [String]) async throws -> ProcessResult {
+    private func runProcess(
+        _ executable: String,
+        arguments: [String],
+        environment: [String: String] = [:]
+    ) async throws -> ProcessResult {
         try await Task.detached(priority: .userInitiated) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
+            if !environment.isEmpty {
+                process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+            }
 
             let stdout = Pipe()
             let stderr = Pipe()
