@@ -91,6 +91,23 @@ struct ServerWorkspaceView: View {
                 }
             )
         }
+        .sheet(item: $viewModel.remoteTextFile) { textFile in
+            RemoteTextEditorSheet(
+                textFile: textFile,
+                draft: $viewModel.remoteTextDraft,
+                isSaving: viewModel.isSavingRemoteText,
+                cancel: {
+                    viewModel.closeRemoteTextEditor()
+                },
+                save: {
+                    viewModel.saveRemoteTextFile(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        remoteFileService: appState.remoteFileService
+                    )
+                }
+            )
+        }
         .onAppear {
             viewModel.configure(initialState: appState.connectionState(for: profile))
             viewModel.loadCommandHistory(profile: profile, repository: appState.repository)
@@ -382,7 +399,7 @@ struct ServerWorkspaceView: View {
                     } label: {
                         Label("Up", systemImage: "arrow.up")
                     }
-                    .disabled(viewModel.isLoadingRemoteFiles || viewModel.isMutatingRemoteFile || viewModel.remoteFilePath == "/")
+                    .disabled(isRemoteFileBusy || viewModel.remoteFilePath == "/")
 
                     TextField("Remote path", text: $filePathText)
                         .textFieldStyle(.roundedBorder)
@@ -402,7 +419,7 @@ struct ServerWorkspaceView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isLoadingRemoteFiles || viewModel.isMutatingRemoteFile)
+                    .disabled(isRemoteFileBusy)
                 }
 
                 if let capturedAt = viewModel.remoteDirectoryListing?.capturedAt {
@@ -419,6 +436,11 @@ struct ServerWorkspaceView: View {
                 if let message = viewModel.remoteFileActionMessage {
                     Label(message, systemImage: "checkmark.circle")
                         .foregroundStyle(.green)
+                }
+
+                if viewModel.isLoadingRemoteText {
+                    Label("Opening text file...", systemImage: "doc.text.magnifyingglass")
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(20)
@@ -456,29 +478,37 @@ struct ServerWorkspaceView: View {
     private func remoteFileList(_ entries: [RemoteFileEntry]) -> some View {
         List(entries) { entry in
             Button {
-                viewModel.openRemoteFileEntry(
-                    entry,
-                    profile: profile,
-                    sshClient: appState.sshClient,
-                    remoteFileService: appState.remoteFileService
-                )
+                openRemoteFileEntry(entry)
             } label: {
                 RemoteFileRow(entry: entry)
             }
             .buttonStyle(.plain)
             .contextMenu {
+                if entry.kind == .file {
+                    Button {
+                        viewModel.openRemoteTextFile(
+                            entry,
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            remoteFileService: appState.remoteFileService
+                        )
+                    } label: {
+                        Label("Open as Text", systemImage: "doc.text")
+                    }
+                    .disabled(isRemoteFileBusy)
+                }
                 Button {
                     startRenaming(entry)
                 } label: {
                     Label("Rename", systemImage: "pencil")
                 }
-                .disabled(viewModel.isMutatingRemoteFile)
+                .disabled(isRemoteFileBusy)
                 Button(role: .destructive) {
                     remoteFileTrashEntry = entry
                 } label: {
                     Label("Move to Trash", systemImage: "trash")
                 }
-                .disabled(viewModel.isMutatingRemoteFile)
+                .disabled(isRemoteFileBusy)
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) {
@@ -492,6 +522,7 @@ struct ServerWorkspaceView: View {
                     Label("Rename", systemImage: "pencil")
                 }
                 .tint(.blue)
+                .disabled(isRemoteFileBusy)
             }
         }
         .overlay {
@@ -508,6 +539,27 @@ struct ServerWorkspaceView: View {
             sshClient: appState.sshClient,
             remoteFileService: appState.remoteFileService
         )
+    }
+
+    private func openRemoteFileEntry(_ entry: RemoteFileEntry) {
+        switch entry.kind {
+        case .directory:
+            viewModel.openRemoteFileEntry(
+                entry,
+                profile: profile,
+                sshClient: appState.sshClient,
+                remoteFileService: appState.remoteFileService
+            )
+        case .file:
+            viewModel.openRemoteTextFile(
+                entry,
+                profile: profile,
+                sshClient: appState.sshClient,
+                remoteFileService: appState.remoteFileService
+            )
+        default:
+            break
+        }
     }
 
     private func startRenaming(_ entry: RemoteFileEntry) {
@@ -646,6 +698,13 @@ struct ServerWorkspaceView: View {
                 }
             }
         )
+    }
+
+    private var isRemoteFileBusy: Bool {
+        viewModel.isLoadingRemoteFiles ||
+            viewModel.isMutatingRemoteFile ||
+            viewModel.isLoadingRemoteText ||
+            viewModel.isSavingRemoteText
     }
 }
 
@@ -826,6 +885,70 @@ private struct RenameRemoteFileSheet: View {
         }
         .padding(24)
         .frame(width: 420)
+    }
+}
+
+private struct RemoteTextEditorSheet: View {
+    let textFile: RemoteTextFile
+    @Binding var draft: String
+    let isSaving: Bool
+    let cancel: () -> Void
+    let save: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(textFile.path)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("\(Self.formatBytes(textFile.byteCount)) · \(textFile.capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("Close", action: cancel)
+                    .disabled(isSaving)
+                Button {
+                    save()
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Save", systemImage: "square.and.arrow.down")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSaving)
+            }
+
+            TextEditor(text: $draft)
+                .font(.system(.body, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                }
+        }
+        .padding(20)
+        .frame(minWidth: 720, minHeight: 520)
+    }
+
+    private static func formatBytes(_ bytes: Int) -> String {
+        let value = Double(bytes)
+        if value < 1024 {
+            return "\(bytes) B"
+        }
+        let kib = value / 1024
+        if kib < 1024 {
+            return String(format: "%.1f KiB", kib)
+        }
+        return String(format: "%.1f MiB", kib / 1024)
     }
 }
 

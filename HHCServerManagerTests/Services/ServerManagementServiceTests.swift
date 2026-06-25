@@ -285,6 +285,69 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testRemoteFileServiceReadsAndSavesSmallUTF8TextWithBackup() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(
+                command: "",
+                stdout: Data("hello\n".utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            ),
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let entry = RemoteFileEntry(
+            name: "app.env",
+            path: "/var/www/app.env",
+            kind: .file,
+            size: 6,
+            modifiedAt: nil,
+            permissions: "-rw-r--r--"
+        )
+
+        let textFile = try await service.readTextFile(entry: entry, profile: profile, sshClient: client)
+        let saveResult = try await service.saveTextFile(
+            path: entry.path,
+            content: "updated\n",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(textFile.content, "hello\n")
+        XCTAssertEqual(textFile.byteCount, 6)
+        XCTAssertEqual(saveResult.path, "/var/www/app.env")
+        XCTAssertTrue(saveResult.backupPath.hasPrefix("/var/www/app.env.hhc-backup-"))
+        XCTAssertEqual(client.commands.count, 2)
+        XCTAssertTrue(client.commands[0].contains("base64 < '/var/www/app.env'"))
+        XCTAssertTrue(client.commands[1].contains("base64 -d > \"$tmp\""))
+        XCTAssertTrue(client.commands[1].contains("cp -p -- '/var/www/app.env' \"$backup\""))
+        XCTAssertTrue(client.commands[1].contains("mv -- \"$tmp\" '/var/www/app.env'"))
+    }
+
+    func testRemoteFileServiceRejectsOversizedKnownTextFileBeforeSSHRead() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let service = RemoteFileService()
+        let entry = RemoteFileEntry(
+            name: "large.log",
+            path: "/var/www/large.log",
+            kind: .file,
+            size: Int64(RemoteFileService.maxEditableTextBytes + 1),
+            modifiedAt: nil,
+            permissions: "-rw-r--r--"
+        )
+
+        do {
+            _ = try await service.readTextFile(entry: entry, profile: profile, sshClient: client)
+            XCTFail("Expected large text read to be rejected.")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "File is larger than the 256 KiB text editing limit.")
+            XCTAssertTrue(client.commands.isEmpty)
+        }
+    }
+
     func testCloudInstanceSyncUpsertsInstancesAndPreservesServerLink() async throws {
         let adapter = MockCloudProviderAdapter(
             providerId: .tencentCloud,
@@ -602,6 +665,11 @@ private func makeServiceTestProfile() -> ServerProfile {
 
 private final class RecordingSSHClient: SSHClient, @unchecked Sendable {
     private(set) var commands: [String] = []
+    private var responses: [CommandResult]
+
+    init(responses: [CommandResult] = []) {
+        self.responses = responses
+    }
 
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
         try await execute("printf hhc-ssh-ok", profile: profile)
@@ -609,6 +677,11 @@ private final class RecordingSSHClient: SSHClient, @unchecked Sendable {
 
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
         commands.append(command)
+        if !responses.isEmpty {
+            var response = responses.removeFirst()
+            response.command = command
+            return response
+        }
         return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
     }
 

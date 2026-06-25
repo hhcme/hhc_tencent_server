@@ -45,6 +45,7 @@ All notable changes to this project will be documented in this file.
 - Added Dashboard partial-failure warnings so optional SSH metric failures no longer block the whole snapshot.
 - Added read-only remote file browser foundations with path navigation, directory listing, metadata display, and tests.
 - Added remote file rename and recoverable delete-to-trash actions with confirmation, validation, refresh, and tests.
+- Added lightweight remote UTF-8 text editing with a 256 KiB guard, temporary-file replacement, backup-on-save, UI sheet, and tests.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -85,3 +86,4 @@ All notable changes to this project will be documented in this file.
 - 添加 Dashboard 部分失败 warning，单项 SSH 指标失败不再阻断整个快照。
 - 添加只读远程文件浏览基础，支持路径导航、目录列表、元信息展示和测试。
 - 添加远程文件重命名和可恢复移入回收目录操作，包含确认、校验、刷新和测试。
+- 添加轻量远程 UTF-8 文本编辑，包含 256 KiB 限制、临时文件替换、保存前备份、UI sheet 和测试。

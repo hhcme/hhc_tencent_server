@@ -48,9 +48,9 @@ xcodebuild \
 - CloudInstanceSyncService：读取 Keychain 云凭据、同步云实例 upsert、保留已有 SSH 关联、从云实例创建 SSH profile、关联/解除关联。
 - CloudImportSheet / CloudImportViewModel：腾讯云账号验证后保存、加载可用地域、同步实例、选择实例并导入为 SSH profile。
 - DashboardService：通过 SSH 探测 OS、kernel、`/proc`、systemd、sftp，并采集负载、内存、根磁盘、CPU 核心数、网络收发总量和进程摘要基础指标；单项指标失败会返回 warning，不阻断整个快照。
-- RemoteFileService：通过 SSH 命令进行文件管理 bootstrap，支持目录列表、重命名、可恢复移入远端回收目录，并解析文件类型、大小、权限、修改时间和路径。
+- RemoteFileService：通过 SSH 命令进行文件管理 bootstrap，支持目录列表、重命名、可恢复移入远端回收目录、轻量 UTF-8 文本读写和保存前备份，并解析文件类型、大小、权限、修改时间和路径。
 - AddServerViewModel：表单校验。
-- ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行与取消、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史、历史命令重跑、Dashboard 刷新、远程目录浏览、重命名和可恢复移入回收目录。
+- ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行与取消、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史、历史命令重跑、Dashboard 刷新、远程目录浏览、重命名、可恢复移入回收目录和轻量文本编辑状态流。
 - SSHIntegrationTests：通过环境变量启用，默认跳过。
 
 ## 真实 SSH 手动验证
@@ -102,7 +102,7 @@ export HHC_TEST_SSH_PASSPHRASE=""
 - 当前 SSH 适配层是 bootstrap OpenSSH adapter，用于先打通真实服务器、主机指纹信任、smoke test、单条命令执行和取消；取消运行中命令时会 terminate 对应 OpenSSH 子进程。
 - 命令面板只持久化 command、exit code、duration 和 created at；stdout/stderr 默认只保留在本次工作台会话中，分开展示但不写入 SQLite，避免把敏感输出落盘。
 - Dashboard 当前为 Phase 3 bootstrap：指标通过 SSH 即时采集，单项可选指标失败会以 warning 降级展示，尚未写入 `dashboard_snapshots` 缓存表，也尚未接入云监控。
-- 文件管理当前为 bootstrap：目录浏览通过 SSH `find` 命令实现，重命名使用 `mv -n`，删除入口会二次确认并移动到 `~/.hhc-server-manager-trash`，尚未完成 SFTP 技术验证、上传、下载、编辑和传输队列。
+- 文件管理当前为 bootstrap：目录浏览通过 SSH `find` 命令实现，重命名使用 `mv -n`，删除入口会二次确认并移动到 `~/.hhc-server-manager-trash`；小型 UTF-8 文本文件可通过 SSH/base64 读取和保存，限制 256 KiB，保存前会生成 `*.hhc-backup-*` 备份并通过临时文件替换。尚未完成 SFTP 技术验证、上传、下载、权限修改、另存为和传输队列。
 - 云账号当前已实现本地元数据、云实例关联表、Keychain 云凭据命名空间、Tencent Cloud 只读 adapter、云实例同步服务和基础导入 UI；真实腾讯云账号手动验收仍在后续任务中。
 - TencentCloudAdapter 已接入腾讯云 API 3.0 TC3-HMAC-SHA256 签名流程，并实现 Region 与 CVM instance 只读查询；默认测试使用 mock transport，不提交真实 SecretId/SecretKey。
 - `SSHClient` 协议已经隔离 UI/ViewModel 与具体 SSH 实现，后续可以替换为 SwiftNIO SSH。

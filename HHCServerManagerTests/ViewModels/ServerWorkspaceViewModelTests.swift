@@ -328,6 +328,46 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.remoteFileErrorMessage)
     }
 
+    func testRemoteTextFileOpenAndSaveRefreshesListingWithBackupMessage() async throws {
+        let profile = makeProfile()
+        let client = RemoteTextFileMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadRemoteFiles(
+            path: "/var/www",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["app.env"] }
+        let entry = try XCTUnwrap(viewModel.remoteDirectoryListing?.entries.first)
+
+        viewModel.openRemoteTextFile(
+            entry,
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteTextFile?.content == "hello\n" }
+        XCTAssertEqual(viewModel.remoteTextDraft, "hello\n")
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+
+        viewModel.remoteTextDraft = "updated\n"
+        viewModel.saveRemoteTextFile(
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteFileActionMessage?.hasPrefix("Saved /var/www/app.env.") == true }
+
+        XCTAssertEqual(viewModel.remoteTextFile?.content, "updated\n")
+        XCTAssertEqual(client.content, "updated\n")
+        XCTAssertTrue(viewModel.remoteFileActionMessage?.contains("Backup: /var/www/app.env.hhc-backup-") == true)
+        XCTAssertEqual(viewModel.remoteDirectoryListing?.entries.map(\.name), ["app.env"])
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -552,6 +592,44 @@ private final class RemoteFileActionMockSSHClient: SSHClient, @unchecked Sendabl
                 "\(name)\tf\t2048\t1700000001.0\t-rw-r--r--\n"
             } ?? ""
             return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class RemoteTextFileMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+    private(set) var content = "hello\n"
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("find . -maxdepth 1") {
+            return CommandResult(
+                command: command,
+                stdout: "app.env\tf\t\(Data(content.utf8).count)\t1700000001.0\t-rw-r--r--\n",
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 < '/var/www/app.env'") {
+            return CommandResult(
+                command: command,
+                stdout: Data(content.utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 -d > \"$tmp\"") {
+            content = "updated\n"
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
         }
         return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
     }

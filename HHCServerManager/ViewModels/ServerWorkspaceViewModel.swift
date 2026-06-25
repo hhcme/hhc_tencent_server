@@ -14,6 +14,10 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isMutatingRemoteFile = false
     @Published var remoteFileErrorMessage: String?
     @Published var remoteFileActionMessage: String?
+    @Published var remoteTextFile: RemoteTextFile?
+    @Published var remoteTextDraft = ""
+    @Published var isLoadingRemoteText = false
+    @Published var isSavingRemoteText = false
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -199,6 +203,88 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func openRemoteTextFile(
+        _ entry: RemoteFileEntry,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService
+    ) {
+        isLoadingRemoteText = true
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+
+        Task {
+            do {
+                let textFile = try await remoteFileService.readTextFile(
+                    entry: entry,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.remoteTextFile = textFile
+                    self.remoteTextDraft = textFile.content
+                    self.isLoadingRemoteText = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.isLoadingRemoteText = false
+                }
+            }
+        }
+    }
+
+    func saveRemoteTextFile(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService
+    ) {
+        guard let remoteTextFile else { return }
+        isSavingRemoteText = true
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+
+        Task {
+            do {
+                let result = try await remoteFileService.saveTextFile(
+                    path: remoteTextFile.path,
+                    content: remoteTextDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let updatedFile = RemoteTextFile(
+                    path: result.path,
+                    content: self.remoteTextDraft,
+                    byteCount: Data(self.remoteTextDraft.utf8).count,
+                    capturedAt: Date()
+                )
+                let listing = try await remoteFileService.listDirectory(
+                    path: self.remoteFilePath,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.remoteTextFile = updatedFile
+                    self.remoteDirectoryListing = listing
+                    self.remoteFileActionMessage = "Saved \(result.path). Backup: \(result.backupPath)."
+                    self.isSavingRemoteText = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.isSavingRemoteText = false
+                }
+            }
+        }
+    }
+
+    func closeRemoteTextEditor() {
+        remoteTextFile = nil
+        remoteTextDraft = ""
+        isLoadingRemoteText = false
+        isSavingRemoteText = false
     }
 
     private func runSmokeTest(

@@ -114,6 +114,19 @@ struct RemoteDirectoryListing: Equatable, Hashable {
     var capturedAt: Date
 }
 
+struct RemoteTextFile: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { path }
+    var path: String
+    var content: String
+    var byteCount: Int
+    var capturedAt: Date
+}
+
+struct RemoteTextSaveResult: Equatable, Hashable, Sendable {
+    var path: String
+    var backupPath: String
+}
+
 struct CommandHistoryEntry: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var serverId: UUID

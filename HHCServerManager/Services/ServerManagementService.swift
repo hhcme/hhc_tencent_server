@@ -466,6 +466,8 @@ private struct DashboardCommandOutput: Sendable {
 }
 
 final class RemoteFileService: @unchecked Sendable {
+    static let maxEditableTextBytes = 256 * 1024
+
     private let now: @Sendable () -> Date
 
     init(now: @escaping @Sendable () -> Date = Date.init) {
@@ -531,6 +533,76 @@ final class RemoteFileService: @unchecked Sendable {
             throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not move \(entry.name) to trash.")
         }
         return trashPath
+    }
+
+    func readTextFile(
+        entry: RemoteFileEntry,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> RemoteTextFile {
+        guard entry.kind == .file else {
+            throw SSHClientError.processFailed("Only regular files can be opened as text.")
+        }
+        if let size = entry.size, size > Self.maxEditableTextBytes {
+            throw SSHClientError.processFailed("File is larger than the 256 KiB text editing limit.")
+        }
+
+        let command = """
+        bytes=$(wc -c < \(Self.shellQuote(entry.path)) 2>/dev/null | tr -d '[:space:]' || echo 0); \
+        if [ "$bytes" -gt \(Self.maxEditableTextBytes) ]; then echo "__HHC_FILE_TOO_LARGE__$bytes"; exit 3; fi; \
+        base64 < \(Self.shellQuote(entry.path))
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            if result.stdout.hasPrefix("__HHC_FILE_TOO_LARGE__") {
+                throw SSHClientError.processFailed("File is larger than the 256 KiB text editing limit.")
+            }
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not read \(entry.name).")
+        }
+        let encoded = result.stdout
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined()
+        guard let data = Data(base64Encoded: encoded), let content = String(data: data, encoding: .utf8) else {
+            throw SSHClientError.processFailed("File is not valid UTF-8 text.")
+        }
+        return RemoteTextFile(path: entry.path, content: content, byteCount: data.count, capturedAt: now())
+    }
+
+    func saveTextFile(
+        path: String,
+        content: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> RemoteTextSaveResult {
+        let data = Data(content.utf8)
+        guard data.count <= Self.maxEditableTextBytes else {
+            throw SSHClientError.processFailed("File is larger than the 256 KiB text editing limit.")
+        }
+        let encoded = data.base64EncodedString()
+        let timestamp = Self.trashTimestamp(for: now())
+        let backupPath = "\(path).hhc-backup-\(timestamp)"
+        let temporaryPath = "\(path).hhc-tmp-\(UUID().uuidString)"
+        let command = """
+        set -e; \
+        tmp=\(Self.shellQuote(temporaryPath)); \
+        backup=\(Self.shellQuote(backupPath)); \
+        trap 'rm -f -- "$tmp"' EXIT; \
+        base64 -d > "$tmp" <<'__HHC_TEXT_EOF__'
+        \(encoded)
+        __HHC_TEXT_EOF__
+        cp -p -- \(Self.shellQuote(path)) "$backup"; \
+        mv -- "$tmp" \(Self.shellQuote(path)); \
+        trap - EXIT
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not save \(path).")
+        }
+        return RemoteTextSaveResult(path: path, backupPath: backupPath)
     }
 
     static func parentPath(for path: String) -> String {
