@@ -64,6 +64,9 @@ Target users include:
 ## Documentation
 
 - [Documentation index](docs/README.md)
+- [macOS MVP Figma design](https://www.figma.com/design/Wvukq4AG9kHbVYKdF64gBX)
+- [macOS MVP design note](docs/en/2026-06-25-macos-mvp-figma-design.md)
+- [中文 macOS MVP 设计稿说明](docs/superpowers/specs/2026-06-25-macos-mvp-figma-design.md)
 - [Design document](docs/en/2026-06-25-server-manager-design.md)
 - [Cloud provider API enhancement](docs/en/2026-06-25-cloud-provider-integration.md)
 - [Windows native client strategy](docs/en/2026-06-25-windows-native-client-strategy.md)

@@ -8,6 +8,8 @@ This directory contains the architecture and implementation planning documents f
 
 ## English
 
+- [macOS MVP Figma design](https://www.figma.com/design/Wvukq4AG9kHbVYKdF64gBX)
+- [macOS MVP design note](en/2026-06-25-macos-mvp-figma-design.md)
 - [Design document](en/2026-06-25-server-manager-design.md)
 - [Cloud Provider API enhancement](en/2026-06-25-cloud-provider-integration.md)
 - [Windows native client strategy](en/2026-06-25-windows-native-client-strategy.md)
@@ -15,6 +17,8 @@ This directory contains the architecture and implementation planning documents f
 
 ## 中文
 
+- [macOS MVP Figma 设计稿](https://www.figma.com/design/Wvukq4AG9kHbVYKdF64gBX)
+- [macOS MVP 设计稿说明](superpowers/specs/2026-06-25-macos-mvp-figma-design.md)
 - [设计文档](superpowers/specs/2026-06-25-server-manager-design.md)
 - [云厂商 API 增强层设计](superpowers/specs/2026-06-25-cloud-provider-integration.md)
 - [Windows 原生版技术选型](superpowers/specs/2026-06-25-windows-native-client-strategy.md)
