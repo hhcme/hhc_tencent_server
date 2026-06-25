@@ -60,6 +60,26 @@ struct CommandResult: Equatable, Hashable {
     var duration: TimeInterval
 }
 
+enum SSHConnectionState: Equatable, Hashable {
+    case disconnected
+    case connecting
+    case connected
+    case failed(String)
+
+    var displayName: String {
+        switch self {
+        case .disconnected:
+            "Disconnected"
+        case .connecting:
+            "Connecting"
+        case .connected:
+            "Connected"
+        case .failed:
+            "Failed"
+        }
+    }
+}
+
 enum CredentialInput: Equatable {
     case password(String)
     case privateKey(data: Data, passphrase: String?)

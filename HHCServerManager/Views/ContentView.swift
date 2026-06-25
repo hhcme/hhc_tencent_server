@@ -7,6 +7,7 @@ struct ContentView: View {
         Group {
             if let selectedServer = appState.selectedServer {
                 ServerWorkspaceView(profile: selectedServer)
+                    .id(selectedServer.id)
             } else {
                 ServerBrowserView()
             }

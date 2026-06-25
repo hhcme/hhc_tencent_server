@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - Started the macOS native app with a SwiftUI server browser, server workspace, SQLite persistence, Keychain credential storage, host-key trust flow, and real OpenSSH smoke-test adapter.
 - Added the macOS unit test target covering repository, Keychain, server-management, form validation, and skipped-by-default SSH integration testing.
 - Added password authentication support to the bootstrap OpenSSH adapter through a temporary askpass flow backed by Keychain credentials.
+- Added workspace connection state, Connect/Disconnect controls, and ViewModel tests for success, failure, host-key trust, and disconnect flows.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -47,3 +48,4 @@ All notable changes to this project will be documented in this file.
 - 启动 macOS 原生应用实现，加入 SwiftUI 服务器列表、单服务器工作台、SQLite 持久化、Keychain 凭据存储、主机指纹信任流程和真实 OpenSSH smoke test 适配层。
 - 添加 macOS 单元测试 target，覆盖 repository、Keychain、服务器管理、表单校验，以及默认跳过的真实 SSH 集成测试入口。
 - 为 bootstrap OpenSSH 适配层加入 password 认证支持，通过临时 askpass 流程读取 Keychain 凭据。
+- 添加工作台连接状态、Connect/Disconnect 控制，并补充 ViewModel 成功、失败、主机指纹信任和断开连接流程测试。

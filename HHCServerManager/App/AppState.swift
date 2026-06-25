@@ -8,6 +8,7 @@ final class AppState: ObservableObject {
 
     @Published var servers: [ServerProfile] = []
     @Published var selectedServerId: UUID?
+    @Published var connectionStates: [UUID: SSHConnectionState] = [:]
     @Published var startupError: String?
 
     init() {
@@ -54,9 +55,18 @@ final class AppState: ObservableObject {
         selectedServerId = nil
     }
 
+    func connectionState(for profile: ServerProfile) -> SSHConnectionState {
+        connectionStates[profile.id] ?? .disconnected
+    }
+
+    func setConnectionState(_ state: SSHConnectionState, for profile: ServerProfile) {
+        connectionStates[profile.id] = state
+    }
+
     func delete(_ profile: ServerProfile) {
         do {
             try serverManagementService.deleteServer(profile)
+            connectionStates[profile.id] = nil
             reloadServers()
         } catch {
             startupError = error.localizedDescription

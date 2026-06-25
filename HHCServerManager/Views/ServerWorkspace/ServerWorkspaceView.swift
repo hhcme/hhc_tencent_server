@@ -40,7 +40,7 @@ struct ServerWorkspaceView: View {
                     viewModel.trustPendingHostKey(profile: profile, sshClient: appState.sshClient)
                 },
                 reject: {
-                    viewModel.pendingHostKey = nil
+                    viewModel.rejectPendingHostKey()
                 }
             )
         }
@@ -50,6 +50,12 @@ struct ServerWorkspaceView: View {
             }
         } message: {
             Text(viewModel.errorMessage ?? "")
+        }
+        .onAppear {
+            viewModel.configure(initialState: appState.connectionState(for: profile))
+        }
+        .onChange(of: viewModel.connectionState) { _, newState in
+            appState.setConnectionState(newState, for: profile)
         }
     }
 
@@ -114,6 +120,25 @@ struct ServerWorkspaceView: View {
                     }
                 }
 
+                HStack(spacing: 10) {
+                    connectionBadge
+
+                    Button {
+                        viewModel.connect(profile: profile, sshClient: appState.sshClient)
+                    } label: {
+                        Label("Connect", systemImage: "bolt.horizontal.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isRunningSmokeTest || viewModel.connectionState == .connecting)
+
+                    Button {
+                        viewModel.disconnect()
+                    } label: {
+                        Label("Disconnect", systemImage: "xmark.circle")
+                    }
+                    .disabled(viewModel.connectionState == .disconnected || viewModel.connectionState == .connecting)
+                }
+
                 Divider()
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -142,6 +167,32 @@ struct ServerWorkspaceView: View {
             get: { appState.selectedServerId ?? profile.id },
             set: { appState.selectedServerId = $0 }
         )
+    }
+
+    private var connectionBadge: some View {
+        Label {
+            Text(viewModel.connectionState.displayName)
+        } icon: {
+            Circle()
+                .fill(connectionColor)
+                .frame(width: 8, height: 8)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.quaternary, in: Capsule())
+    }
+
+    private var connectionColor: Color {
+        switch viewModel.connectionState {
+        case .disconnected:
+            .secondary
+        case .connecting:
+            .orange
+        case .connected:
+            .green
+        case .failed:
+            .red
+        }
     }
 
     private var errorBinding: Binding<Bool> {
