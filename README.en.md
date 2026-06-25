@@ -33,7 +33,7 @@ Target users include:
 - Services foundations with systemd unit listing, state display, journal reading, and confirmed start/stop/restart/reload actions.
 - Cron foundations with crontab reading, entry parsing, add/enable/disable/delete flows, and pre-install remote backups.
 - Nginx foundations with dynamic config path discovery, guarded config editing, remote backups, `nginx -t`, automatic rollback on failed tests, confirmed reload, and remote-change audit records.
-- Firewall foundations with backend detection and limited rule actions for firewalld, ufw, nftables, and iptables.
+- Firewall foundations with backend detection and limited rule actions for firewalld, ufw, nftables, and iptables; nftables only edits existing compatible filter chains and HHC-marked rules.
 - Environment file foundations with guarded discovery and editing for common `.env`, `/etc/default`, `/etc/sysconfig`, and systemd drop-in files, including remote backups and audit records.
 - Optional cloud account integration through provider adapters.
 - Cloud instance discovery, resource metadata, cloud metrics, security groups, and power operations.

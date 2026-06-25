@@ -65,7 +65,7 @@ CREATE TABLE environment_profiles (
 - `CloudSecurityGroupService`：云安全组读取、规则读取、规则 diff 和支持 provider 的单条写操作提交。
 - `SystemdServiceManager`：服务列表、状态、start/stop/restart、journal 日志。
 - `NginxConfigManager`：站点配置读取、编辑、测试、reload、回滚。
-- `FirewallAdapter`：ufw/firewalld/iptables 能力探测和有限操作。
+- `FirewallAdapter`：ufw/firewalld/iptables/nftables 能力探测和有限操作。
 - `CronManager`：crontab 读取、编辑、禁用、恢复。
 - `EnvironmentFileManager`：常见 `.env`、`/etc/default`、`/etc/sysconfig` 和 systemd drop-in env file 的受限发现、读取、备份保存。
 - `RemoteChangeLogStore`：所有写操作审计。
@@ -116,9 +116,9 @@ CREATE TABLE environment_profiles (
 
 ### Task 5：防火墙
 
-- [x] 探测 ufw/firewalld/iptables/nftables：当前只读探测 firewalld、ufw、nftables、iptables，并处理 firewalld 安装但未运行的状态。
+- [x] 探测 ufw/firewalld/iptables/nftables：当前探测 firewalld、ufw、nftables、iptables，并处理 firewalld 安装但未运行的状态。
 - [x] 展示规则：当前展示后端状态和原始规则输出。
-- [x] 支持有限新增/删除规则：当前支持经过校验的 IPv4 CIDR、TCP/UDP、单端口 allow/deny 规则，firewalld 支持 ingress，ufw/iptables 支持 ingress/egress，nftables 因缺少通用 table/chain 语义暂时禁用写入。
+- [x] 支持有限新增/删除规则：当前支持经过校验的 IPv4 CIDR、TCP/UDP、单端口 allow/deny 规则，firewalld 支持 ingress，ufw/iptables 支持 ingress/egress，nftables 支持在已有 `inet` / `ip` filter input/output chain 上新增带 HHC comment 标记的规则，删除时只按该标记查找 handle 后删除，不创建 table/chain 或修改默认 policy。
 - [x] 高风险规则二次确认：工作台会展示风险级别、目标、命令预览、影响和恢复说明，确认后才执行。
 
 ### Task 6：Cron 与环境变量
@@ -133,7 +133,7 @@ CREATE TABLE environment_profiles (
 - [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验、Cron 解析和 crontab 写入内容、Nginx 配置列表解析和路径校验、Environment 文件列表解析和路径校验。
 - [x] 风险确认模型测试：已覆盖 systemd、Cron、Nginx、Environment、远程文件权限修改的风险级别、命令预览、恢复说明和确认文案。
 - [x] Nginx 配置测试/回滚逻辑测试：已覆盖配置保存、保存前备份、`nginx -t`、测试失败回滚、测试通过后 reload 和审计日志写入；已加入 `HHC_TEST_NGINX_REAL=1` 受保护真实集成入口，用于在 nginx 运行且存在安全 include 目录时验证临时 server block 写入、reload、HTTP smoke 和清理。
-- [x] Firewall adapter 能力探测测试：已覆盖 firewalld、ufw、nftables、iptables 解析和 firewalld 未运行状态。
+- [x] Firewall adapter 能力探测测试：已覆盖 firewalld、ufw、nftables、iptables 解析、firewalld 未运行状态、nftables 兼容 chain 选择、nftables add/delete 命令和无兼容 chain 拒绝。
 - [x] Environment 文件读写测试：已覆盖受限文件发现、UTF-8 读取、保存前备份、ViewModel 状态流和审计日志写入；真实服务器已通过临时 `$HOME/hhc-phase4-env-*` 目录验证 `.env` 发现、保存、备份和审计。
 - [x] 安全组测试：已覆盖 TencentCloudAdapter VPC 安全组/规则读取和单条写操作 API contract、CloudSecurityGroupService 账号/凭据/关联链路、ViewModel 加载/选择/写入刷新和审计状态流。
 - [x] RemoteChangeLogStore 测试：已覆盖保存、倒序查询、按 server 过滤和 server 删除后的 SET NULL。
@@ -145,7 +145,7 @@ CREATE TABLE environment_profiles (
 - [x] 新增安全组规则前显示预览和确认基础：当前安全组详情页可生成拟新增规则预览并展示风险，确认后执行腾讯云单条规则写入。
 - [x] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，并通过受控临时 oneshot unit 验证真实 restart 写操作、远端 marker 和 `remote_change_logs` 审计。
 - [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，且已加入受保护的临时配置写入/reload 集成入口。当前测试服务器 nginx 服务未运行，真实配置写入/reload 仍待合适环境谨慎验收。
-- [x] 防火墙后端只读探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作已有 mock/contract 测试覆盖，真实服务器写入仍需谨慎手动验收。
+- [x] 防火墙后端探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作已有 mock/contract 测试覆盖，其中 nftables 仅写入已有兼容 chain 且只删除 HHC 标记规则，真实服务器写入仍需谨慎手动验收。
 - [x] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，并通过受控临时 cron entry 验证 add/disable/enable/delete、原 crontab 恢复和 `remote_change_logs` 审计。
 - [x] Environment 文件保存可备份并审计。当前真实服务器已通过受控临时 `.env` 验证保存、`.hhc-backup-*` 备份、远端内容变更和 `remote_change_logs` 审计。
 - [ ] 所有写操作可在操作日志中查到。当前 systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`；systemd/Cron/Environment 真实服务器写操作审计已验收，Nginx/Firewall 真实服务器写操作和真实云账号验收仍需继续补齐。

@@ -4608,7 +4608,7 @@ final class FirewallManager: @unchecked Sendable {
         profile: ServerProfile,
         sshClient: SSHClient
     ) async throws -> FirewallRuleMutationResult {
-        let command = try Self.command(for: draft, backend: snapshot.backend)
+        let command = try Self.command(for: draft, snapshot: snapshot)
         let result = try await CloudProviderRequestRunner.withTimeout(20) {
             try await sshClient.execute(command, profile: profile)
         }
@@ -4651,7 +4651,29 @@ final class FirewallManager: @unchecked Sendable {
             let cidrFlag = draft.direction == .ingress ? "-s" : "-d"
             return "iptables \(operation) \(chain) -p \(draft.proto.rawValue) \(cidrFlag) \(shellQuote(draft.cidr)) --dport \(draft.port) -j \(jump)"
         case .nft:
-            throw SSHClientError.processFailed("nftables limited rule editing requires an existing table/chain policy and is not supported yet.")
+            throw SSHClientError.processFailed("Refresh nftables rules before editing so an existing table and chain can be selected.")
+        }
+    }
+
+    static func command(for draft: FirewallRuleDraft, snapshot: FirewallSnapshot) throws -> String {
+        try validate(draft)
+        guard snapshot.backend == .nft else {
+            return try command(for: draft, backend: snapshot.backend)
+        }
+        let target = try nftTarget(for: draft.direction, rulesText: snapshot.rulesText)
+        let marker = nftMarker(for: draft)
+        let addressFlag = draft.direction == .ingress ? "saddr" : "daddr"
+        let nftAction = draft.action == .allow ? "accept" : "drop"
+        let chainCommand = "\(target.family) \(shellQuote(target.table)) \(shellQuote(target.chain))"
+        switch draft.mutation {
+        case .add:
+            return "nft add rule \(chainCommand) ip \(addressFlag) \(shellQuote(draft.cidr)) \(draft.proto.rawValue) dport \(draft.port) counter \(nftAction) comment \(shellQuote(marker))"
+        case .delete:
+            return """
+            set -e; marker=\(shellQuote(marker)); handle=$(nft -a list chain \(chainCommand) | awk -v marker="$marker" 'index($0, "comment " sprintf("%c", 34) marker sprintf("%c", 34)) { print $NF; exit }'); \
+            if [ -z "$handle" ]; then echo "No HHC-managed nftables rule found for $marker" >&2; exit 4; fi; \
+            nft delete rule \(chainCommand) handle "$handle"
+            """
         }
     }
 
@@ -4707,6 +4729,78 @@ final class FirewallManager: @unchecked Sendable {
             guard let number = Int(octet), (0...255).contains(number) else { return false }
             return String(number) == String(octet)
         }
+    }
+
+    private struct NftTarget: Equatable {
+        var family: String
+        var table: String
+        var chain: String
+    }
+
+    private static func nftTarget(for direction: FirewallRuleDirection, rulesText: String) throws -> NftTarget {
+        let hook = direction == .ingress ? "input" : "output"
+        var currentTable: (family: String, name: String)?
+        var currentChain: String?
+        let normalized = rulesText
+            .replacingOccurrences(of: "{", with: " {\n")
+            .replacingOccurrences(of: "}", with: "\n}\n")
+            .replacingOccurrences(of: ";", with: ";\n")
+
+        for rawLine in normalized.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+
+            if parts.first == "table", parts.count >= 4 {
+                let family = parts[1]
+                let table = unquotedNftName(parts[2])
+                if ["inet", "ip"].contains(family), isSafeNftIdentifier(table) {
+                    currentTable = (family, table)
+                } else {
+                    currentTable = nil
+                }
+                currentChain = nil
+                continue
+            }
+
+            if line == "}" {
+                if currentChain != nil {
+                    currentChain = nil
+                } else {
+                    currentTable = nil
+                }
+                continue
+            }
+
+            guard let table = currentTable else { continue }
+            if parts.first == "chain", parts.count >= 3 {
+                let chain = unquotedNftName(parts[1])
+                currentChain = isSafeNftIdentifier(chain) ? chain : nil
+                continue
+            }
+
+            guard let chain = currentChain else { continue }
+            if line.contains("type filter"),
+               line.contains("hook \(hook)"),
+               !line.contains("hook \(hook)dev") {
+                return NftTarget(family: table.family, table: table.name, chain: chain)
+            }
+        }
+
+        throw SSHClientError.processFailed("No compatible nftables \(hook) chain was found. HHC only edits existing inet/ip filter chains.")
+    }
+
+    private static func nftMarker(for draft: FirewallRuleDraft) -> String {
+        "hhc:\(draft.direction.rawValue):\(draft.action.rawValue):\(draft.proto.rawValue):\(draft.port):\(draft.cidr)"
+    }
+
+    private static func unquotedNftName(_ value: String) -> String {
+        value.trimmingCharacters(in: CharacterSet(charactersIn: "\"'{};"))
+    }
+
+    private static func isSafeNftIdentifier(_ value: String) -> Bool {
+        guard !value.isEmpty else { return false }
+        return value.range(of: #"^[A-Za-z0-9_.-]+$"#, options: .regularExpression) != nil
     }
 
     private static func shellQuote(_ value: String) -> String {

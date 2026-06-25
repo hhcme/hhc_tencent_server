@@ -2248,6 +2248,43 @@ final class ServerManagementServiceTests: XCTestCase {
         )
         XCTAssertTrue(try FirewallManager.command(for: draft, backend: .firewalld).contains("--add-rich-rule='rule family=\"ipv4\""))
         XCTAssertThrowsError(try FirewallManager.command(for: draft, backend: .nft))
+        let nftSnapshot = FirewallSnapshot(
+            backend: .nft,
+            status: "installed",
+            rulesText: """
+            table inet filter {
+              chain input {
+                type filter hook input priority 0; policy accept;
+              }
+              chain output {
+                type filter hook output priority 0; policy accept;
+              }
+            }
+            """,
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        XCTAssertEqual(
+            try FirewallManager.command(for: draft, snapshot: nftSnapshot),
+            "nft add rule inet 'filter' 'input' ip saddr '203.0.113.0/24' tcp dport 443 counter accept comment 'hhc:ingress:allow:tcp:443:203.0.113.0/24'"
+        )
+        let deleteDraft = FirewallRuleDraft(
+            mutation: .delete,
+            direction: .egress,
+            action: .deny,
+            proto: .udp,
+            port: 53,
+            cidr: "198.51.100.10/32"
+        )
+        let deleteCommand = try FirewallManager.command(for: deleteDraft, snapshot: nftSnapshot)
+        XCTAssertTrue(deleteCommand.contains("nft -a list chain inet 'filter' 'output'"))
+        XCTAssertTrue(deleteCommand.contains("sprintf(\"%c\", 34) marker sprintf(\"%c\", 34)"))
+        XCTAssertTrue(deleteCommand.contains("nft delete rule inet 'filter' 'output' handle \"$handle\""))
+        XCTAssertThrowsError(try FirewallManager.command(for: draft, snapshot: FirewallSnapshot(
+            backend: .nft,
+            status: "installed",
+            rulesText: "table ip nat { chain prerouting { type nat hook prerouting priority 0; } }",
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )))
         XCTAssertThrowsError(try FirewallManager.command(for: FirewallRuleDraft(
             mutation: .add,
             direction: .ingress,

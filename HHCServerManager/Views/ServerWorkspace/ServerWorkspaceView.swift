@@ -2363,10 +2363,10 @@ struct ServerWorkspaceView: View {
             }
 
             if let draft = currentFirewallRuleDraft,
-               let command = try? FirewallManager.command(for: draft, backend: snapshot.backend) {
+               let command = try? FirewallManager.command(for: draft, snapshot: snapshot) {
                 RiskPreviewView(risk: RemoteOperationRiskFactory.firewallRule(draft, backend: snapshot.backend, command: command))
             } else if snapshot.backend == .nft {
-                Label("nftables limited rule editing is not available yet.", systemImage: "lock")
+                Label("nftables edits require an existing inet/ip filter input or output chain.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2937,7 +2937,7 @@ struct ServerWorkspaceView: View {
         }
 
         do {
-            let command = try FirewallManager.command(for: draft, backend: snapshot.backend)
+            let command = try FirewallManager.command(for: draft, snapshot: snapshot)
             pendingFirewallRule = FirewallRuleRequest(
                 draft: draft,
                 risk: RemoteOperationRiskFactory.firewallRule(draft, backend: snapshot.backend, command: command)
