@@ -52,6 +52,7 @@ All notable changes to this project will be documented in this file.
 - Added Dashboard auto-refresh toggle with immediate refresh, periodic refresh, cancellation on disable/disappear, and ViewModel coverage.
 - Added Tencent Cloud Monitor `GetMonitorData` support for linked CVM Cloud CPU metrics, with Cloud API source labeling and dashboard aggregation tests.
 - Started Phase 4 Services with systemd unit listing, strict `.service` unit validation, journal reading, confirmed start/stop/restart/reload actions, UI wiring, tests, and read-only real-server validation.
+- Added Cron workspace foundations with crontab reading, entry parsing, add/enable/disable/delete flows, pre-install remote backups, confirmation UI, tests, and read-only real-server validation.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -99,3 +100,4 @@ All notable changes to this project will be documented in this file.
 - 添加 Dashboard 自动刷新开关，支持立即刷新、周期刷新、关闭/离开时取消，并补充 ViewModel 覆盖。
 - 添加腾讯云云监控 `GetMonitorData` 支持，可为已关联 CVM 展示 Cloud CPU 指标，并补充 Cloud API 来源标记和 Dashboard 聚合测试。
 - 启动 Phase 4 Services，加入 systemd 服务列表、严格 `.service` 单元校验、journal 读取、带确认的 start/stop/restart/reload 操作、UI 接入、测试和真实服务器只读验证。
+- 添加 Cron 工作台基础，支持 crontab 读取、任务解析、添加/启用/禁用/删除流程、写入前远端备份、确认 UI、测试和真实服务器只读验证。

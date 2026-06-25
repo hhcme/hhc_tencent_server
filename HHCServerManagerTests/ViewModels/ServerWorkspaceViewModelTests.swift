@@ -629,6 +629,35 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedSystemdUnit?.name, "ssh.service")
     }
 
+    func testCronEntriesLoadAddDisableAndDelete() async throws {
+        let profile = makeProfile()
+        let client = CronViewModelMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let manager = CronManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadCron(profile: profile, sshClient: client, cronManager: manager)
+        try await waitUntil { viewModel.isLoadingCron == false && viewModel.cronSnapshot != nil }
+
+        XCTAssertEqual(viewModel.cronSnapshot?.entries.map(\.command), ["/usr/bin/backup"])
+        XCTAssertNil(viewModel.cronErrorMessage)
+
+        viewModel.addCronEntry(schedule: "*/5 * * * *", command: "/usr/bin/health", profile: profile, sshClient: client, cronManager: manager)
+        try await waitUntil { viewModel.isMutatingCron == false && viewModel.cronSnapshot?.entries.count == 2 }
+
+        XCTAssertEqual(viewModel.cronActionMessage, "Added cron entry.")
+        let health = try XCTUnwrap(viewModel.cronSnapshot?.entries.first { $0.command == "/usr/bin/health" })
+        XCTAssertTrue(health.isEnabled)
+
+        viewModel.performCronEntryAction(.disable, entry: health, profile: profile, sshClient: client, cronManager: manager)
+        try await waitUntil { viewModel.cronSnapshot?.entries.first { $0.command == "/usr/bin/health" }?.isEnabled == false }
+        XCTAssertEqual(viewModel.cronActionMessage, "Disable requested for cron entry.")
+
+        let disabled = try XCTUnwrap(viewModel.cronSnapshot?.entries.first { $0.command == "/usr/bin/health" })
+        viewModel.performCronEntryAction(.delete, entry: disabled, profile: profile, sshClient: client, cronManager: manager)
+        try await waitUntil { viewModel.cronSnapshot?.entries.count == 1 }
+        XCTAssertEqual(viewModel.cronSnapshot?.entries.map(\.command), ["/usr/bin/backup"])
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -1086,4 +1115,32 @@ private final class SystemdViewModelMockSSHClient: SSHClient, @unchecked Sendabl
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class CronViewModelMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var crontab = "0 2 * * * /usr/bin/backup\n"
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        if command == "crontab -l 2>/dev/null || true" {
+            return CommandResult(command: command, stdout: crontab, stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("crontab -") {
+            crontab = Self.decodeCrontab(from: command)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+
+    private static func decodeCrontab(from command: String) -> String {
+        guard let start = command.range(of: "crontab -\n"),
+              let end = command[start.upperBound...].range(of: "\n__HHC_CRON_EOF__")
+        else { return "" }
+        let encoded = String(command[start.upperBound..<end.lowerBound])
+        return Data(base64Encoded: encoded).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
 }

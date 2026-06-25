@@ -29,6 +29,11 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isLoadingSystemdJournal = false
     @Published var systemdErrorMessage: String?
     @Published var systemdActionMessage: String?
+    @Published var cronSnapshot: CronTabSnapshot?
+    @Published var isLoadingCron = false
+    @Published var isMutatingCron = false
+    @Published var cronErrorMessage: String?
+    @Published var cronActionMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -647,6 +652,89 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.systemdErrorMessage = error.localizedDescription
                     self.isLoadingSystemdJournal = false
+                }
+            }
+        }
+    }
+
+    func loadCron(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        cronManager: CronManager
+    ) {
+        isLoadingCron = true
+        cronErrorMessage = nil
+        cronActionMessage = nil
+
+        Task {
+            do {
+                let snapshot = try await cronManager.load(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.cronSnapshot = snapshot
+                    self.isLoadingCron = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.cronErrorMessage = error.localizedDescription
+                    self.isLoadingCron = false
+                }
+            }
+        }
+    }
+
+    func addCronEntry(
+        schedule: String,
+        command: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        cronManager: CronManager
+    ) {
+        isMutatingCron = true
+        cronErrorMessage = nil
+        cronActionMessage = nil
+
+        Task {
+            do {
+                try await cronManager.add(schedule: schedule, command: command, profile: profile, sshClient: sshClient)
+                let snapshot = try await cronManager.load(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.cronSnapshot = snapshot
+                    self.cronActionMessage = "Added cron entry."
+                    self.isMutatingCron = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.cronErrorMessage = error.localizedDescription
+                    self.isMutatingCron = false
+                }
+            }
+        }
+    }
+
+    func performCronEntryAction(
+        _ action: CronEntryAction,
+        entry: CronEntry,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        cronManager: CronManager
+    ) {
+        isMutatingCron = true
+        cronErrorMessage = nil
+        cronActionMessage = nil
+
+        Task {
+            do {
+                try await cronManager.perform(action, entry: entry, profile: profile, sshClient: sshClient)
+                let snapshot = try await cronManager.load(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.cronSnapshot = snapshot
+                    self.cronActionMessage = "\(action.displayName) requested for cron entry."
+                    self.isMutatingCron = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.cronErrorMessage = error.localizedDescription
+                    self.isMutatingCron = false
                 }
             }
         }

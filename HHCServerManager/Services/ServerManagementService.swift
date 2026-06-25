@@ -625,6 +625,140 @@ final class SystemdServiceManager: @unchecked Sendable {
     }
 }
 
+final class CronManager: @unchecked Sendable {
+    static let disabledPrefix = "# HHC_DISABLED "
+
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func load(profile: ServerProfile, sshClient: SSHClient) async throws -> CronTabSnapshot {
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute("crontab -l 2>/dev/null || true", profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not read crontab.")
+        }
+        return CronTabSnapshot(entries: Self.parse(result.stdout), rawText: result.stdout, capturedAt: now())
+    }
+
+    func add(
+        schedule: String,
+        command: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws {
+        let normalizedLine = try Self.makeEntryLine(schedule: schedule, command: command)
+        let snapshot = try await load(profile: profile, sshClient: sshClient)
+        var lines = Self.normalizedLines(snapshot.rawText)
+        lines.append(normalizedLine)
+        try await install(lines: lines, profile: profile, sshClient: sshClient)
+    }
+
+    func perform(
+        _ action: CronEntryAction,
+        entry: CronEntry,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws {
+        let snapshot = try await load(profile: profile, sshClient: sshClient)
+        let lines = Self.normalizedLines(snapshot.rawText)
+        guard let index = lines.firstIndex(of: entry.originalLine) else {
+            throw SSHClientError.processFailed("Cron entry no longer exists.")
+        }
+        var updated = lines
+        switch action {
+        case .enable:
+            guard !entry.isEnabled else { return }
+            updated[index] = String(entry.originalLine.dropFirst(Self.disabledPrefix.count))
+        case .disable:
+            guard entry.isEnabled else { return }
+            updated[index] = "\(Self.disabledPrefix)\(entry.originalLine)"
+        case .delete:
+            updated.remove(at: index)
+        }
+        try await install(lines: updated, profile: profile, sshClient: sshClient)
+    }
+
+    static func parse(_ text: String) -> [CronEntry] {
+        normalizedLines(text).compactMap { line in
+            parseLine(line)
+        }
+    }
+
+    static func makeEntryLine(schedule: String, command: String) throws -> String {
+        let normalizedSchedule = schedule.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedCommand.isEmpty else {
+            throw SSHClientError.processFailed("Cron command cannot be empty.")
+        }
+        guard !normalizedCommand.contains("\n") && !normalizedCommand.contains("\r") else {
+            throw SSHClientError.processFailed("Cron command must be a single line.")
+        }
+        guard isValidSchedule(normalizedSchedule) else {
+            throw SSHClientError.processFailed("Cron schedule must contain exactly five fields.")
+        }
+        return "\(normalizedSchedule) \(normalizedCommand)"
+    }
+
+    private func install(lines: [String], profile: ServerProfile, sshClient: SSHClient) async throws {
+        let content = lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
+        let encoded = Data(content.utf8).base64EncodedString()
+        let backupPath = "~/.hhc-crontab-backup-\(Self.timestamp(for: now()))"
+        let command = """
+        set -e; \
+        crontab -l > \(Self.shellQuote(backupPath)) 2>/dev/null || true; \
+        base64 -d <<'__HHC_CRON_EOF__' | crontab -
+        \(encoded)
+        __HHC_CRON_EOF__
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not install crontab.")
+        }
+    }
+
+    private static func parseLine(_ line: String) -> CronEntry? {
+        let isDisabled = line.hasPrefix(disabledPrefix)
+        let activeLine = isDisabled ? String(line.dropFirst(disabledPrefix.count)) : line
+        guard !activeLine.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("#") else { return nil }
+        let parts = activeLine.split(maxSplits: 5, whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard parts.count == 6 else { return nil }
+        let schedule = parts.prefix(5).joined(separator: " ")
+        return CronEntry(
+            schedule: schedule,
+            command: parts[5],
+            isEnabled: !isDisabled,
+            originalLine: line
+        )
+    }
+
+    private static func normalizedLines(_ text: String) -> [String] {
+        text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func isValidSchedule(_ schedule: String) -> Bool {
+        schedule.split(whereSeparator: { $0.isWhitespace }).count == 5
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func timestamp(for date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+            .replacingOccurrences(of: ":", with: "-")
+    }
+}
+
 final class RemoteFileService: @unchecked Sendable {
     static let maxEditableTextBytes = 256 * 1024
 

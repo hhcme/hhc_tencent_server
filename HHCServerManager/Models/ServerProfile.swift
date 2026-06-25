@@ -156,6 +156,39 @@ struct SystemdJournalLog: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+struct CronEntry: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { originalLine }
+    var schedule: String
+    var command: String
+    var isEnabled: Bool
+    var originalLine: String
+}
+
+struct CronTabSnapshot: Equatable, Hashable, Sendable {
+    var entries: [CronEntry]
+    var rawText: String
+    var capturedAt: Date
+}
+
+enum CronEntryAction: String, CaseIterable, Identifiable, Sendable {
+    case enable
+    case disable
+    case delete
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .enable:
+            "Enable"
+        case .disable:
+            "Disable"
+        case .delete:
+            "Delete"
+        }
+    }
+}
+
 enum RemoteFileKind: String, Equatable, Hashable {
     case directory
     case file

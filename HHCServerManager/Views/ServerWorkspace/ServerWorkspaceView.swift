@@ -13,6 +13,9 @@ struct ServerWorkspaceView: View {
     @State private var remoteFilePermissionsEntry: RemoteFileEntry?
     @State private var remoteFilePermissionsText = ""
     @State private var pendingSystemdAction: SystemdActionRequest?
+    @State private var cronScheduleText = "0 2 * * *"
+    @State private var cronCommandText = ""
+    @State private var pendingCronAction: CronActionRequest?
 
     let profile: ServerProfile
 
@@ -27,6 +30,8 @@ struct ServerWorkspaceView: View {
                     .tag("files")
                 Label("Services", systemImage: "gearshape.2")
                     .tag("services")
+                Label("Cron", systemImage: "calendar.badge.clock")
+                    .tag("cron")
                 Label("Cloud", systemImage: "cloud")
                     .tag("cloud")
                     .foregroundStyle(.secondary)
@@ -87,6 +92,18 @@ struct ServerWorkspaceView: View {
                         sshClient: appState.sshClient,
                         systemdServiceManager: appState.systemdServiceManager
                     )
+                },
+                secondaryButton: .cancel()
+            )
+        }
+        .alert(item: $pendingCronAction) { request in
+            Alert(
+                title: Text("\(request.action.displayName) Cron Entry?"),
+                message: Text(request.entry.command),
+                primaryButton: request.action == .delete ? .destructive(Text(request.action.displayName)) {
+                    performCronAction(request)
+                } : .default(Text(request.action.displayName)) {
+                    performCronAction(request)
                 },
                 secondaryButton: .cancel()
             )
@@ -178,6 +195,8 @@ struct ServerWorkspaceView: View {
             filesPanel
         case "services":
             servicesPanel
+        case "cron":
+            cronPanel
         default:
             overview
         }
@@ -798,6 +817,165 @@ struct ServerWorkspaceView: View {
         }
     }
 
+    private var cronPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Cron")
+                        .font(.title2.weight(.semibold))
+                    Spacer()
+                    Button {
+                        viewModel.loadCron(
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            cronManager: appState.cronManager
+                        )
+                    } label: {
+                        if viewModel.isLoadingCron {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isCronBusy)
+                }
+
+                HStack(spacing: 8) {
+                    TextField("Schedule", text: $cronScheduleText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(width: 160)
+                    TextField("Command", text: $cronCommandText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                    Button {
+                        addCronEntry()
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .disabled(isCronBusy || cronCommandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                if let capturedAt = viewModel.cronSnapshot?.capturedAt {
+                    Text("Last updated \(capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = viewModel.cronErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+
+                if let message = viewModel.cronActionMessage {
+                    Label(message, systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
+                }
+            }
+            .padding(20)
+
+            Divider()
+
+            Group {
+                if let entries = viewModel.cronSnapshot?.entries {
+                    cronEntryList(entries)
+                } else {
+                    ContentUnavailableView(
+                        "No Cron Loaded",
+                        systemImage: "calendar.badge.clock",
+                        description: Text("Refresh to read the remote user's crontab.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .onAppear {
+            if viewModel.cronSnapshot == nil && !viewModel.isLoadingCron {
+                viewModel.loadCron(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    cronManager: appState.cronManager
+                )
+            }
+        }
+    }
+
+    private func cronEntryList(_ entries: [CronEntry]) -> some View {
+        List(entries) { entry in
+            CronEntryRow(entry: entry)
+                .contextMenu {
+                    if entry.isEnabled {
+                        Button {
+                            pendingCronAction = CronActionRequest(entry: entry, action: .disable)
+                        } label: {
+                            Label("Disable", systemImage: "pause.fill")
+                        }
+                    } else {
+                        Button {
+                            pendingCronAction = CronActionRequest(entry: entry, action: .enable)
+                        } label: {
+                            Label("Enable", systemImage: "play.fill")
+                        }
+                    }
+                    Button(role: .destructive) {
+                        pendingCronAction = CronActionRequest(entry: entry, action: .delete)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        pendingCronAction = CronActionRequest(entry: entry, action: .delete)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    if entry.isEnabled {
+                        Button {
+                            pendingCronAction = CronActionRequest(entry: entry, action: .disable)
+                        } label: {
+                            Label("Disable", systemImage: "pause.fill")
+                        }
+                        .tint(.orange)
+                    } else {
+                        Button {
+                            pendingCronAction = CronActionRequest(entry: entry, action: .enable)
+                        } label: {
+                            Label("Enable", systemImage: "play.fill")
+                        }
+                        .tint(.green)
+                    }
+                }
+        }
+        .overlay {
+            if entries.isEmpty {
+                ContentUnavailableView("No Cron Entries", systemImage: "calendar.badge.clock")
+            }
+        }
+    }
+
+    private func addCronEntry() {
+        viewModel.addCronEntry(
+            schedule: cronScheduleText,
+            command: cronCommandText,
+            profile: profile,
+            sshClient: appState.sshClient,
+            cronManager: appState.cronManager
+        )
+        cronCommandText = ""
+    }
+
+    private func performCronAction(_ request: CronActionRequest) {
+        viewModel.performCronEntryAction(
+            request.action,
+            entry: request.entry,
+            profile: profile,
+            sshClient: appState.sshClient,
+            cronManager: appState.cronManager
+        )
+    }
+
     private func systemdJournalText(for unit: SystemdUnit) -> String {
         guard viewModel.systemdJournalLog?.unitName == unit.name else {
             return "Select Logs to load recent journal entries."
@@ -1073,6 +1251,10 @@ struct ServerWorkspaceView: View {
             viewModel.isPerformingSystemdAction ||
             viewModel.isLoadingSystemdJournal
     }
+
+    private var isCronBusy: Bool {
+        viewModel.isLoadingCron || viewModel.isMutatingCron
+    }
 }
 
 private struct SystemdActionRequest: Identifiable {
@@ -1081,6 +1263,15 @@ private struct SystemdActionRequest: Identifiable {
 
     var id: String {
         "\(unit.id)-\(action.id)"
+    }
+}
+
+private struct CronActionRequest: Identifiable {
+    var entry: CronEntry
+    var action: CronEntryAction
+
+    var id: String {
+        "\(entry.id)-\(action.id)"
     }
 }
 
@@ -1203,6 +1394,36 @@ private struct SystemdStateBadge: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Color.secondary.opacity(0.10), in: Capsule())
+    }
+}
+
+private struct CronEntryRow: View {
+    let entry: CronEntry
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: entry.isEnabled ? "checkmark.circle.fill" : "pause.circle")
+                .foregroundStyle(entry.isEnabled ? .green : .orange)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.command)
+                    .font(.system(.body, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(entry.schedule)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospaced()
+            }
+
+            Spacer()
+
+            Text(entry.isEnabled ? "enabled" : "disabled")
+                .font(.caption)
+                .foregroundStyle(entry.isEnabled ? .green : .secondary)
+        }
+        .padding(.vertical, 4)
     }
 }
 

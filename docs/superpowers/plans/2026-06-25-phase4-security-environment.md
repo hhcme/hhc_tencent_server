@@ -122,14 +122,14 @@ CREATE TABLE environment_profiles (
 
 ### Task 6：Cron 与环境变量
 
-- [ ] 读取用户 crontab。
-- [ ] 添加、禁用、删除任务。
+- [x] 读取用户 crontab。
+- [x] 添加、禁用、删除任务：当前支持用户级 crontab 的添加、启用、禁用和删除，写入前创建远端备份。
 - [ ] 管理常用 `.env` 文件和 systemd env file。
 - [ ] 保存前创建备份。
 
 ### Task 7：测试
 
-- [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验和命令构建。
+- [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验、Cron 解析和 crontab 写入内容。
 - [ ] 风险确认 ViewModel 测试。
 - [ ] Nginx 配置测试/回滚逻辑测试。
 - [ ] Firewall adapter 能力探测测试。
@@ -142,7 +142,7 @@ CREATE TABLE environment_profiles (
 - [ ] 新增安全组规则前显示预览和确认。
 - [ ] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，重启操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
 - [ ] Nginx 配置测试失败时不 reload。
-- [ ] Cron 任务可禁用并恢复。
+- [ ] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，禁用/恢复写操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
 - [ ] 所有写操作可在操作日志中查到。
 
 ## 8. 完成标志

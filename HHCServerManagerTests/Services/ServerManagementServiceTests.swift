@@ -255,6 +255,48 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(client.commands.contains("journalctl -u 'nginx.service' -n 42 --no-pager --output=short-iso"))
     }
 
+    func testCronManagerParsesValidatesAndMutatesCrontab() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingCronSSHClient()
+        let manager = CronManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let parsed = CronManager.parse("""
+        # comment
+        0 2 * * * /usr/bin/backup
+        # HHC_DISABLED */5 * * * * /usr/bin/ping
+        """)
+        XCTAssertEqual(parsed.count, 2)
+        XCTAssertEqual(parsed[0].schedule, "0 2 * * *")
+        XCTAssertTrue(parsed[0].isEnabled)
+        XCTAssertFalse(parsed[1].isEnabled)
+        XCTAssertEqual(try CronManager.makeEntryLine(schedule: "*/10 * * * *", command: "/usr/bin/echo ok"), "*/10 * * * * /usr/bin/echo ok")
+        XCTAssertThrowsError(try CronManager.makeEntryLine(schedule: "* * * *", command: "bad"))
+        XCTAssertThrowsError(try CronManager.makeEntryLine(schedule: "* * * * *", command: "bad\nline"))
+
+        var snapshot = try await manager.load(profile: profile, sshClient: client)
+        XCTAssertEqual(snapshot.entries.map(\.command), ["/usr/bin/backup"])
+
+        try await manager.add(schedule: "*/5 * * * *", command: "/usr/bin/health", profile: profile, sshClient: client)
+        XCTAssertTrue(client.installedCrontab.contains("*/5 * * * * /usr/bin/health"))
+        XCTAssertTrue(client.commands.contains { $0.contains(".hhc-crontab-backup-") })
+
+        snapshot = try await manager.load(profile: profile, sshClient: client)
+        let health = try XCTUnwrap(snapshot.entries.first { $0.command == "/usr/bin/health" })
+        try await manager.perform(.disable, entry: health, profile: profile, sshClient: client)
+        XCTAssertTrue(client.installedCrontab.contains("# HHC_DISABLED */5 * * * * /usr/bin/health"))
+
+        snapshot = try await manager.load(profile: profile, sshClient: client)
+        let disabledHealth = try XCTUnwrap(snapshot.entries.first { $0.command == "/usr/bin/health" })
+        try await manager.perform(.enable, entry: disabledHealth, profile: profile, sshClient: client)
+        XCTAssertTrue(client.installedCrontab.contains("*/5 * * * * /usr/bin/health"))
+        XCTAssertFalse(client.installedCrontab.contains("# HHC_DISABLED */5 * * * * /usr/bin/health"))
+
+        snapshot = try await manager.load(profile: profile, sshClient: client)
+        let enabledHealth = try XCTUnwrap(snapshot.entries.first { $0.command == "/usr/bin/health" })
+        try await manager.perform(.delete, entry: enabledHealth, profile: profile, sshClient: client)
+        XCTAssertFalse(client.installedCrontab.contains("/usr/bin/health"))
+    }
+
     func testDashboardServiceAppendsCloudMetricsWhenLinked() async throws {
         let harness = try Harness(adapters: [
             MockCloudProviderAdapter(
@@ -1079,6 +1121,37 @@ private final class RecordingSystemdSSHClient: SSHClient, @unchecked Sendable {
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class RecordingCronSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+    private(set) var installedCrontab = "0 2 * * * /usr/bin/backup\n"
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command == "crontab -l 2>/dev/null || true" {
+            return CommandResult(command: command, stdout: installedCrontab, stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("crontab -") {
+            installedCrontab = Self.decodeCrontab(from: command)
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+
+    private static func decodeCrontab(from command: String) -> String {
+        guard let start = command.range(of: "crontab -\n"),
+              let end = command[start.upperBound...].range(of: "\n__HHC_CRON_EOF__")
+        else { return "" }
+        let encoded = String(command[start.upperBound..<end.lowerBound])
+        return Data(base64Encoded: encoded).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
 }
 
 private final class RecordingTransferClient: RemoteFileTransferClient, @unchecked Sendable {
