@@ -5,6 +5,7 @@ struct ServerWorkspaceView: View {
     @StateObject private var viewModel = ServerWorkspaceViewModel()
     @State private var selectedSection = "overview"
     @State private var commandText = ""
+    @State private var filePathText = "~"
 
     let profile: ServerProfile
 
@@ -17,7 +18,6 @@ struct ServerWorkspaceView: View {
                     .tag("terminal")
                 Label("Files", systemImage: "folder")
                     .tag("files")
-                    .foregroundStyle(.secondary)
                 Label("Services", systemImage: "gearshape.2")
                     .tag("services")
                     .foregroundStyle(.secondary)
@@ -65,6 +65,8 @@ struct ServerWorkspaceView: View {
         switch selectedSection {
         case "terminal":
             commandPanel
+        case "files":
+            filesPanel
         default:
             overview
         }
@@ -313,6 +315,120 @@ struct ServerWorkspaceView: View {
         }
     }
 
+    private var filesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Files")
+                    .font(.title2.weight(.semibold))
+
+                HStack(spacing: 8) {
+                    Button {
+                        viewModel.loadRemoteParentDirectory(
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            remoteFileService: appState.remoteFileService
+                        )
+                        filePathText = RemoteFileService.parentPath(for: viewModel.remoteFilePath)
+                    } label: {
+                        Label("Up", systemImage: "arrow.up")
+                    }
+                    .disabled(viewModel.isLoadingRemoteFiles || viewModel.remoteFilePath == "/")
+
+                    TextField("Remote path", text: $filePathText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .onSubmit {
+                            loadRemoteFilesFromPathField()
+                        }
+
+                    Button {
+                        loadRemoteFilesFromPathField()
+                    } label: {
+                        if viewModel.isLoadingRemoteFiles {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isLoadingRemoteFiles)
+                }
+
+                if let capturedAt = viewModel.remoteDirectoryListing?.capturedAt {
+                    Text("Last updated \(capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = viewModel.remoteFileErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(20)
+
+            Divider()
+
+            Group {
+                if let listing = viewModel.remoteDirectoryListing {
+                    remoteFileList(listing.entries)
+                } else {
+                    ContentUnavailableView(
+                        "No Directory Loaded",
+                        systemImage: "folder",
+                        description: Text("Refresh to browse the remote server directory.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .onAppear {
+            filePathText = viewModel.remoteFilePath
+            if viewModel.remoteDirectoryListing == nil && !viewModel.isLoadingRemoteFiles {
+                viewModel.loadRemoteFiles(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    remoteFileService: appState.remoteFileService
+                )
+            }
+        }
+        .onChange(of: viewModel.remoteFilePath) { _, newPath in
+            filePathText = newPath
+        }
+    }
+
+    private func remoteFileList(_ entries: [RemoteFileEntry]) -> some View {
+        List(entries) { entry in
+            Button {
+                viewModel.openRemoteFileEntry(
+                    entry,
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    remoteFileService: appState.remoteFileService
+                )
+            } label: {
+                RemoteFileRow(entry: entry)
+            }
+            .buttonStyle(.plain)
+            .disabled(entry.kind != .directory)
+        }
+        .overlay {
+            if entries.isEmpty {
+                ContentUnavailableView("Empty Directory", systemImage: "folder")
+            }
+        }
+    }
+
+    private func loadRemoteFilesFromPathField() {
+        viewModel.loadRemoteFiles(
+            path: filePathText,
+            profile: profile,
+            sshClient: appState.sshClient,
+            remoteFileService: appState.remoteFileService
+        )
+    }
+
     private var persistedHistorySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Command History")
@@ -506,6 +622,80 @@ private struct CapabilityBadge: View {
         Label(title, systemImage: enabled ? "checkmark.circle" : "minus.circle")
             .font(.caption)
             .foregroundStyle(enabled ? .green : .secondary)
+    }
+}
+
+private struct RemoteFileRow: View {
+    let entry: RemoteFileEntry
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .foregroundStyle(iconColor)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(metadata)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            if let size = entry.size, entry.kind != .directory {
+                Text(Self.formatBytes(size))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var iconName: String {
+        switch entry.kind {
+        case .directory:
+            "folder"
+        case .file:
+            "doc"
+        case .symlink:
+            "link"
+        case .other:
+            "questionmark.square"
+        }
+    }
+
+    private var iconColor: Color {
+        entry.kind == .directory ? .accentColor : .secondary
+    }
+
+    private var metadata: String {
+        var parts = [entry.permissions]
+        if let modifiedAt = entry.modifiedAt {
+            parts.append(modifiedAt.formatted(date: .abbreviated, time: .shortened))
+        }
+        parts.append(entry.path)
+        return parts.joined(separator: " · ")
+    }
+
+    private static func formatBytes(_ bytes: Int64) -> String {
+        let value = Double(bytes)
+        if value < 1024 {
+            return "\(bytes) B"
+        }
+        let kib = value / 1024
+        if kib < 1024 {
+            return String(format: "%.1f KiB", kib)
+        }
+        let mib = kib / 1024
+        if mib < 1024 {
+            return String(format: "%.1f MiB", mib)
+        }
+        return String(format: "%.1f GiB", mib / 1024)
     }
 }
 

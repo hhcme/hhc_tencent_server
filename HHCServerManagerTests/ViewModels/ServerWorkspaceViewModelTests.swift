@@ -233,6 +233,41 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.dashboardErrorMessage)
     }
 
+    func testLoadRemoteFilesListsDirectoryAndOpensChildDirectory() async throws {
+        let profile = makeProfile()
+        let client = RemoteFileMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadRemoteFiles(
+            path: "/var/www",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.isLoadingRemoteFiles == false && viewModel.remoteDirectoryListing != nil }
+
+        var listing = try XCTUnwrap(viewModel.remoteDirectoryListing)
+        XCTAssertEqual(viewModel.remoteFilePath, "/var/www")
+        XCTAssertEqual(listing.entries.map(\.name), ["logs", "index.html"])
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+
+        viewModel.openRemoteFileEntry(
+            listing.entries[0],
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil {
+            viewModel.remoteDirectoryListing?.path == "/var/www/logs" &&
+                viewModel.remoteDirectoryListing?.entries.map(\.name) == ["app.log"]
+        }
+
+        listing = try XCTUnwrap(viewModel.remoteDirectoryListing)
+        XCTAssertEqual(listing.path, "/var/www/logs")
+        XCTAssertEqual(listing.entries.map(\.name), ["app.log"])
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -381,6 +416,27 @@ private final class DashboardMockSSHClient: SSHClient, @unchecked Sendable {
             stdout = "4\n"
         } else {
             stdout = ""
+        }
+        return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class RemoteFileMockSSHClient: SSHClient, @unchecked Sendable {
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        let stdout: String
+        if command.contains("cd -- '/var/www/logs'") {
+            stdout = "app.log\tf\t1024\t1700000100.0\t-rw-r--r--\n"
+        } else {
+            stdout = """
+            index.html\tf\t2048\t1700000001.0\t-rw-r--r--
+            logs\td\t4096\t1700000002.0\tdrwxr-xr-x
+            """
         }
         return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
     }

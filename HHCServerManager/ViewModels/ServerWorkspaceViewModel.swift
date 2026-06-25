@@ -8,6 +8,10 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isRefreshingDashboard = false
     @Published var dashboardSnapshot: ServerDashboardSnapshot?
     @Published var dashboardErrorMessage: String?
+    @Published var remoteFilePath = "~"
+    @Published var remoteDirectoryListing: RemoteDirectoryListing?
+    @Published var isLoadingRemoteFiles = false
+    @Published var remoteFileErrorMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -66,6 +70,61 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func loadRemoteFiles(
+        path: String? = nil,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService
+    ) {
+        let targetPath = RemoteFileService.normalizedDirectoryPath(path ?? remoteFilePath)
+        remoteFilePath = targetPath
+        isLoadingRemoteFiles = true
+        remoteFileErrorMessage = nil
+
+        Task {
+            do {
+                let listing = try await remoteFileService.listDirectory(
+                    path: targetPath,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.remoteDirectoryListing = listing
+                    self.remoteFilePath = listing.path
+                    self.isLoadingRemoteFiles = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.isLoadingRemoteFiles = false
+                }
+            }
+        }
+    }
+
+    func openRemoteFileEntry(
+        _ entry: RemoteFileEntry,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService
+    ) {
+        guard entry.kind == .directory else { return }
+        loadRemoteFiles(path: entry.path, profile: profile, sshClient: sshClient, remoteFileService: remoteFileService)
+    }
+
+    func loadRemoteParentDirectory(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService
+    ) {
+        loadRemoteFiles(
+            path: RemoteFileService.parentPath(for: remoteFilePath),
+            profile: profile,
+            sshClient: sshClient,
+            remoteFileService: remoteFileService
+        )
     }
 
     private func runSmokeTest(

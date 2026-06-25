@@ -381,6 +381,104 @@ final class DashboardService: @unchecked Sendable {
     }
 }
 
+final class RemoteFileService: @unchecked Sendable {
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func listDirectory(
+        path: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> RemoteDirectoryListing {
+        let normalizedPath = Self.normalizedDirectoryPath(path)
+        let command = """
+        cd -- \(Self.shellQuote(normalizedPath)) && find . -maxdepth 1 -mindepth 1 -printf '%f\\t%y\\t%s\\t%T@\\t%M\\n' 2>/dev/null | sort
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not list \(normalizedPath).")
+        }
+        return RemoteDirectoryListing(
+            path: normalizedPath,
+            entries: Self.parseFindListing(result.stdout, basePath: normalizedPath),
+            capturedAt: now()
+        )
+    }
+
+    static func parentPath(for path: String) -> String {
+        let normalized = normalizedDirectoryPath(path)
+        guard normalized != "/" else { return "/" }
+        let components = normalized.split(separator: "/").map(String.init)
+        let parent = components.dropLast().joined(separator: "/")
+        return parent.isEmpty ? "/" : "/\(parent)"
+    }
+
+    static func normalizedDirectoryPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "~" }
+        if trimmed == "/" || trimmed == "~" {
+            return trimmed
+        }
+        return trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
+    }
+
+    static func parseFindListing(_ text: String, basePath: String) -> [RemoteFileEntry] {
+        text.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 5 else { return nil }
+            let name = parts[0]
+            let kind = kind(fromFindType: parts[1])
+            let size = Int64(parts[2])
+            let modifiedAt = Double(parts[3]).map(Date.init(timeIntervalSince1970:))
+            return RemoteFileEntry(
+                name: name,
+                path: joinedPath(basePath: basePath, name: name),
+                kind: kind,
+                size: size,
+                modifiedAt: modifiedAt,
+                permissions: parts[4]
+            )
+        }
+        .sorted { left, right in
+            if left.kind == .directory, right.kind != .directory { return true }
+            if left.kind != .directory, right.kind == .directory { return false }
+            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+        }
+    }
+
+    private static func kind(fromFindType type: String) -> RemoteFileKind {
+        switch type {
+        case "d":
+            .directory
+        case "f":
+            .file
+        case "l":
+            .symlink
+        default:
+            .other
+        }
+    }
+
+    private static func joinedPath(basePath: String, name: String) -> String {
+        if basePath == "/" {
+            return "/\(name)"
+        }
+        if basePath == "~" {
+            return "~/\(name)"
+        }
+        return "\(basePath)/\(name)"
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 protocol CloudProviderAdapter: Sendable {
     var providerId: CloudProviderID { get }
     var displayName: String { get }

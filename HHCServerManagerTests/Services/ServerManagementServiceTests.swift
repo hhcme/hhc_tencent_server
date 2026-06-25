@@ -215,6 +215,24 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(disk, "10.0 GiB / 20.0 GiB")
     }
 
+    func testRemoteFileServiceParsesFindListingAndPaths() {
+        let entries = RemoteFileService.parseFindListing("""
+        z.log\tf\t2048\t1700000010.5\t-rw-r--r--
+        bin\td\t4096\t1700000000.0\tdrwxr-xr-x
+        current\tl\t12\t1700000020.0\tlrwxrwxrwx
+        """, basePath: "/var/www")
+
+        XCTAssertEqual(entries.map(\.name), ["bin", "current", "z.log"])
+        XCTAssertEqual(entries[0].kind, .directory)
+        XCTAssertEqual(entries[0].path, "/var/www/bin")
+        XCTAssertEqual(entries[1].kind, .symlink)
+        XCTAssertEqual(entries[1].size, 12)
+        XCTAssertEqual(entries[2].modifiedAt, Date(timeIntervalSince1970: 1_700_000_010.5))
+        XCTAssertEqual(RemoteFileService.normalizedDirectoryPath(" /tmp/ "), "/tmp")
+        XCTAssertEqual(RemoteFileService.parentPath(for: "/var/www"), "/var")
+        XCTAssertEqual(RemoteFileService.parentPath(for: "/"), "/")
+    }
+
     func testCloudInstanceSyncUpsertsInstancesAndPreservesServerLink() async throws {
         let adapter = MockCloudProviderAdapter(
             providerId: .tencentCloud,

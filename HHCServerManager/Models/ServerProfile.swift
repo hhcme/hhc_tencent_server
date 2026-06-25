@@ -84,6 +84,29 @@ struct ServerDashboardSnapshot: Equatable, Hashable {
     var capturedAt: Date
 }
 
+enum RemoteFileKind: String, Equatable, Hashable {
+    case directory
+    case file
+    case symlink
+    case other
+}
+
+struct RemoteFileEntry: Identifiable, Equatable, Hashable {
+    var id: String { path }
+    var name: String
+    var path: String
+    var kind: RemoteFileKind
+    var size: Int64?
+    var modifiedAt: Date?
+    var permissions: String
+}
+
+struct RemoteDirectoryListing: Equatable, Hashable {
+    var path: String
+    var entries: [RemoteFileEntry]
+    var capturedAt: Date
+}
+
 struct CommandHistoryEntry: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var serverId: UUID

@@ -41,6 +41,7 @@ All notable changes to this project will be documented in this file.
 - Improved the command panel with separate stdout/stderr sections, failure summaries, and rerun buttons for persisted command history.
 - Added cancellable command execution that terminates the underlying OpenSSH process when a running command is cancelled.
 - Started Phase 3 Dashboard foundations with SSH-based OS/capability detection, load/memory/disk/CPU metric parsing, Dashboard refresh state, and tests.
+- Added read-only remote file browser foundations with path navigation, directory listing, metadata display, and tests.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -77,3 +78,4 @@ All notable changes to this project will be documented in this file.
 - 改进命令面板，支持 stdout/stderr 分区展示、失败摘要和持久化历史命令重跑。
 - 添加可取消命令执行，取消运行中的命令时会终止底层 OpenSSH 子进程。
 - 启动 Phase 3 Dashboard 基础，加入基于 SSH 的 OS/能力探测、负载/内存/磁盘/CPU 指标解析、Dashboard 刷新状态和测试。
+- 添加只读远程文件浏览基础，支持路径导航、目录列表、元信息展示和测试。

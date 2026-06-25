@@ -130,9 +130,10 @@ CREATE TABLE file_transfer_jobs (
 
 ### Task 6：文件管理器
 
-- [ ] 实现路径导航和目录列表。
+- [x] 实现路径导航和只读目录列表 bootstrap。
 - [ ] 实现上传、下载、取消和进度。
-- [ ] 实现重命名和权限查看。
+- [ ] 实现重命名。
+- [x] 实现权限查看基础展示。
 - [ ] 删除前二次确认，优先移动到远端应用回收目录。
 - [ ] 文本文件编辑保存前创建备份。
 
@@ -141,7 +142,8 @@ CREATE TABLE file_transfer_jobs (
 - [x] 指标解析单元测试。
 - [x] 能力探测基础测试。
 - [x] Dashboard ViewModel 测试。
-- [ ] RemoteFileService 协议层测试。
+- [x] RemoteFileService 目录列表解析测试。
+- [x] 文件浏览 ViewModel 测试。
 - [ ] 可选真实 SFTP 集成测试。
 
 ### Task 8：手动验收
