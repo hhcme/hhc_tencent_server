@@ -254,6 +254,33 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.dashboardErrorMessage)
     }
 
+    func testDashboardAutoRefreshRunsImmediatelyAndStopsWhenDisabled() async throws {
+        let profile = makeProfile()
+        let client = DashboardMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = DashboardService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.setDashboardAutoRefreshEnabled(
+            true,
+            profile: profile,
+            sshClient: client,
+            dashboardService: service,
+            interval: .milliseconds(50)
+        )
+
+        try await waitUntil { client.snapshotRequests >= 1 && viewModel.dashboardSnapshot != nil }
+        try await waitUntil { client.snapshotRequests >= 2 }
+
+        viewModel.stopDashboardAutoRefresh()
+        try await waitUntil { !viewModel.isRefreshingDashboard }
+        let requestsAfterStop = client.snapshotRequests
+        try await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertFalse(viewModel.isDashboardAutoRefreshEnabled)
+        XCTAssertEqual(client.snapshotRequests, requestsAfterStop)
+        XCTAssertNil(viewModel.dashboardErrorMessage)
+    }
+
     func testLoadRemoteFilesListsDirectoryAndOpensChildDirectory() async throws {
         let profile = makeProfile()
         let client = RemoteFileMockSSHClient()
@@ -696,6 +723,14 @@ private final class SlowSSHClient: SSHClient, @unchecked Sendable {
 }
 
 private final class DashboardMockSSHClient: SSHClient, @unchecked Sendable {
+    @MainActor
+    private var _snapshotRequests = 0
+
+    @MainActor
+    var snapshotRequests: Int {
+        _snapshotRequests
+    }
+
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
         try await execute("printf hhc-ssh-ok", profile: profile)
     }
@@ -703,6 +738,9 @@ private final class DashboardMockSSHClient: SSHClient, @unchecked Sendable {
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
         let stdout: String
         if command.contains("/etc/os-release") {
+            await MainActor.run {
+                _snapshotRequests += 1
+            }
             stdout = """
             PRETTY_NAME="Ubuntu 24.04.2 LTS"
             VERSION_ID="24.04"

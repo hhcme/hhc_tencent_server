@@ -6,6 +6,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isRunningCommand = false
     @Published var connectionState: SSHConnectionState = .disconnected
     @Published var isRefreshingDashboard = false
+    @Published var isDashboardAutoRefreshEnabled = false
     @Published var dashboardSnapshot: ServerDashboardSnapshot?
     @Published var dashboardErrorMessage: String?
     @Published var remoteFilePath = "~"
@@ -29,9 +30,16 @@ final class ServerWorkspaceViewModel: ObservableObject {
     private var pendingHostKeyAction: PendingHostKeyAction?
     private var commandTask: Task<Void, Never>?
     private var runningCommand: String?
+    private var dashboardAutoRefreshTask: Task<Void, Never>?
     private var transferTask: Task<Void, Never>?
     private var runningTransferJobId: UUID?
     private var transferQueue: [QueuedRemoteFileTransfer] = []
+
+    deinit {
+        dashboardAutoRefreshTask?.cancel()
+        commandTask?.cancel()
+        transferTask?.cancel()
+    }
 
     func configure(initialState: SSHConnectionState) {
         connectionState = initialState
@@ -64,6 +72,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         sshClient: SSHClient,
         dashboardService: DashboardService
     ) {
+        guard !isRefreshingDashboard else { return }
         isRefreshingDashboard = true
         dashboardErrorMessage = nil
 
@@ -78,6 +87,56 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.dashboardErrorMessage = error.localizedDescription
                     self.isRefreshingDashboard = false
+                }
+            }
+        }
+    }
+
+    func setDashboardAutoRefreshEnabled(
+        _ enabled: Bool,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        dashboardService: DashboardService,
+        interval: Duration = .seconds(30)
+    ) {
+        guard isDashboardAutoRefreshEnabled != enabled else { return }
+        isDashboardAutoRefreshEnabled = enabled
+        if enabled {
+            startDashboardAutoRefresh(
+                profile: profile,
+                sshClient: sshClient,
+                dashboardService: dashboardService,
+                interval: interval
+            )
+        } else {
+            stopDashboardAutoRefresh()
+        }
+    }
+
+    func stopDashboardAutoRefresh() {
+        dashboardAutoRefreshTask?.cancel()
+        dashboardAutoRefreshTask = nil
+        isDashboardAutoRefreshEnabled = false
+    }
+
+    private func startDashboardAutoRefresh(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        dashboardService: DashboardService,
+        interval: Duration
+    ) {
+        dashboardAutoRefreshTask?.cancel()
+        refreshDashboard(profile: profile, sshClient: sshClient, dashboardService: dashboardService)
+        dashboardAutoRefreshTask = Task {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: interval)
+                } catch {
+                    break
+                }
+                await MainActor.run {
+                    guard self.isDashboardAutoRefreshEnabled else { return }
+                    self.refreshDashboard(profile: profile, sshClient: sshClient, dashboardService: dashboardService)
                 }
             }
         }

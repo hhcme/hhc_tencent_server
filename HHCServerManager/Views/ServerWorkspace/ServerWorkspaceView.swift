@@ -145,6 +145,9 @@ struct ServerWorkspaceView: View {
             viewModel.configure(initialState: appState.connectionState(for: profile))
             viewModel.loadCommandHistory(profile: profile, repository: appState.repository)
         }
+        .onDisappear {
+            viewModel.stopDashboardAutoRefresh()
+        }
         .onChange(of: viewModel.connectionState) { _, newState in
             appState.setConnectionState(newState, for: profile)
         }
@@ -241,6 +244,12 @@ struct ServerWorkspaceView: View {
                         }
                     }
                     .disabled(viewModel.isRefreshingDashboard)
+
+                    Toggle(isOn: dashboardAutoRefreshBinding) {
+                        Label("Auto", systemImage: "timer")
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(viewModel.connectionState == .connecting)
 
                     Button {
                         viewModel.connect(profile: profile, sshClient: appState.sshClient)
@@ -765,6 +774,20 @@ struct ServerWorkspaceView: View {
         Binding(
             get: { appState.selectedServerId ?? profile.id },
             set: { appState.selectedServerId = $0 }
+        )
+    }
+
+    private var dashboardAutoRefreshBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.isDashboardAutoRefreshEnabled },
+            set: { enabled in
+                viewModel.setDashboardAutoRefreshEnabled(
+                    enabled,
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    dashboardService: appState.dashboardService
+                )
+            }
         )
     }
 

@@ -119,7 +119,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 实现 Dashboard ViewModel 基础刷新。
 - [x] 实现指标卡片、系统信息、刷新状态。
 - [x] 实现错误和能力缺失基础提示。
-- [ ] 支持手动刷新和自动刷新开关。
+- [x] 支持手动刷新和自动刷新开关。
 
 ### Task 5：SFTP 技术验证
 
@@ -149,6 +149,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 指标解析单元测试。
 - [x] 能力探测基础测试。
 - [x] Dashboard ViewModel 测试。
+- [x] Dashboard 自动刷新 ViewModel 测试。
 - [x] RemoteFileService 目录列表解析测试。
 - [x] 文件浏览 ViewModel 测试。
 - [x] 文件重命名和可恢复删除测试。
