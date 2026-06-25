@@ -3394,6 +3394,93 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[2].queryValue("PageNumber"), "2")
     }
 
+    func testAlibabaCloudAdapterFetchesDisksUsesSignedECSAPI() async throws {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockAlibabaCloudTransport(responses: [
+            """
+            {
+              "RequestId": "aliyun-disks-1",
+              "TotalCount": 2,
+              "Disks": {
+                "Disk": [
+                  {
+                    "DiskId": "d-1",
+                    "DiskName": "prod-system",
+                    "Category": "cloud_essd",
+                    "Type": "system",
+                    "Size": 80,
+                    "Status": "In_use",
+                    "InstanceId": "i-1",
+                    "DiskChargeType": "PrePaid",
+                    "ExpiredTime": "2026-07-01T00:00:00Z"
+                  }
+                ]
+              }
+            }
+            """,
+            """
+            {
+              "RequestId": "aliyun-disks-2",
+              "TotalCount": 2,
+              "Disks": {
+                "Disk": [
+                  {
+                    "DiskId": "d-2",
+                    "DiskName": "prod-data",
+                    "Category": "cloud_efficiency",
+                    "Type": "data",
+                    "Size": 200,
+                    "Status": "Available",
+                    "DiskChargeType": "PostPaid"
+                  }
+                ]
+              }
+            }
+            """,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            nonce: { "nonce-disk" },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK")
+
+        let disks = try await adapter.fetchDisks(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-southeast-1",
+            capturedAt: capturedAt
+        )
+
+        XCTAssertEqual(disks.map(\.diskId), ["d-1", "d-2"])
+        XCTAssertEqual(disks[0].accountId, accountId)
+        XCTAssertEqual(disks[0].providerId, .alibabaCloud)
+        XCTAssertEqual(disks[0].regionId, "ap-southeast-1")
+        XCTAssertEqual(disks[0].instanceId, "i-1")
+        XCTAssertEqual(disks[0].name, "prod-system")
+        XCTAssertEqual(disks[0].diskType, "cloud_essd")
+        XCTAssertEqual(disks[0].sizeGB, 80)
+        XCTAssertEqual(disks[0].status, "In_use")
+        XCTAssertEqual(disks[0].billingType, "PrePaid")
+        XCTAssertNotNil(disks[0].expiredTime)
+        XCTAssertEqual(disks[0].lastSyncedAt, capturedAt)
+        XCTAssertEqual(disks[1].diskType, "cloud_efficiency")
+        XCTAssertEqual(disks[1].billingType, "PostPaid")
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-action"), "DescribeDisks")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-version"), "2014-05-26")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-signature-nonce"), "nonce-disk")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("ACS3-HMAC-SHA256 Credential=ALIYUNAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("RegionId"), "ap-southeast-1")
+        XCTAssertEqual(transport.requests[0].queryValue("PageNumber"), "1")
+        XCTAssertEqual(transport.requests[0].queryValue("PageSize"), "100")
+        XCTAssertEqual(transport.requests[1].queryValue("PageNumber"), "2")
+    }
+
     func testHuaweiCloudAdapterFetchRegionsAndInstancesUsesSignedECSAPI() async throws {
         let transport = MockHuaweiCloudTransport(responses: [
             """

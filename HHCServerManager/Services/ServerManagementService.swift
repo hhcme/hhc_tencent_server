@@ -5926,6 +5926,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .regions,
         .instanceDiscovery,
         .instanceMetadata,
+        .cloudDisks,
         .cloudBilling,
     ]
 
@@ -6033,7 +6034,49 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         capturedAt: Date
     ) async throws -> [CloudDisk] {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudDisks)
+        var pageNumber = 1
+        let pageSize = 100
+        var totalCount: Int?
+        var disks: [CloudDisk] = []
+
+        repeat {
+            let response: AlibabaDescribeDisksResponse = try await request(
+                credential: credential,
+                host: "ecs.\(regionId).aliyuncs.com",
+                action: "DescribeDisks",
+                queryItems: [
+                    URLQueryItem(name: "RegionId", value: regionId),
+                    URLQueryItem(name: "PageNumber", value: "\(pageNumber)"),
+                    URLQueryItem(name: "PageSize", value: "\(pageSize)"),
+                ]
+            )
+            let page = response.disks?.disk ?? []
+            guard !page.isEmpty else {
+                break
+            }
+            disks.append(contentsOf: page.map { disk in
+                CloudDisk(
+                    id: UUID(),
+                    accountId: accountId,
+                    providerId: .alibabaCloud,
+                    regionId: regionId,
+                    diskId: disk.diskId,
+                    instanceId: disk.instanceId,
+                    name: disk.diskName,
+                    diskType: disk.category ?? disk.type,
+                    sizeGB: disk.size,
+                    status: disk.status,
+                    billingType: disk.diskChargeType,
+                    expiredTime: disk.expiredTime.flatMap(Self.parseAlibabaDate),
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                )
+            })
+            totalCount = response.totalCount
+            pageNumber += 1
+        } while disks.count < (totalCount ?? 0)
+
+        return disks
     }
 
     func fetchSnapshots(
@@ -6638,6 +6681,48 @@ private struct AlibabaDescribeInstancesResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case totalCount = "TotalCount"
         case instances = "Instances"
+    }
+}
+
+private struct AlibabaDescribeDisksResponse: Decodable {
+    var totalCount: Int?
+    var disks: AlibabaDisks?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCount = "TotalCount"
+        case disks = "Disks"
+    }
+}
+
+private struct AlibabaDisks: Decodable {
+    var disk: [AlibabaDisk]
+
+    enum CodingKeys: String, CodingKey {
+        case disk = "Disk"
+    }
+}
+
+private struct AlibabaDisk: Decodable {
+    var diskId: String
+    var diskName: String?
+    var type: String?
+    var category: String?
+    var size: Int?
+    var status: String?
+    var instanceId: String?
+    var diskChargeType: String?
+    var expiredTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case diskId = "DiskId"
+        case diskName = "DiskName"
+        case type = "Type"
+        case category = "Category"
+        case size = "Size"
+        case status = "Status"
+        case instanceId = "InstanceId"
+        case diskChargeType = "DiskChargeType"
+        case expiredTime = "ExpiredTime"
     }
 }
 
