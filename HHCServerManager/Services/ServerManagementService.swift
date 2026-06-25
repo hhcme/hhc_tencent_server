@@ -759,6 +759,145 @@ final class CronManager: @unchecked Sendable {
     }
 }
 
+final class NginxConfigManager: @unchecked Sendable {
+    static let maxConfigBytes = 512 * 1024
+
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func listConfigs(profile: ServerProfile, sshClient: SSHClient) async throws -> NginxConfigList {
+        let command = """
+        command -v nginx >/dev/null 2>&1 || exit 3; \
+        info=$(nginx -V 2>&1 || true); \
+        prefix=$(printf '%s' "$info" | tr ' ' '\\n' | sed -n 's/^--prefix=//p' | tail -n 1); \
+        conf=$(printf '%s' "$info" | tr ' ' '\\n' | sed -n 's/^--conf-path=//p' | tail -n 1); \
+        if [ -z "$conf" ] && [ -n "$prefix" ]; then conf="$prefix/conf/nginx.conf"; fi; \
+        { [ -n "$conf" ] && dirname "$conf"; [ -n "$prefix" ] && printf '%s/conf\\n' "$prefix"; printf '%s\\n' /etc/nginx /usr/local/nginx/conf /opt/nginx/conf; } | \
+        awk 'NF && !seen[$0]++' | while IFS= read -r dir; do \
+        [ -d "$dir" ] && find "$dir" -type f -name '*.conf' -printf '%p\\t%s\\t%T@\\n' 2>/dev/null; \
+        done | sort
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            if result.exitCode == 3 {
+                throw SSHClientError.processFailed("Nginx is not available on this server.")
+            }
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not list Nginx configs.")
+        }
+        return NginxConfigList(files: Self.parseConfigListing(result.stdout), capturedAt: now())
+    }
+
+    func readConfig(
+        file: NginxConfigFile,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> NginxConfigContent {
+        let path = try Self.validatedConfigPath(file.path)
+        if let size = file.size, size > Self.maxConfigBytes {
+            throw SSHClientError.processFailed("Nginx config is larger than the editable preview limit.")
+        }
+        let command = """
+        bytes=$(wc -c < \(Self.shellQuote(path)) 2>/dev/null | tr -d '[:space:]' || echo 0); \
+        if [ "$bytes" -gt \(Self.maxConfigBytes) ]; then echo "__HHC_NGINX_CONFIG_TOO_LARGE__$bytes"; exit 3; fi; \
+        base64 < \(Self.shellQuote(path))
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            if result.exitCode == 3 {
+                throw SSHClientError.processFailed("Nginx config is larger than the editable preview limit.")
+            }
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not read \(path).")
+        }
+        let encoded = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = Data(base64Encoded: encoded),
+              let content = String(data: data, encoding: .utf8)
+        else {
+            throw SSHClientError.processFailed("Nginx config is not valid UTF-8 text.")
+        }
+        return NginxConfigContent(
+            file: file,
+            content: content,
+            byteCount: data.count,
+            capturedAt: now()
+        )
+    }
+
+    func testConfig(profile: ServerProfile, sshClient: SSHClient) async throws -> NginxTestResult {
+        let result = try await CloudProviderRequestRunner.withTimeout(12) {
+            try await sshClient.execute("nginx -t", profile: profile)
+        }
+        return NginxTestResult(
+            succeeded: result.exitCode == 0,
+            output: Self.combinedOutput(result),
+            capturedAt: now()
+        )
+    }
+
+    func reload(profile: ServerProfile, sshClient: SSHClient) async throws -> NginxTestResult {
+        let test = try await testConfig(profile: profile, sshClient: sshClient)
+        guard test.succeeded else {
+            throw SSHClientError.processFailed(test.output.nilIfEmpty ?? "nginx -t failed.")
+        }
+        let command = "systemctl reload nginx 2>/dev/null || nginx -s reload"
+        let result = try await CloudProviderRequestRunner.withTimeout(15) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.combinedOutput(result).nilIfEmpty ?? "Could not reload Nginx.")
+        }
+        return test
+    }
+
+    static func parseConfigListing(_ text: String) -> [NginxConfigFile] {
+        text.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard let path = parts.first,
+                  (try? validatedConfigPath(path)) != nil
+            else { return nil }
+            let size = parts.indices.contains(1) ? Int64(parts[1]) : nil
+            let modifiedAt = parts.indices.contains(2)
+                ? Double(parts[2]).map { Date(timeIntervalSince1970: $0) }
+                : nil
+            return NginxConfigFile(path: path, size: size, modifiedAt: modifiedAt)
+        }
+        .sorted { left, right in
+            left.path.localizedStandardCompare(right.path) == .orderedAscending
+        }
+    }
+
+    static func validatedConfigPath(_ path: String) throws -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/"),
+              !trimmed.contains("\n"),
+              !trimmed.contains("\r"),
+              !trimmed.contains("/../"),
+              !trimmed.hasSuffix("/.."),
+              trimmed.hasSuffix(".conf"),
+              trimmed.contains("/nginx/")
+        else {
+            throw SSHClientError.processFailed("Only Nginx configuration paths are supported.")
+        }
+        return trimmed
+    }
+
+    private static func combinedOutput(_ result: CommandResult) -> String {
+        [result.stdout.trimmed, result.stderr.trimmed]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 final class RemoteFileService: @unchecked Sendable {
     static let maxEditableTextBytes = 256 * 1024
 

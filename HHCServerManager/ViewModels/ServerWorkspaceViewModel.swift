@@ -34,6 +34,16 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isMutatingCron = false
     @Published var cronErrorMessage: String?
     @Published var cronActionMessage: String?
+    @Published var nginxConfigList: NginxConfigList?
+    @Published var selectedNginxConfig: NginxConfigFile?
+    @Published var nginxConfigContent: NginxConfigContent?
+    @Published var nginxTestResult: NginxTestResult?
+    @Published var isLoadingNginxConfigs = false
+    @Published var isLoadingNginxConfigContent = false
+    @Published var isTestingNginxConfig = false
+    @Published var isReloadingNginx = false
+    @Published var nginxErrorMessage: String?
+    @Published var nginxActionMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -808,6 +818,149 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.cronErrorMessage = error.localizedDescription
                     self.isMutatingCron = false
+                }
+            }
+        }
+    }
+
+    func loadNginxConfigs(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        nginxConfigManager: NginxConfigManager
+    ) {
+        isLoadingNginxConfigs = true
+        nginxErrorMessage = nil
+        nginxActionMessage = nil
+
+        Task {
+            do {
+                let list = try await nginxConfigManager.listConfigs(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.nginxConfigList = list
+                    if let selected = self.selectedNginxConfig,
+                       let refreshed = list.files.first(where: { $0.id == selected.id }) {
+                        self.selectedNginxConfig = refreshed
+                    } else {
+                        self.selectedNginxConfig = list.files.first
+                    }
+                    self.isLoadingNginxConfigs = false
+                }
+                if let selected = await MainActor.run(body: { self.selectedNginxConfig }) {
+                    await MainActor.run {
+                        self.selectNginxConfig(
+                            selected,
+                            profile: profile,
+                            sshClient: sshClient,
+                            nginxConfigManager: nginxConfigManager
+                        )
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.nginxErrorMessage = error.localizedDescription
+                    self.isLoadingNginxConfigs = false
+                }
+            }
+        }
+    }
+
+    func selectNginxConfig(
+        _ file: NginxConfigFile,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        nginxConfigManager: NginxConfigManager
+    ) {
+        selectedNginxConfig = file
+        isLoadingNginxConfigContent = true
+        nginxErrorMessage = nil
+
+        Task {
+            do {
+                let content = try await nginxConfigManager.readConfig(file: file, profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.nginxConfigContent = content
+                    self.isLoadingNginxConfigContent = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.nginxErrorMessage = error.localizedDescription
+                    self.isLoadingNginxConfigContent = false
+                }
+            }
+        }
+    }
+
+    func testNginxConfig(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        nginxConfigManager: NginxConfigManager
+    ) {
+        isTestingNginxConfig = true
+        nginxErrorMessage = nil
+        nginxActionMessage = nil
+
+        Task {
+            do {
+                let result = try await nginxConfigManager.testConfig(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.nginxTestResult = result
+                    self.nginxActionMessage = result.succeeded ? "Nginx configuration test passed." : "Nginx configuration test failed."
+                    self.isTestingNginxConfig = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.nginxErrorMessage = error.localizedDescription
+                    self.isTestingNginxConfig = false
+                }
+            }
+        }
+    }
+
+    func reloadNginx(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        nginxConfigManager: NginxConfigManager,
+        repository: ServerRepository? = nil
+    ) {
+        isReloadingNginx = true
+        nginxErrorMessage = nil
+        nginxActionMessage = nil
+        let beforeSnapshot = nginxTestResult?.output
+
+        Task {
+            do {
+                let result = try await nginxConfigManager.reload(profile: profile, sshClient: sshClient)
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: selectedNginxConfig?.path ?? "nginx",
+                    action: "reload",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: result.output,
+                    status: "success",
+                    message: "Reloaded Nginx after successful nginx -t."
+                )
+                await MainActor.run {
+                    self.nginxTestResult = result
+                    self.nginxActionMessage = "Reloaded Nginx."
+                    self.isReloadingNginx = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: selectedNginxConfig?.path ?? "nginx",
+                    action: "reload",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.nginxErrorMessage = error.localizedDescription
+                    self.isReloadingNginx = false
                 }
             }
         }

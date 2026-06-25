@@ -189,6 +189,31 @@ enum CronEntryAction: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+struct NginxConfigFile: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { path }
+    var path: String
+    var size: Int64?
+    var modifiedAt: Date?
+}
+
+struct NginxConfigContent: Equatable, Hashable, Sendable {
+    var file: NginxConfigFile
+    var content: String
+    var byteCount: Int
+    var capturedAt: Date
+}
+
+struct NginxConfigList: Equatable, Hashable, Sendable {
+    var files: [NginxConfigFile]
+    var capturedAt: Date
+}
+
+struct NginxTestResult: Equatable, Hashable, Sendable {
+    var succeeded: Bool
+    var output: String
+    var capturedAt: Date
+}
+
 enum RemoteFileKind: String, Equatable, Hashable {
     case directory
     case file

@@ -11,6 +11,7 @@ final class AppState: ObservableObject {
     let dashboardService: DashboardService
     let systemdServiceManager: SystemdServiceManager
     let cronManager: CronManager
+    let nginxConfigManager: NginxConfigManager
     let remoteFileService: RemoteFileService
     let sshClient: OpenSSHClient
 
@@ -35,6 +36,7 @@ final class AppState: ObservableObject {
             dashboardService = DashboardService()
             systemdServiceManager = SystemdServiceManager()
             cronManager = CronManager()
+            nginxConfigManager = NginxConfigManager()
             remoteFileService = RemoteFileService()
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,
@@ -58,6 +60,7 @@ final class AppState: ObservableObject {
             dashboardService = DashboardService()
             systemdServiceManager = SystemdServiceManager()
             cronManager = CronManager()
+            nginxConfigManager = NginxConfigManager()
             remoteFileService = RemoteFileService()
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,

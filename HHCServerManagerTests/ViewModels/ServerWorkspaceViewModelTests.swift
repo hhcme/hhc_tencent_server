@@ -674,6 +674,44 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertFalse(logs[0].afterSnapshot?.contains("/usr/bin/health") == true)
     }
 
+    func testNginxConfigsLoadSelectTestAndReload() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = NginxViewModelMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let manager = NginxConfigManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadNginxConfigs(profile: profile, sshClient: client, nginxConfigManager: manager)
+        try await waitUntil { viewModel.isLoadingNginxConfigs == false && viewModel.nginxConfigList != nil }
+        try await waitUntil { viewModel.isLoadingNginxConfigContent == false && viewModel.nginxConfigContent != nil }
+
+        XCTAssertEqual(viewModel.nginxConfigList?.files.map(\.path), ["/www/server/nginx/conf/nginx.conf", "/www/server/nginx/conf/vhost/site.conf"])
+        XCTAssertEqual(viewModel.selectedNginxConfig?.path, "/www/server/nginx/conf/nginx.conf")
+        XCTAssertTrue(viewModel.nginxConfigContent?.content.contains("user www-data;") == true)
+        XCTAssertNil(viewModel.nginxErrorMessage)
+
+        let site = try XCTUnwrap(viewModel.nginxConfigList?.files.first { $0.path.contains("/vhost/") })
+        viewModel.selectNginxConfig(site, profile: profile, sshClient: client, nginxConfigManager: manager)
+        try await waitUntil { viewModel.nginxConfigContent?.file.path == site.path }
+        XCTAssertTrue(viewModel.nginxConfigContent?.content.contains("server_name example.com;") == true)
+
+        viewModel.testNginxConfig(profile: profile, sshClient: client, nginxConfigManager: manager)
+        try await waitUntil { viewModel.isTestingNginxConfig == false && viewModel.nginxTestResult != nil }
+        XCTAssertEqual(viewModel.nginxActionMessage, "Nginx configuration test passed.")
+
+        viewModel.reloadNginx(profile: profile, sshClient: client, nginxConfigManager: manager, repository: repository)
+        try await waitUntil { viewModel.isReloadingNginx == false && viewModel.nginxActionMessage == "Reloaded Nginx." }
+        XCTAssertTrue(client.commands.contains("systemctl reload nginx 2>/dev/null || nginx -s reload"))
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.count, 1)
+        XCTAssertEqual(logs[0].targetType, "nginx")
+        XCTAssertEqual(logs[0].targetId, "/www/server/nginx/conf/vhost/site.conf")
+        XCTAssertEqual(logs[0].action, "reload")
+        XCTAssertEqual(logs[0].status, "success")
+        XCTAssertTrue(logs[0].afterSnapshot?.contains("syntax is ok") == true)
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -1165,4 +1203,61 @@ private final class CronViewModelMockSSHClient: SSHClient, @unchecked Sendable {
         let encoded = String(command[start.upperBound..<end.lowerBound])
         return Data(base64Encoded: encoded).flatMap { String(data: $0, encoding: .utf8) } ?? ""
     }
+}
+
+private final class NginxViewModelMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("nginx -V") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                /www/server/nginx/conf/nginx.conf\t320\t1700000000.5
+                /www/server/nginx/conf/vhost/site.conf\t120\t1700000001.0
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 < '/www/server/nginx/conf/nginx.conf'") {
+            return CommandResult(
+                command: command,
+                stdout: Data("user www-data;\n".utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 < '/www/server/nginx/conf/vhost/site.conf'") {
+            return CommandResult(
+                command: command,
+                stdout: Data("server { server_name example.com; }\n".utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command == "nginx -t" {
+            return CommandResult(
+                command: command,
+                stdout: "",
+                stderr: "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command == "systemctl reload nginx 2>/dev/null || nginx -s reload" {
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
 }

@@ -297,6 +297,40 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertFalse(client.installedCrontab.contains("/usr/bin/health"))
     }
 
+    func testNginxConfigManagerListsReadsTestsAndReloads() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingNginxSSHClient()
+        let manager = NginxConfigManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let parsed = NginxConfigManager.parseConfigListing("""
+        /etc/nginx/nginx.conf\t320\t1700000000.5
+        /tmp/not-nginx.conf\t12\t1700000000.5
+        /www/server/nginx/conf/vhost/site.conf\t120\t1700000001.0
+        """)
+        XCTAssertEqual(parsed.map(\.path), ["/etc/nginx/nginx.conf", "/www/server/nginx/conf/vhost/site.conf"])
+        XCTAssertEqual(parsed[0].size, 320)
+        XCTAssertEqual(try NginxConfigManager.validatedConfigPath("/etc/nginx/nginx.conf"), "/etc/nginx/nginx.conf")
+        XCTAssertEqual(try NginxConfigManager.validatedConfigPath("/www/server/nginx/conf/nginx.conf"), "/www/server/nginx/conf/nginx.conf")
+        XCTAssertThrowsError(try NginxConfigManager.validatedConfigPath("/etc/passwd"))
+        XCTAssertThrowsError(try NginxConfigManager.validatedConfigPath("/etc/nginx/../passwd"))
+
+        let list = try await manager.listConfigs(profile: profile, sshClient: client)
+        XCTAssertEqual(list.files.map(\.path), ["/www/server/nginx/conf/nginx.conf", "/www/server/nginx/conf/vhost/site.conf"])
+        XCTAssertTrue(client.commands.contains { $0.contains("nginx -V") })
+
+        let content = try await manager.readConfig(file: list.files[0], profile: profile, sshClient: client)
+        XCTAssertEqual(content.content, "user www-data;\n")
+        XCTAssertTrue(client.commands.contains { $0.contains("base64 < '/www/server/nginx/conf/nginx.conf'") })
+
+        let test = try await manager.testConfig(profile: profile, sshClient: client)
+        XCTAssertTrue(test.succeeded)
+        XCTAssertTrue(test.output.contains("syntax is ok"))
+
+        _ = try await manager.reload(profile: profile, sshClient: client)
+        XCTAssertTrue(client.commands.contains("nginx -t"))
+        XCTAssertTrue(client.commands.contains("systemctl reload nginx 2>/dev/null || nginx -s reload"))
+    }
+
     func testDashboardServiceAppendsCloudMetricsWhenLinked() async throws {
         let harness = try Harness(adapters: [
             MockCloudProviderAdapter(
@@ -1152,6 +1186,54 @@ private final class RecordingCronSSHClient: SSHClient, @unchecked Sendable {
         let encoded = String(command[start.upperBound..<end.lowerBound])
         return Data(base64Encoded: encoded).flatMap { String(data: $0, encoding: .utf8) } ?? ""
     }
+}
+
+private final class RecordingNginxSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("nginx -V") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                /www/server/nginx/conf/nginx.conf\t320\t1700000000.5
+                /www/server/nginx/conf/vhost/site.conf\t120\t1700000001.0
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 < '/www/server/nginx/conf/nginx.conf'") {
+            return CommandResult(
+                command: command,
+                stdout: Data("user www-data;\n".utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command == "nginx -t" {
+            return CommandResult(
+                command: command,
+                stdout: "",
+                stderr: "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command == "systemctl reload nginx 2>/dev/null || nginx -s reload" {
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
 }
 
 private final class RecordingTransferClient: RemoteFileTransferClient, @unchecked Sendable {

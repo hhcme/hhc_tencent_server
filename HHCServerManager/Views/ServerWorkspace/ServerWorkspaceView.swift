@@ -16,6 +16,7 @@ struct ServerWorkspaceView: View {
     @State private var cronScheduleText = "0 2 * * *"
     @State private var cronCommandText = ""
     @State private var pendingCronAction: CronActionRequest?
+    @State private var pendingNginxReload = false
 
     let profile: ServerProfile
 
@@ -30,6 +31,8 @@ struct ServerWorkspaceView: View {
                     .tag("files")
                 Label("Services", systemImage: "gearshape.2")
                     .tag("services")
+                Label("Nginx", systemImage: "network")
+                    .tag("nginx")
                 Label("Cron", systemImage: "calendar.badge.clock")
                     .tag("cron")
                 Label("Cloud", systemImage: "cloud")
@@ -108,6 +111,19 @@ struct ServerWorkspaceView: View {
                 },
                 secondaryButton: .cancel()
             )
+        }
+        .alert("Reload Nginx?", isPresented: $pendingNginxReload) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reload") {
+                viewModel.reloadNginx(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    nginxConfigManager: appState.nginxConfigManager,
+                    repository: appState.repository
+                )
+            }
+        } message: {
+            Text("This will run nginx -t first and reload only if the configuration test passes.")
         }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
@@ -196,6 +212,8 @@ struct ServerWorkspaceView: View {
             filesPanel
         case "services":
             servicesPanel
+        case "nginx":
+            nginxPanel
         case "cron":
             cronPanel
         default:
@@ -818,6 +836,170 @@ struct ServerWorkspaceView: View {
         }
     }
 
+    private var nginxPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Nginx")
+                        .font(.title2.weight(.semibold))
+                    Spacer()
+                    Button {
+                        viewModel.testNginxConfig(
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            nginxConfigManager: appState.nginxConfigManager
+                        )
+                    } label: {
+                        if viewModel.isTestingNginxConfig {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Test", systemImage: "checkmark.seal")
+                        }
+                    }
+                    .disabled(isNginxBusy)
+
+                    Button {
+                        pendingNginxReload = true
+                    } label: {
+                        if viewModel.isReloadingNginx {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Reload", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    .disabled(isNginxBusy)
+
+                    Button {
+                        viewModel.loadNginxConfigs(
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            nginxConfigManager: appState.nginxConfigManager
+                        )
+                    } label: {
+                        if viewModel.isLoadingNginxConfigs {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isNginxBusy)
+                }
+
+                if let capturedAt = viewModel.nginxConfigList?.capturedAt {
+                    Text("Last updated \(capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = viewModel.nginxErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+
+                if let message = viewModel.nginxActionMessage {
+                    Label(message, systemImage: viewModel.nginxTestResult?.succeeded == false ? "xmark.octagon" : "checkmark.circle")
+                        .foregroundStyle(viewModel.nginxTestResult?.succeeded == false ? .orange : .green)
+                }
+            }
+            .padding(20)
+
+            Divider()
+
+            Group {
+                if let files = viewModel.nginxConfigList?.files {
+                    HSplitView {
+                        nginxConfigList(files)
+                            .frame(minWidth: 360, idealWidth: 440)
+                        nginxConfigDetailPanel
+                            .frame(minWidth: 420)
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Nginx Configs Loaded",
+                        systemImage: "network",
+                        description: Text("Refresh to inspect the remote Nginx configuration directory.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .onAppear {
+            if viewModel.nginxConfigList == nil && !viewModel.isLoadingNginxConfigs {
+                viewModel.loadNginxConfigs(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    nginxConfigManager: appState.nginxConfigManager
+                )
+            }
+        }
+    }
+
+    private func nginxConfigList(_ files: [NginxConfigFile]) -> some View {
+        List(files, selection: nginxConfigSelectionBinding) { file in
+            NginxConfigRow(file: file)
+                .tag(file.id)
+        }
+        .overlay {
+            if files.isEmpty {
+                ContentUnavailableView("No Config Files", systemImage: "network")
+            }
+        }
+    }
+
+    private var nginxConfigDetailPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let file = viewModel.selectedNginxConfig {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(file.path)
+                        .font(.title3.weight(.semibold))
+                        .textSelection(.enabled)
+                    Text(nginxConfigMetadata(file))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if viewModel.isLoadingNginxConfigContent {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                ScrollView {
+                    Text(nginxConfigText(for: file))
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+
+                if let result = viewModel.nginxTestResult {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(
+                            result.succeeded ? "nginx -t passed" : "nginx -t failed",
+                            systemImage: result.succeeded ? "checkmark.circle" : "xmark.octagon"
+                        )
+                        .foregroundStyle(result.succeeded ? .green : .orange)
+                        Text(result.output.isEmpty ? "(empty)" : result.output)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            } else {
+                ContentUnavailableView("Select a Config", systemImage: "network")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .padding(20)
+    }
+
     private var cronPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1186,6 +1368,42 @@ struct ServerWorkspaceView: View {
         )
     }
 
+    private var nginxConfigSelectionBinding: Binding<String?> {
+        Binding(
+            get: { viewModel.selectedNginxConfig?.id },
+            set: { fileId in
+                guard let fileId,
+                      let file = viewModel.nginxConfigList?.files.first(where: { $0.id == fileId })
+                else { return }
+                viewModel.selectNginxConfig(
+                    file,
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    nginxConfigManager: appState.nginxConfigManager
+                )
+            }
+        )
+    }
+
+    private func nginxConfigText(for file: NginxConfigFile) -> String {
+        guard viewModel.nginxConfigContent?.file.id == file.id else {
+            return "Select Refresh to load this file."
+        }
+        let content = viewModel.nginxConfigContent?.content ?? ""
+        return content.isEmpty ? "(empty)" : content
+    }
+
+    private func nginxConfigMetadata(_ file: NginxConfigFile) -> String {
+        var parts: [String] = []
+        if let size = file.size {
+            parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+        }
+        if let modifiedAt = file.modifiedAt {
+            parts.append("modified \(modifiedAt.formatted(date: .abbreviated, time: .shortened))")
+        }
+        return parts.isEmpty ? "Remote config file" : parts.joined(separator: " · ")
+    }
+
     private var connectionBadge: some View {
         Label {
             Text(viewModel.connectionState.displayName)
@@ -1258,6 +1476,13 @@ struct ServerWorkspaceView: View {
     private var isCronBusy: Bool {
         viewModel.isLoadingCron || viewModel.isMutatingCron
     }
+
+    private var isNginxBusy: Bool {
+        viewModel.isLoadingNginxConfigs ||
+            viewModel.isLoadingNginxConfigContent ||
+            viewModel.isTestingNginxConfig ||
+            viewModel.isReloadingNginx
+    }
 }
 
 private struct SystemdActionRequest: Identifiable {
@@ -1275,6 +1500,42 @@ private struct CronActionRequest: Identifiable {
 
     var id: String {
         "\(entry.id)-\(action.id)"
+    }
+}
+
+private struct NginxConfigRow: View {
+    let file: NginxConfigFile
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "doc.text")
+                .foregroundStyle(.blue)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(file.path)
+                    .font(.system(.body, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(metadata)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var metadata: String {
+        var parts: [String] = []
+        if let size = file.size {
+            parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+        }
+        if let modifiedAt = file.modifiedAt {
+            parts.append(modifiedAt.formatted(date: .abbreviated, time: .shortened))
+        }
+        return parts.isEmpty ? "config" : parts.joined(separator: " · ")
     }
 }
 

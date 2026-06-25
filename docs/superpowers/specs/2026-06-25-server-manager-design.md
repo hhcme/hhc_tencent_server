@@ -354,7 +354,8 @@ protocol SFTPClientProtocol {
 
 **Nginx 管理**：
 - 能力探测：`command -v nginx`，读取 `nginx -V` 和 `nginx -T`
-- 站点列表：优先解析 `nginx -T` 输出；`/etc/nginx/sites-enabled/` 仅作为 Debian/Ubuntu 约定路径
+- 配置路径探测：优先解析 `nginx -V` 的 `--conf-path` / `--prefix`，再兼容 `/etc/nginx`、`/usr/local/nginx/conf`、`/opt/nginx/conf` 等常见目录；不能假设所有服务器都使用 `/etc/nginx`
+- 站点列表：优先基于探测到的配置目录枚举配置文件，后续可增强为解析 `nginx -T` include 图；`/etc/nginx/sites-enabled/` 仅作为 Debian/Ubuntu 约定路径
 - 配置编辑：在线编辑配置文件
 - 配置测试：`nginx -t`
 - 重载配置：`nginx -s reload`

@@ -85,8 +85,8 @@ CREATE TABLE environment_profiles (
 ### Task 1：危险操作框架
 
 - [ ] 定义 `RemoteOperationRisk` 和确认模型。
-- [x] 所有写操作写入 `remote_change_logs`：当前 systemd 和 Cron 写操作已记录 before/after/status/message，安全组、Nginx、防火墙待接入。
-- [x] 操作失败时保存 stderr 和上下文：当前 systemd 和 Cron 失败会记录 before snapshot 与错误 message。
+- [x] 所有写操作写入 `remote_change_logs`：当前 systemd、Cron 和 Nginx reload 写操作已记录 before/after/status/message，安全组、防火墙待接入。
+- [x] 操作失败时保存 stderr 和上下文：当前 systemd、Cron 和 Nginx reload 失败会记录 before snapshot 与错误 message。
 - [ ] UI 展示操作预览和风险说明。
 
 ### Task 2：安全组
@@ -107,11 +107,11 @@ CREATE TABLE environment_profiles (
 
 ### Task 4：Nginx
 
-- [ ] 探测 Nginx 安装和配置路径。
-- [ ] 读取站点配置。
+- [x] 探测 Nginx 安装和配置路径：当前通过 `command -v nginx` 和 `nginx -V` 解析 `--conf-path` / `--prefix`，并兼容 `/etc/nginx`、`/usr/local/nginx/conf`、`/opt/nginx/conf`、`/www/server/nginx/conf` 等路径。
+- [x] 读取站点配置：当前支持配置文件列表和 UTF-8 配置内容只读浏览，单文件预览限制 512 KiB。
 - [ ] 编辑前备份。
-- [ ] 保存后执行 `nginx -t`。
-- [ ] 测试通过才 reload，失败自动恢复备份。
+- [x] 手动执行 `nginx -t`，并展示 stdout/stderr 合并结果。
+- [x] reload 前必须 `nginx -t` 通过；测试失败不会 reload。编辑保存后的自动测试和失败恢复备份仍待编辑流程接入。
 
 ### Task 5：防火墙
 
@@ -129,9 +129,9 @@ CREATE TABLE environment_profiles (
 
 ### Task 7：测试
 
-- [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验、Cron 解析和 crontab 写入内容。
+- [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验、Cron 解析和 crontab 写入内容、Nginx 配置列表解析和路径校验。
 - [ ] 风险确认 ViewModel 测试。
-- [ ] Nginx 配置测试/回滚逻辑测试。
+- [x] Nginx 配置测试/reload 逻辑测试：已覆盖 `nginx -t`、测试通过后 reload、审计日志写入；配置编辑失败回滚待编辑流程接入后补测。
 - [ ] Firewall adapter 能力探测测试。
 - [x] RemoteChangeLogStore 测试：已覆盖保存、倒序查询、按 server 过滤和 server 删除后的 SET NULL。
 
@@ -141,7 +141,7 @@ CREATE TABLE environment_profiles (
 - [ ] 腾讯云安全组可读取。
 - [ ] 新增安全组规则前显示预览和确认。
 - [ ] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，重启操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
-- [ ] Nginx 配置测试失败时不 reload。
+- [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，失败直接返回错误并记录审计；真实服务器已完成只读配置路径和 `nginx -t` 验证，真实 reload 写操作待谨慎手动验收。
 - [ ] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，禁用/恢复写操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
 - [ ] 所有写操作可在操作日志中查到。
 
@@ -150,7 +150,7 @@ CREATE TABLE environment_profiles (
 1. 云安全组基础读写可用。
 2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。
 3. 所有远程写操作有确认和审计。
-4. Nginx 等配置类操作有备份和回滚。
+4. Nginx 等配置类操作有备份和回滚。当前 Nginx 已具备读取、测试和 reload 前保护；编辑保存、备份与回滚仍待完成。
 5. 测试和手动验收通过。
 
 ## 9. 后续 Phase 边界
