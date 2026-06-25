@@ -290,6 +290,20 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testConnectIgnoresDuplicateTapWhileSmokeTestIsRunning() async throws {
+        let profile = makeProfile()
+        let client = MockSSHClient(delayNanoseconds: 100_000_000)
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.connect(profile: profile, sshClient: client)
+        viewModel.connect(profile: profile, sshClient: client)
+        try await waitUntil { viewModel.isRunningSmokeTest == false }
+
+        XCTAssertEqual(client.smokeTestCallCount, 1)
+        XCTAssertEqual(viewModel.connectionState, .connected)
+        XCTAssertEqual(viewModel.commandResult?.stdout, "hhc-ssh-ok")
+    }
+
     func testConnectFailureUpdatesFailedState() async throws {
         let profile = makeProfile()
         let client = MockSSHClient(error: SSHClientError.processFailed("boom"))
@@ -2191,13 +2205,27 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
 private final class MockSSHClient: SSHClient, @unchecked Sendable {
     private let result: CommandResult?
     private let error: Error?
+    private let delayNanoseconds: UInt64
+    private let lock = NSLock()
+    private var smokeTestCalls = 0
 
-    init(result: CommandResult? = nil, error: Error? = nil) {
+    var smokeTestCallCount: Int {
+        lock.withLock { smokeTestCalls }
+    }
+
+    init(result: CommandResult? = nil, error: Error? = nil, delayNanoseconds: UInt64 = 0) {
         self.result = result
         self.error = error
+        self.delayNanoseconds = delayNanoseconds
     }
 
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        lock.withLock {
+            smokeTestCalls += 1
+        }
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
         if let error {
             throw error
         }

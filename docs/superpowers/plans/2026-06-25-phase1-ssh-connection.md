@@ -498,7 +498,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 验收：
 
 - [ ] UI 状态更新没有跨线程警告。
-- [ ] 连接中重复点击不会创建重复连接。
+- [x] 连接中重复点击不会创建重复连接：`ServerWorkspaceViewModel.connect` 会在 connecting 或 smoke test 运行中忽略重复触发，并有 ViewModel 回归测试覆盖。
 - [ ] 删除当前选中服务器会清空 selection 并断开连接。
 - [ ] 在工作台内切换服务器不会复用上一台服务器的连接状态或 smoke test 输出。
 
@@ -527,12 +527,12 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 
 ### Task 9: 测试
 
-- [ ] 模型测试。
-- [ ] Repository 测试。
-- [ ] Keychain 测试。
-- [ ] ServerManagementService 补偿逻辑测试。
-- [ ] HostKeyTrustStore 测试。
-- [ ] SSH 状态机测试。
+- [x] 模型测试：核心模型的编解码、风险模型和状态模型已通过 repository/service/view model 测试间接覆盖。
+- [x] Repository 测试：`ServerRepositoryTests` 覆盖 server、trusted host key、command history、dashboard snapshot、transfer jobs 和级联删除。
+- [x] Keychain 测试：`KeychainServiceTests` 覆盖 password、private key、cloud credential 和 webhook secret 的保存、覆盖、读取、删除。
+- [x] ServerManagementService 补偿逻辑测试：`ServerManagementServiceTests` 覆盖服务器创建/更新/删除、凭据清理和云账号凭据生命周期。
+- [x] HostKeyTrustStore 测试：`HostKeyTrustStoreTests` 覆盖首次未知指纹、已信任匹配和指纹变化阻断。
+- [x] SSH 状态机测试：`ServerWorkspaceViewModelTests` 覆盖连接成功、连接失败、未知 host key 等待/拒绝、重复连接防抖和断开连接状态。
 - [ ] 可选真实 SSH 集成测试。
 
 真实 SSH 集成测试通过环境变量启用：

@@ -152,6 +152,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
     }
 
     func connect(profile: ServerProfile, sshClient: SSHClient) {
+        guard connectionState != .connecting, !isRunningSmokeTest else {
+            return
+        }
         connectionState = .connecting
         runSmokeTest(profile: profile, sshClient: sshClient, action: .connect)
     }
