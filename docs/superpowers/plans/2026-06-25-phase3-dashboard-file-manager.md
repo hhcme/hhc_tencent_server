@@ -128,7 +128,7 @@ CREATE TABLE file_transfer_jobs (
 - [ ] 验证权限、断线恢复和正式传输队列。
 - [x] 形成技术验证结论并写入设计文档。
 
-结论：当前 macOS bootstrap 继续使用系统 OpenSSH 工具链。目录浏览和文本读写走 `ssh` 命令，文件上传/下载优先走 `rsync --partial --progress` 以获得字节进度和部分文件保留能力；rsync 不可用或失败时先回退到 OpenSSH `sftp -b` 的普通 `put` / `get` batch；SFTP 仍失败时再回退 `scp`。工作台传输队列当前允许最多两个任务并发运行，超出的任务保持 pending。已在真实 Linux 服务器上验证远端 `sftp` 命令存在、SFTP 上传/下载往返可用以及 scp 上传/下载往返可用。SwiftNIO SSH/libssh2 的正式 SFTP 封装留到可恢复/断点续传队列阶段替换，避免在核心流程尚未稳定时引入额外 native binding 风险。
+结论：当前 macOS bootstrap 继续使用系统 OpenSSH 工具链。目录浏览和文本读写走 `ssh` 命令，文件上传/下载优先走 `rsync --partial --progress` 以获得字节进度和部分文件保留能力；rsync 不可用或失败时先回退到 OpenSSH `sftp -b` 的普通 `put` / `get` batch；SFTP 仍失败时再回退 `scp`。工作台传输队列当前允许最多两个任务并发运行，超出的任务保持 pending。失败、取消和中断任务现在会以同一条历史任务原地恢复为 pending/running，保留已有进度上下文并在成功后覆盖为 succeeded，避免重试后留下重复历史。已在真实 Linux 服务器上验证远端 `sftp` 命令存在、SFTP 上传/下载往返可用以及 scp 上传/下载往返可用。SwiftNIO SSH/libssh2 的正式 SFTP 封装仍留到 native 可恢复/断点续传阶段替换，避免在核心流程尚未稳定时引入额外 native binding 风险。
 
 ### Task 6：文件管理器
 
@@ -142,7 +142,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 增加 rsync bootstrap 传输路径，支持字节进度解析和部分文件保留，失败时优先回退 OpenSSH `sftp -b` 普通 batch，最后回退 scp。
 - [x] 实现 pending/running 任务持久化，重新进入工作台时将遗留未完成任务标记为 interrupted。
 - [x] 实现 bootstrap 有限并发传输队列。
-- [x] 实现失败、取消和中断传输任务的历史重试入口；rsync 路径可利用 `--partial` 保留的部分文件继续传输，SFTP fallback 负责普通上传/下载，真正断点续传留到正式 SFTP 队列阶段。
+- [x] 实现失败、取消和中断传输任务的原地恢复入口；rsync 路径可利用 `--partial` 保留的部分文件继续传输，恢复时复用原任务 ID、保留已有进度上下文并在成功后覆盖为 succeeded，SFTP fallback 负责普通上传/下载，native 真正断点续传留到正式 SFTP 队列阶段。
 - [ ] 实现正式 SFTP 和真正可恢复/断点续传队列。
 - [x] 实现重命名。
 - [x] 实现权限查看基础展示。
@@ -165,7 +165,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 单文件和批量上传/下载服务与 ViewModel 测试。
 - [x] 当前传输取消 ViewModel 测试。
 - [x] 有限并发传输队列、pending 溢出和待传队列清空 ViewModel 测试。
-- [x] 失败/中断传输重试 ViewModel 测试。
+- [x] 失败/中断传输原地恢复 ViewModel 测试。
 - [x] 传输历史 SQLite 持久化、恢复和级联删除测试。
 - [x] 运行中传输进度回调、UI 状态更新和持久化测试。
 - [x] rsync 进度输出解析测试。

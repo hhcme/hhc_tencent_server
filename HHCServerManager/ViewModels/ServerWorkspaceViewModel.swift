@@ -880,16 +880,13 @@ final class ServerWorkspaceViewModel: ObservableObject {
         repository: ServerRepository? = nil
     ) {
         guard job.status.isRetryable else { return }
-        let jobId = enqueueRemoteFileTransferJob(
-            direction: job.direction,
-            remotePath: job.remotePath,
-            localPath: job.localPath,
-            message: "Retrying previous transfer.",
+        let jobId = resumeRemoteFileTransferJob(
+            job,
             profile: profile,
             repository: repository
         )
         remoteFileErrorMessage = nil
-        remoteFileActionMessage = "Queued retry for \(Self.remoteFileTransferDisplayName(job))."
+        remoteFileActionMessage = "Resuming \(Self.remoteFileTransferDisplayName(job))."
 
         switch job.direction {
         case .upload:
@@ -2941,6 +2938,27 @@ final class ServerWorkspaceViewModel: ObservableObject {
         return id
     }
 
+    private func resumeRemoteFileTransferJob(
+        _ job: RemoteFileTransferJob,
+        profile: ServerProfile,
+        repository: ServerRepository?
+    ) -> UUID {
+        if let index = remoteFileTransferJobs.firstIndex(where: { $0.id == job.id }) {
+            remoteFileTransferJobs.remove(at: index)
+        }
+        var resumed = job
+        resumed.status = .pending
+        resumed.message = "Resuming previous \(job.direction.displayName.lowercased()) transfer."
+        resumed.startedAt = Date()
+        resumed.finishedAt = nil
+        if resumed.progressFraction == nil {
+            resumed.progressFraction = 0
+        }
+        remoteFileTransferJobs.insert(resumed, at: 0)
+        persistRemoteFileTransferJob(resumed.id, profile: profile, repository: repository)
+        return resumed.id
+    }
+
     private func startNextRemoteFileTransferIfNeeded() {
         while transferTasksByJobId.count < maximumConcurrentRemoteFileTransfers, !transferQueue.isEmpty {
             let request = transferQueue.removeFirst()
@@ -3124,7 +3142,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     private func markRemoteFileTransferJobRunning(_ id: UUID) {
         guard let index = remoteFileTransferJobs.firstIndex(where: { $0.id == id }) else { return }
         remoteFileTransferJobs[index].status = .running
-        remoteFileTransferJobs[index].progressFraction = 0
+        remoteFileTransferJobs[index].progressFraction = remoteFileTransferJobs[index].progressFraction ?? 0
         remoteFileTransferJobs[index].startedAt = Date()
     }
 

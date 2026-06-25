@@ -1224,16 +1224,16 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             repository: repository
         )
 
-        try await waitUntil {
-            viewModel.remoteFileTransferJobs.count == 2 &&
-                viewModel.remoteFileTransferJobs.first?.status == .succeeded
-        }
+        try await waitUntil { viewModel.remoteFileTransferJobs.first?.status == .succeeded }
 
-        XCTAssertEqual(viewModel.remoteFileTransferJobs.last, failed)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.count, 1)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.id, failed.id)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.progressFraction, 1)
         XCTAssertEqual(client.uploads.map(\.remotePath), ["/var/www/retry.env"])
         let persisted = try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
-        XCTAssertEqual(persisted.filter { $0.status == .succeeded }.count, 1)
-        XCTAssertEqual(persisted.filter { $0.status == .failed }.count, 1)
+        XCTAssertEqual(persisted.count, 1)
+        XCTAssertEqual(persisted.first?.id, failed.id)
+        XCTAssertEqual(persisted.first?.status, .succeeded)
     }
 
     func testRetryRemoteFileTransferQueuesNewDownloadJobFromInterruptedHistory() async throws {
@@ -1266,17 +1266,17 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             repository: repository
         )
 
-        try await waitUntil {
-            viewModel.remoteFileTransferJobs.count == 2 &&
-                viewModel.remoteFileTransferJobs.first?.status == .succeeded
-        }
+        try await waitUntil { viewModel.remoteFileTransferJobs.first?.status == .succeeded }
 
-        XCTAssertEqual(viewModel.remoteFileTransferJobs.last, interrupted)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.count, 1)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.id, interrupted.id)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.progressFraction, 1)
         XCTAssertEqual(client.downloads.map(\.remotePath), ["/var/www/app.env"])
         XCTAssertEqual(client.downloads.map(\.localURL.path), ["/tmp/downloads/app.env"])
         let persisted = try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
-        XCTAssertEqual(persisted.filter { $0.status == .succeeded }.count, 1)
-        XCTAssertEqual(persisted.filter { $0.status == .interrupted }.count, 1)
+        XCTAssertEqual(persisted.count, 1)
+        XCTAssertEqual(persisted.first?.id, interrupted.id)
+        XCTAssertEqual(persisted.first?.status, .succeeded)
     }
 
     func testRemoteFileTransferCancellationMarksRunningJobCancelled() async throws {
