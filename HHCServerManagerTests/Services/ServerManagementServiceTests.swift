@@ -791,6 +791,106 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testVerdaccioManagerParsesStatusAndRedactsLogs() async throws {
+        let profile = makeServiceTestProfile()
+        let logs = Data("started token=secret-value\nready\n".utf8).base64EncodedString()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(
+                command: "",
+                stdout: """
+                __HHC_VERDACCIO_ACTIVE_STATE__active
+                __HHC_VERDACCIO_SUB_STATE__running
+                __HHC_VERDACCIO_VERSION__5.31.1
+                __HHC_VERDACCIO_STORAGE_BYTES__4096
+                __HHC_VERDACCIO_LOGS__\(logs)
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            ),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let snapshot = try await manager.loadStatus(
+            draft: VerdaccioInstallDraft(),
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertTrue(snapshot.isRunning)
+        XCTAssertEqual(snapshot.version, "5.31.1")
+        XCTAssertEqual(snapshot.storageBytes, 4096)
+        XCTAssertTrue(snapshot.recentLogs.contains("token=<redacted>"))
+        XCTAssertFalse(snapshot.recentLogs.contains("secret-value"))
+        XCTAssertTrue(client.commands[0].contains("systemctl show \"$service\" --property=ActiveState"))
+        XCTAssertTrue(client.commands[0].contains("journalctl -u \"$service\""))
+    }
+
+    func testVerdaccioManagerReadsConfigAsUTF8() async throws {
+        let profile = makeServiceTestProfile()
+        let config = "storage: /srv/verdaccio/storage\n"
+        let client = RecordingSSHClient(responses: [
+            CommandResult(
+                command: "",
+                stdout: Data(config.utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            ),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let file = try await manager.readConfig(
+            draft: VerdaccioInstallDraft(),
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(file.path, "/srv/verdaccio/config.yaml")
+        XCTAssertEqual(file.content, config)
+        XCTAssertTrue(client.commands[0].contains("base64 < \"$path\""))
+    }
+
+    func testVerdaccioManagerSavesConfigWithBackupAndRestart() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await manager.saveConfig(
+            draft: VerdaccioInstallDraft(),
+            content: "storage: /srv/verdaccio/storage\n",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(result.path, "/srv/verdaccio/config.yaml")
+        XCTAssertTrue(result.backupPath.hasPrefix("/srv/verdaccio/config.yaml.hhc-backup-"))
+        XCTAssertTrue(client.commands[0].contains("cp -p -- \"$path\" \"$backup\""))
+        XCTAssertTrue(client.commands[0].contains("base64 -d > \"$tmp\""))
+        XCTAssertTrue(client.commands[0].contains("systemctl restart \"$service\""))
+    }
+
+    func testVerdaccioManagerRejectsOversizedConfigBeforeSSH() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let manager = VerdaccioManager()
+
+        do {
+            _ = try await manager.saveConfig(
+                draft: VerdaccioInstallDraft(),
+                content: String(repeating: "a", count: VerdaccioManager.maxConfigBytes + 1),
+                profile: profile,
+                sshClient: client
+            )
+            XCTFail("Expected oversized config failure.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("larger than the 256 KiB"))
+            XCTAssertTrue(client.commands.isEmpty)
+        }
+    }
+
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
         let os = DashboardService.parseOSRelease("""
         NAME="Ubuntu"

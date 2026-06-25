@@ -1161,6 +1161,31 @@ struct VerdaccioInstallResult: Equatable, Sendable {
     var healthCheckOutput: String
 }
 
+struct VerdaccioStatusSnapshot: Equatable, Sendable {
+    var serviceName: String
+    var activeState: String
+    var subState: String
+    var version: String?
+    var storageBytes: Int64?
+    var recentLogs: String
+    var capturedAt: Date
+
+    var isRunning: Bool {
+        activeState == "active" && subState == "running"
+    }
+}
+
+struct VerdaccioConfigFile: Equatable, Sendable {
+    var path: String
+    var content: String
+    var capturedAt: Date
+}
+
+struct VerdaccioConfigSaveResult: Equatable, Sendable {
+    var path: String
+    var backupPath: String
+}
+
 enum RegistryConfigurationError: LocalizedError, Equatable {
     case invalidName
     case invalidPath(String)
@@ -1385,6 +1410,185 @@ final class VerdaccioInstaller: @unchecked Sendable {
 
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
+final class VerdaccioManager: @unchecked Sendable {
+    static let maxConfigBytes = 256 * 1024
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func loadStatus(
+        draft: VerdaccioInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioStatusSnapshot {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(Self.statusCommand(for: draft), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not load Verdaccio status."))
+        }
+        return Self.parseStatus(result.stdout, serviceName: draft.serviceName.trimmed, capturedAt: now())
+    }
+
+    func readConfig(
+        draft: VerdaccioInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioConfigFile {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let path = "\(draft.installPath.trimmed)/config.yaml"
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(Self.readConfigCommand(path: path), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            if result.stdout.hasPrefix("__HHC_VERDACCIO_CONFIG_TOO_LARGE__") {
+                throw SSHClientError.processFailed("Verdaccio config is larger than the 256 KiB editing limit.")
+            }
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not read Verdaccio config."))
+        }
+        let encoded = result.stdout.split(whereSeparator: { $0.isWhitespace }).joined()
+        guard let data = Data(base64Encoded: encoded), let content = String(data: data, encoding: .utf8) else {
+            throw SSHClientError.processFailed("Verdaccio config is not valid UTF-8 text.")
+        }
+        return VerdaccioConfigFile(path: path, content: content, capturedAt: now())
+    }
+
+    func saveConfig(
+        draft: VerdaccioInstallDraft,
+        content: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioConfigSaveResult {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let data = Data(content.utf8)
+        guard data.count <= Self.maxConfigBytes else {
+            throw SSHClientError.processFailed("Verdaccio config is larger than the 256 KiB editing limit.")
+        }
+        let path = "\(draft.installPath.trimmed)/config.yaml"
+        let timestamp = Self.timestamp(for: now())
+        let backupPath = "\(path).hhc-backup-\(timestamp)"
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(
+                Self.saveConfigCommand(
+                    path: path,
+                    backupPath: backupPath,
+                    serviceName: draft.serviceName.trimmed,
+                    encodedContent: data.base64EncodedString()
+                ),
+                profile: profile
+            )
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not save Verdaccio config."))
+        }
+        return VerdaccioConfigSaveResult(path: path, backupPath: backupPath)
+    }
+
+    static func parseStatus(
+        _ output: String,
+        serviceName: String,
+        capturedAt: Date = Date()
+    ) -> VerdaccioStatusSnapshot {
+        let values = markerValues(from: output)
+        return VerdaccioStatusSnapshot(
+            serviceName: serviceName,
+            activeState: values["ACTIVE_STATE"]?.nilIfEmpty ?? "unknown",
+            subState: values["SUB_STATE"]?.nilIfEmpty ?? "unknown",
+            version: values["VERSION"]?.nilIfEmpty,
+            storageBytes: Int64(values["STORAGE_BYTES"] ?? ""),
+            recentLogs: DeploymentLogRedactor.redact(values["LOGS"] ?? ""),
+            capturedAt: capturedAt
+        )
+    }
+
+    static func statusCommand(for draft: VerdaccioInstallDraft) -> String {
+        let service = shellQuote("\(draft.serviceName.trimmed).service")
+        let dataPath = shellQuote(draft.dataPath.trimmed)
+        return """
+        service=\(service); data_path=\(dataPath); \
+        printf '__HHC_VERDACCIO_ACTIVE_STATE__%s\\n' "$(systemctl show "$service" --property=ActiveState --value 2>/dev/null || echo unknown)"; \
+        printf '__HHC_VERDACCIO_SUB_STATE__%s\\n' "$(systemctl show "$service" --property=SubState --value 2>/dev/null || echo unknown)"; \
+        printf '__HHC_VERDACCIO_VERSION__%s\\n' "$(npx --yes verdaccio@\(draft.version.trimmed) --version 2>/dev/null || true)"; \
+        printf '__HHC_VERDACCIO_STORAGE_BYTES__%s\\n' "$(du -sb "$data_path" 2>/dev/null | awk '{print $1}' || echo 0)"; \
+        printf '__HHC_VERDACCIO_LOGS__'; journalctl -u "$service" -n 80 --no-pager 2>/dev/null | tail -n 80 | base64 | tr -d '\\n'; printf '\\n'
+        """
+    }
+
+    static func readConfigCommand(path: String) -> String {
+        """
+        path=\(shellQuote(path)); \
+        bytes=$(wc -c < "$path" 2>/dev/null | tr -d '[:space:]' || echo 0); \
+        if [ "$bytes" -gt \(maxConfigBytes) ]; then echo "__HHC_VERDACCIO_CONFIG_TOO_LARGE__$bytes"; exit 3; fi; \
+        base64 < "$path"
+        """
+    }
+
+    static func saveConfigCommand(
+        path: String,
+        backupPath: String,
+        serviceName: String,
+        encodedContent: String
+    ) -> String {
+        let temporaryPath = "\(path).hhc-tmp-\(UUID().uuidString)"
+        return """
+        set -e; \
+        path=\(shellQuote(path)); \
+        backup=\(shellQuote(backupPath)); \
+        tmp=\(shellQuote(temporaryPath)); \
+        service=\(shellQuote("\(serviceName).service")); \
+        trap 'rm -f -- "$tmp"' EXIT; \
+        cp -p -- "$path" "$backup"; \
+        base64 -d > "$tmp" <<'__HHC_VERDACCIO_CONFIG_EOF__'
+        \(encodedContent)
+        __HHC_VERDACCIO_CONFIG_EOF__
+        chown --reference="$path" "$tmp"; \
+        chmod --reference="$path" "$tmp"; \
+        mv -- "$tmp" "$path"; \
+        systemctl restart "$service"; \
+        trap - EXIT
+        """
+    }
+
+    private static func markerValues(from output: String) -> [String: String] {
+        var values: [String: String] = [:]
+        for line in output.components(separatedBy: .newlines) where line.hasPrefix("__HHC_VERDACCIO_") {
+            let keyStart = line.index(line.startIndex, offsetBy: "__HHC_VERDACCIO_".count)
+            guard let markerEnd = line.range(of: "__", range: keyStart..<line.endIndex) else { continue }
+            let key = String(line[keyStart..<markerEnd.lowerBound])
+            let value = String(line[markerEnd.upperBound...]).trimmed
+            if key == "LOGS", let data = Data(base64Encoded: value), let decoded = String(data: data, encoding: .utf8) {
+                values[key] = decoded
+            } else {
+                values[key] = value
+            }
+        }
+        return values
+    }
+
+    private static func redactedOutput(from result: CommandResult, fallback: String) -> String {
+        DeploymentLogRedactor.redact(
+            [result.stderr.trimmed, result.stdout.trimmed]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+                .nilIfEmpty ?? fallback
+        )
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func timestamp(for date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+            .replacingOccurrences(of: ":", with: "-")
     }
 }
 
