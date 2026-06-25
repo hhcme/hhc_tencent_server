@@ -82,8 +82,9 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?
     ) async throws -> RemoteFileTransferResult {
         try await transferFile(
+            direction: .upload,
             source: localURL.path,
-            destination: "\(profile.username)@\(profile.host):\(Self.scpRemoteQuote(remotePath))",
+            remoteSourceOrDestination: "\(profile.username)@\(profile.host):\(Self.remoteShellQuote(remotePath))",
             remotePath: remotePath,
             localURL: localURL,
             profile: profile,
@@ -98,8 +99,9 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?
     ) async throws -> RemoteFileTransferResult {
         try await transferFile(
-            source: "\(profile.username)@\(profile.host):\(Self.scpRemoteQuote(remotePath))",
-            destination: localURL.path,
+            direction: .download,
+            source: localURL.path,
+            remoteSourceOrDestination: "\(profile.username)@\(profile.host):\(Self.remoteShellQuote(remotePath))",
             remotePath: remotePath,
             localURL: localURL,
             profile: profile,
@@ -113,8 +115,9 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
     }
 
     private func transferFile(
+        direction: RemoteFileTransferDirection,
         source: String,
-        destination: String,
+        remoteSourceOrDestination: String,
         remotePath: String,
         localURL: URL,
         profile: ServerProfile,
@@ -131,8 +134,33 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         let start = Date()
         let initialByteCount = (try? fileManager.attributesOfItem(atPath: localURL.path)[.size]) as? Int64
         progressHandler?(RemoteFileTransferProgress(completedBytes: 0, totalBytes: initialByteCount, fraction: 0))
+
+        if let result = try await transferFileWithRsyncIfAvailable(
+            direction: direction,
+            source: source,
+            remoteSourceOrDestination: remoteSourceOrDestination,
+            remotePath: remotePath,
+            localURL: localURL,
+            profile: profile,
+            knownHostsURL: knownHostsURL,
+            progressHandler: progressHandler,
+            start: start
+        ) {
+            return result
+        }
+
+        let scpSource: String
+        let scpDestination: String
+        switch direction {
+        case .upload:
+            scpSource = source
+            scpDestination = remoteSourceOrDestination
+        case .download:
+            scpSource = remoteSourceOrDestination
+            scpDestination = source
+        }
         var arguments = authContext.arguments
-        arguments.append(contentsOf: [source, destination])
+        arguments.append(contentsOf: [scpSource, scpDestination])
         let processResult = try await runProcess("/usr/bin/scp", arguments: arguments, environment: authContext.environment)
         guard processResult.exitCode == 0 else {
             let message = processResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -141,6 +169,68 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
 
         let byteCount = (try? fileManager.attributesOfItem(atPath: localURL.path)[.size]) as? Int64
         progressHandler?(RemoteFileTransferProgress(completedBytes: byteCount, totalBytes: byteCount ?? initialByteCount, fraction: 1))
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: byteCount,
+            duration: Date().timeIntervalSince(start)
+        )
+    }
+
+    private func transferFileWithRsyncIfAvailable(
+        direction: RemoteFileTransferDirection,
+        source: String,
+        remoteSourceOrDestination: String,
+        remotePath: String,
+        localURL: URL,
+        profile: ServerProfile,
+        knownHostsURL: URL,
+        progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?,
+        start: Date
+    ) async throws -> RemoteFileTransferResult? {
+        guard fileManager.isExecutableFile(atPath: "/usr/bin/rsync") else {
+            return nil
+        }
+        let authContext = try makeAuthContext(profile: profile, knownHostsURL: knownHostsURL, portFlag: "-p")
+        defer {
+            authContext.cleanup()
+        }
+
+        let rsyncSource: String
+        let rsyncDestination: String
+        switch direction {
+        case .upload:
+            rsyncSource = source
+            rsyncDestination = remoteSourceOrDestination
+        case .download:
+            rsyncSource = remoteSourceOrDestination
+            rsyncDestination = source
+        }
+
+        let sshCommand = (["ssh"] + authContext.arguments.map(Self.shellQuote)).joined(separator: " ")
+        let arguments = [
+            "--partial",
+            "--progress",
+            "-e", sshCommand,
+            rsyncSource,
+            rsyncDestination,
+        ]
+        let processResult = try await runProcessStreaming(
+            "/usr/bin/rsync",
+            arguments: arguments,
+            environment: authContext.environment
+        ) { chunk in
+            for progress in Self.rsyncProgressUpdates(from: chunk) {
+                progressHandler?(progress)
+            }
+        }
+
+        guard processResult.exitCode == 0 else {
+            return nil
+        }
+
+        let byteCount = (try? fileManager.attributesOfItem(atPath: localURL.path)[.size]) as? Int64
+        progressHandler?(RemoteFileTransferProgress(completedBytes: byteCount, totalBytes: byteCount, fraction: 1))
         return RemoteFileTransferResult(
             remotePath: remotePath,
             localPath: localURL.path,
@@ -277,8 +367,45 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         return url
     }
 
-    private static func scpRemoteQuote(_ value: String) -> String {
+    private static func remoteShellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    static func rsyncProgressUpdates(from output: String) -> [RemoteFileTransferProgress] {
+        output
+            .split(whereSeparator: \.isNewline)
+            .compactMap { rsyncProgressUpdate(fromLine: String($0)) }
+    }
+
+    static func rsyncProgressUpdate(fromLine line: String) -> RemoteFileTransferProgress? {
+        let columns = line
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(whereSeparator: \.isNewline)
+            .last?
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init) ?? []
+        guard columns.count >= 2 else {
+            return nil
+        }
+        let completedText = columns[0].filter { $0.isNumber }
+        let percentText = columns[1].replacingOccurrences(of: "%", with: "")
+        guard
+            let completedBytes = Int64(completedText),
+            let percent = Double(percentText)
+        else {
+            return nil
+        }
+        let fraction = percent / 100
+        let totalBytes = fraction > 0 ? Int64((Double(completedBytes) / fraction).rounded()) : nil
+        return RemoteFileTransferProgress(
+            completedBytes: completedBytes,
+            totalBytes: totalBytes,
+            fraction: fraction
+        )
     }
 
     private func appSupportURL() throws -> URL {
@@ -347,6 +474,96 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             processBox.terminate()
         }
     }
+
+    private func runProcessStreaming(
+        _ executable: String,
+        arguments: [String],
+        environment: [String: String] = [:],
+        outputHandler: @escaping @Sendable (String) -> Void
+    ) async throws -> ProcessResult {
+        let processBox = ProcessBox()
+        return try await withTaskCancellationHandler {
+            try await Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+
+                let process = Process()
+                processBox.set(process)
+                process.executableURL = URL(fileURLWithPath: executable)
+                process.arguments = arguments
+                if !environment.isEmpty {
+                    process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+                }
+
+                let stdout = Pipe()
+                let stderr = Pipe()
+                let stdoutBuffer = LockedDataBuffer()
+                let stderrBuffer = LockedDataBuffer()
+                stdout.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    guard !data.isEmpty else { return }
+                    stdoutBuffer.append(data)
+                    if let chunk = String(data: data, encoding: .utf8) {
+                        outputHandler(chunk)
+                    }
+                }
+                stderr.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    guard !data.isEmpty else { return }
+                    stderrBuffer.append(data)
+                    if let chunk = String(data: data, encoding: .utf8) {
+                        outputHandler(chunk)
+                    }
+                }
+                process.standardOutput = stdout
+                process.standardError = stderr
+
+                do {
+                    try process.run()
+                } catch {
+                    stdout.fileHandleForReading.readabilityHandler = nil
+                    stderr.fileHandleForReading.readabilityHandler = nil
+                    throw SSHClientError.processFailed(error.localizedDescription)
+                }
+
+                if Task.isCancelled {
+                    processBox.terminate()
+                    stdout.fileHandleForReading.readabilityHandler = nil
+                    stderr.fileHandleForReading.readabilityHandler = nil
+                    throw SSHClientError.cancelled
+                }
+
+                process.waitUntilExit()
+                stdout.fileHandleForReading.readabilityHandler = nil
+                stderr.fileHandleForReading.readabilityHandler = nil
+                let remainingStdout = stdout.fileHandleForReading.readDataToEndOfFile()
+                if !remainingStdout.isEmpty {
+                    stdoutBuffer.append(remainingStdout)
+                    if let chunk = String(data: remainingStdout, encoding: .utf8) {
+                        outputHandler(chunk)
+                    }
+                }
+                let remainingStderr = stderr.fileHandleForReading.readDataToEndOfFile()
+                if !remainingStderr.isEmpty {
+                    stderrBuffer.append(remainingStderr)
+                    if let chunk = String(data: remainingStderr, encoding: .utf8) {
+                        outputHandler(chunk)
+                    }
+                }
+
+                if Task.isCancelled {
+                    throw SSHClientError.cancelled
+                }
+
+                return ProcessResult(
+                    stdout: String(data: stdoutBuffer.data(), encoding: .utf8) ?? "",
+                    stderr: String(data: stderrBuffer.data(), encoding: .utf8) ?? "",
+                    exitCode: process.terminationStatus
+                )
+            }.value
+        } onCancel: {
+            processBox.terminate()
+        }
+    }
 }
 
 private struct SSHProcessAuthContext {
@@ -380,6 +597,24 @@ private final class ProcessBox: @unchecked Sendable {
         if process?.isRunning == true {
             process?.terminate()
         }
+    }
+}
+
+private final class LockedDataBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = Data()
+
+    func append(_ data: Data) {
+        lock.lock()
+        storage.append(data)
+        lock.unlock()
+    }
+
+    func data() -> Data {
+        lock.lock()
+        let data = storage
+        lock.unlock()
+        return data
     }
 }
 

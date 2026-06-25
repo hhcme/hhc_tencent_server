@@ -6,9 +6,9 @@ HHC Server Manager is an open-source macOS native server management client. It a
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，目标是以 SSH 为核心提供类似宝塔面板的桌面端体验，并在用户配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-> Project status: early macOS implementation. The app can already store server profiles, keep SSH and cloud credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, execute single remote commands, browse remote files, queue batch file transfers, show SSH dashboard metrics, load linked Tencent Cloud CVM CPU metrics, inspect Tencent Cloud security groups, apply confirmed single-rule Tencent Cloud security group changes, inspect and edit limited firewall rules, manage systemd/Cron/Nginx/Environment foundations, and persist command/cloud/remote-change metadata in SQLite.
+> Project status: early macOS implementation. The app can already store server profiles, keep SSH and cloud credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, execute single remote commands, browse remote files, queue rsync/scp-backed batch file transfers with running byte progress, show SSH dashboard metrics, load linked Tencent Cloud CVM CPU metrics, inspect Tencent Cloud security groups, apply confirmed single-rule Tencent Cloud security group changes, inspect and edit limited firewall rules, manage systemd/Cron/Nginx/Environment foundations, and persist command/cloud/remote-change metadata in SQLite.
 >
-> 项目状态：macOS 早期实现阶段。当前应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览远程文件、排队批量传输文件、展示 SSH Dashboard 指标、加载已关联腾讯云 CVM 的 CPU 云监控指标，查看腾讯云安全组、执行经过确认的腾讯云安全组单条规则变更、查看并有限修改防火墙规则，管理 systemd/Cron/Nginx/Environment 基础能力，并在 SQLite 中持久化命令、云资源和远程变更元数据。
+> 项目状态：macOS 早期实现阶段。当前应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览远程文件、通过 rsync/scp 排队批量传输文件并展示运行中字节进度、展示 SSH Dashboard 指标、加载已关联腾讯云 CVM 的 CPU 云监控指标，查看腾讯云安全组、执行经过确认的腾讯云安全组单条规则变更、查看并有限修改防火墙规则，管理 systemd/Cron/Nginx/Environment 基础能力，并在 SQLite 中持久化命令、云资源和远程变更元数据。
 
 ## Highlights / 亮点
 
@@ -29,7 +29,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - SSH 密码、私钥等敏感信息存入 macOS Keychain。
 - 把主机指纹验证作为基础安全能力。
 - 服务器列表、单服务器工作台、真实 smoke test、简化命令面板和命令元数据历史已进入实现。
-- Dashboard 自动刷新、SSH 指标、已关联腾讯云 CVM 的 CPU 云监控指标、腾讯云安全组查看和经确认的单条规则变更、远程文件浏览、带另存为的轻量文本编辑、权限修改、排队批量上传/下载、systemd Services、Cron 管理、受保护的 Nginx 配置编辑/测试/reload、有限防火墙规则变更和受保护的环境变量文件编辑已进入实现。
+- Dashboard 自动刷新、SSH 指标、已关联腾讯云 CVM 的 CPU 云监控指标、腾讯云安全组查看和经确认的单条规则变更、远程文件浏览、带另存为的轻量文本编辑、权限修改、带 rsync 字节进度和 scp 回退的排队批量上传/下载、systemd Services、Cron 管理、受保护的 Nginx 配置编辑/测试/reload、有限防火墙规则变更和受保护的环境变量文件编辑已进入实现。
 - 云账号元数据和云凭据存储基础已经落地。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装已经落地。
 - 腾讯云 adapter 已包含 TC3 请求签名、地域查询、CVM 实例查询解析、云监控 CPU 指标查询、VPC 安全组/规则查询和单条安全组规则新增/删除。
