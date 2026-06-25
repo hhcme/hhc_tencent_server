@@ -82,6 +82,16 @@ public sealed class ServerManagementService(
         return trusted;
     }
 
+    public async Task<SshHostKey> ScanHostKeyAsync(
+        ServerProfile profile,
+        IWindowsSshClient sshClient,
+        CancellationToken cancellationToken = default)
+    {
+        var credential = await credentials.ReadAsync(profile.CredentialRef, cancellationToken)
+            ?? throw new InvalidOperationException("Credential is missing for this server.");
+        return await sshClient.ScanHostKeyAsync(profile, credential, cancellationToken);
+    }
+
     public async Task<CommandResult> RunSmokeTestAsync(
         ServerProfile profile,
         IWindowsSshClient sshClient,

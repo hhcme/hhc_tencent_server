@@ -1,4 +1,6 @@
+using HHCServerManager.Windows.Application.Ports;
 using HHCServerManager.Windows.Application.ServerManagement;
+using HHCServerManager.Windows.Application.Shell;
 using HHCServerManager.Windows.Domain.Security;
 using HHCServerManager.Windows.Domain.Servers;
 using HHCServerManager.Windows.Domain.Ssh;
@@ -92,5 +94,88 @@ public sealed class WindowsPhase8CoreTests
         var store = new WindowsCredentialStore();
         await Assert.ThrowsAsync<PlatformNotSupportedException>(() =>
             store.SaveAsync("test", new CredentialInput.Password("secret")));
+    }
+
+    [Fact]
+    public async Task MainWindowViewModelRequiresHostKeyTrustThenRunsSmokeTest()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.AddPasswordServerAsync("Prod", "example.internal", 22, "root", "secret");
+
+        await viewModel.ConnectAsync();
+
+        Assert.Equal(WindowsConnectionState.AwaitingHostKeyTrust, viewModel.ConnectionState);
+        Assert.True(viewModel.CanConfirmHostKey);
+        Assert.Contains("SHA256:first", viewModel.HostKeyTrustMessage);
+
+        await viewModel.TrustPendingHostKeyAndConnectAsync();
+        await viewModel.RunSmokeTestAsync();
+
+        Assert.Equal(WindowsConnectionState.Connected, viewModel.ConnectionState);
+        Assert.Equal("hhc-ssh-ok", viewModel.CommandOutput);
+        Assert.Equal("Smoke test succeeded.", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task MainWindowViewModelBlocksMismatchedHostKeyUntilUserReviewsIt()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var trustedSsh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4)));
+        var profile = await service.AddServerAsync(
+            "Prod",
+            "example.internal",
+            22,
+            "root",
+            SshAuthType.Password,
+            null,
+            new CredentialInput.Password("secret"));
+        await service.TrustHostKeyAsync(profile, trustedSsh.HostKey);
+
+        var changedSsh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:changed", "ssh-ed25519 BBBB"),
+            new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, changedSsh);
+        await viewModel.LoadServersAsync();
+
+        await viewModel.ConnectAsync();
+
+        Assert.Equal(WindowsConnectionState.AwaitingHostKeyTrust, viewModel.ConnectionState);
+        Assert.True(viewModel.PendingHostKeyTrust?.IsMismatch);
+        Assert.Contains("differs", viewModel.HostKeyTrustMessage);
+
+        viewModel.RejectPendingHostKey();
+
+        Assert.Equal(WindowsConnectionState.Disconnected, viewModel.ConnectionState);
+        Assert.False(viewModel.CanConfirmHostKey);
+    }
+
+    private sealed class FakeWindowsSshClient(SshHostKey hostKey, CommandResult result) : IWindowsSshClient
+    {
+        public SshHostKey HostKey { get; } = hostKey;
+
+        public Task<SshHostKey> ScanHostKeyAsync(
+            ServerProfile profile,
+            CredentialInput credential,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(HostKey);
+
+        public Task<CommandResult> ExecuteAsync(
+            ServerProfile profile,
+            CredentialInput credential,
+            string command,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(result with { Command = command });
     }
 }

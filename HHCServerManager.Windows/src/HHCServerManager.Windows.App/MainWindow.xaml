@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:servers="using:HHCServerManager.Windows.Domain.Servers"
     mc:Ignorable="d"
     Title="HHC Server Manager">
 
@@ -14,10 +15,10 @@
         </Grid.RowDefinitions>
 
         <CommandBar Grid.Row="0" DefaultLabelPosition="Right">
-            <AppBarButton Icon="Add" Label="Add server" />
-            <AppBarButton Icon="Refresh" Label="Refresh" />
+            <AppBarButton Icon="Add" Label="Add server" Click="AddServer_Click" />
+            <AppBarButton Icon="Refresh" Label="Refresh" Click="Refresh_Click" />
             <CommandBar.SecondaryCommands>
-                <AppBarButton Icon="Setting" Label="Settings" />
+                <AppBarButton Icon="Delete" Label="Delete selected server" Click="DeleteServer_Click" />
             </CommandBar.SecondaryCommands>
         </CommandBar>
 
@@ -46,25 +47,30 @@
                     </Grid.RowDefinitions>
                     <TextBlock Text="Servers" Style="{StaticResource TitleTextBlockStyle}" />
                     <AutoSuggestBox Grid.Row="1" Margin="0,12,0,12" PlaceholderText="Search servers" />
-                    <ListView Grid.Row="2" SelectionMode="Single">
-                        <ListViewItem IsSelected="True">
-                            <StackPanel Spacing="2">
-                                <TextBlock Text="Production API" FontWeight="SemiBold" />
-                                <TextBlock Text="root@server.example.com" Style="{StaticResource CaptionTextBlockStyle}" />
-                            </StackPanel>
-                        </ListViewItem>
-                        <ListViewItem>
-                            <StackPanel Spacing="2">
-                                <TextBlock Text="Staging" FontWeight="SemiBold" />
-                                <TextBlock Text="ubuntu@example.internal" Style="{StaticResource CaptionTextBlockStyle}" />
-                            </StackPanel>
-                        </ListViewItem>
+                    <ListView
+                        Grid.Row="2"
+                        ItemsSource="{x:Bind ViewModel.Servers, Mode=OneWay}"
+                        SelectedItem="{x:Bind ViewModel.SelectedServer, Mode=TwoWay}"
+                        SelectionMode="Single">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="servers:ServerProfile">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" />
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}">
+                                        <Run Text="{x:Bind Username}" />
+                                        <Run Text="@" />
+                                        <Run Text="{x:Bind Host}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
                     </ListView>
                 </Grid>
             </NavigationView>
 
             <Grid Grid.Column="1" Padding="28,20,28,28">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -76,40 +82,65 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Spacing="4">
-                        <TextBlock Text="Production API" Style="{StaticResource TitleTextBlockStyle}" />
-                        <TextBlock Text="root@server.example.com · SSH pending" Style="{StaticResource BodyTextBlockStyle}" />
+                        <TextBlock Text="{x:Bind ViewModel.SelectedServerTitle, Mode=OneWay}" Style="{StaticResource TitleTextBlockStyle}" />
+                        <TextBlock Text="{x:Bind ViewModel.SelectedServerSubtitle, Mode=OneWay}" Style="{StaticResource BodyTextBlockStyle}" />
                     </StackPanel>
-                    <Button Grid.Column="1" Content="Switch server" />
+                    <Button Grid.Column="1" Content="Delete" Click="DeleteServer_Click" />
                 </Grid>
 
                 <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,20,0,16">
-                    <Button Content="Connect" />
-                    <Button Content="Smoke test" />
-                    <Button Content="Disconnect" />
+                    <Button Content="Connect" IsEnabled="{x:Bind ViewModel.CanConnect, Mode=OneWay}" Click="Connect_Click" />
+                    <Button Content="Smoke test" IsEnabled="{x:Bind ViewModel.CanRunSmokeTest, Mode=OneWay}" Click="SmokeTest_Click" />
+                    <Button Content="Disconnect" IsEnabled="{x:Bind ViewModel.CanDisconnect, Mode=OneWay}" Click="Disconnect_Click" />
+                    <ProgressRing Width="24" Height="24" IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
                 </StackPanel>
 
-                <Grid Grid.Row="2">
+                <InfoBar
+                    Grid.Row="2"
+                    Margin="0,0,0,16"
+                    IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+                    Severity="Error"
+                    Title="Operation failed"
+                    Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}" />
+
+                <Grid Grid.Row="3">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="2*" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" Spacing="16">
-                        <TextBlock Text="Overview" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Overview" Style="{StaticResource SubtitleTextBlockStyle}" />
+                            <Button Grid.Column="1" Content="Copy output" Click="CopyOutput_Click" />
+                        </Grid>
                         <InfoBar
                             IsOpen="True"
                             Severity="Informational"
-                            Title="Host key trust is required before the first connection." />
+                            Title="Status"
+                            Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" />
                         <TextBox
                             AcceptsReturn="True"
                             IsReadOnly="True"
                             MinHeight="260"
-                            Text="Command output will appear here after connection." />
+                            Text="{x:Bind ViewModel.CommandOutput, Mode=OneWay}" />
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Margin="24,0,0,0" Spacing="16">
-                        <TextBlock Text="Connection" Style="{StaticResource SubtitleTextBlockStyle}" />
-                        <TextBlock Text="Authentication: private key" />
-                        <TextBlock Text="Host key: not trusted" />
-                        <TextBlock Text="Last smoke test: never" />
+                    <StackPanel Grid.Column="1" Margin="24,0,0,0" Spacing="12">
+                        <TextBlock Text="Host key trust" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock TextWrapping="Wrap" Text="{x:Bind ViewModel.HostKeyTrustMessage, Mode=OneWay}" />
+                        <Button
+                            Content="Trust and continue"
+                            IsEnabled="{x:Bind ViewModel.CanConfirmHostKey, Mode=OneWay}"
+                            Click="TrustHostKey_Click" />
+                        <Button
+                            Content="Reject"
+                            IsEnabled="{x:Bind ViewModel.CanConfirmHostKey, Mode=OneWay}"
+                            Click="RejectHostKey_Click" />
+                        <TextBlock Text="Connection" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,12,0,0" />
+                        <TextBlock Text="{x:Bind ViewModel.SelectedServerSubtitle, Mode=OneWay}" TextWrapping="Wrap" />
                     </StackPanel>
                 </Grid>
             </Grid>

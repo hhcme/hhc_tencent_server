@@ -113,9 +113,9 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 ### Task 2：项目骨架
 
 - [x] 创建 solution 和项目结构。
-- [ ] 建立 MVVM 基础。
-- [ ] 建立依赖注入。
-- [ ] 添加日志和错误处理基础。
+- [x] 建立 MVVM 基础：`MainWindowViewModel` 管理服务器列表、选中服务器、连接状态、host key 待确认状态和 smoke test 输出。
+- [x] 建立依赖注入：WinUI App 启动时通过 `Microsoft.Extensions.DependencyInjection` 组装 SQLite repository、Credential Manager、SSH.NET adapter 和应用服务。
+- [x] 添加错误处理基础：ViewModel 统一记录 `ErrorMessage`、`StatusMessage` 和失败状态，WinUI 通过 InfoBar 展示。
 
 ### Task 3：存储和凭据
 
@@ -126,7 +126,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 
 ### Task 4：SSH MVP
 
-- [ ] 实现连接状态机。
+- [x] 实现连接状态机：覆盖 disconnected、checking host key、awaiting trust、connected、running smoke test、failed。
 - [x] 实现 host key 首次确认的应用层判断。
 - [x] 实现 host key mismatch 阻断的应用层判断。
 - [x] 实现密码认证 adapter。
@@ -136,11 +136,11 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 ### Task 5：Windows UI
 
 - [x] 服务器列表骨架。
-- [ ] 添加服务器 dialog。
+- [x] 添加服务器 dialog：支持密码认证服务器配置写入 repository 和 Credential Manager 边界。
 - [x] 单服务器工作台骨架。
-- [x] 服务器切换器入口骨架。
-- [ ] Host key trust dialog。
-- [ ] 错误提示和输出复制。
+- [x] 服务器切换器入口骨架：左侧服务器列表选择即切换当前工作台上下文。
+- [x] Host key trust dialog：连接遇到未知或变更指纹时弹出确认 dialog，工作台侧栏也展示 presented fingerprint，并提供 trust/reject 操作。
+- [x] 错误提示和输出复制：错误通过 InfoBar 展示，命令输出区提供复制按钮。
 
 ### Task 6：测试
 
@@ -148,7 +148,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] SQLite repository 测试。
 - [x] Credential store 平台边界测试。
 - [x] Host key trust 测试。
-- [ ] SSH 状态机测试。
+- [x] SSH 状态机测试：覆盖首次 host key trust、确认后 smoke test、mismatch 阻断和 reject。
 - [ ] 可选真实 SSH 集成测试。
 
 ### Task 7：手动验收

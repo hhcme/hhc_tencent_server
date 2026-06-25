@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <ProjectReference Include="..\HHCServerManager.Windows.Application\HHCServerManager.Windows.Application.csproj" />
     <ProjectReference Include="..\HHCServerManager.Windows.Infrastructure\HHCServerManager.Windows.Infrastructure.csproj" />
   </ItemGroup>
