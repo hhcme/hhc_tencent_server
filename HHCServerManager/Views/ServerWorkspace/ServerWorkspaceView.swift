@@ -1732,6 +1732,9 @@ struct ServerWorkspaceView: View {
                         cancel: {
                             viewModel.cancelRemoteFileTransfer()
                         },
+                        cancelJob: { job in
+                            viewModel.cancelRemoteFileTransfer(job)
+                        },
                         clearPending: {
                             viewModel.cancelPendingRemoteFileTransfers()
                         },
@@ -4469,6 +4472,7 @@ private struct RemoteTextSaveAsSheet: View {
 private struct RemoteTransferJobsView: View {
     let jobs: [RemoteFileTransferJob]
     let cancel: () -> Void
+    let cancelJob: (RemoteFileTransferJob) -> Void
     let clearPending: () -> Void
     let retry: (RemoteFileTransferJob) -> Void
 
@@ -4524,6 +4528,16 @@ private struct RemoteTransferJobsView: View {
                     }
 
                     Spacer()
+
+                    if job.status == .pending || job.status == .running {
+                        Button {
+                            cancelJob(job)
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Cancel this transfer")
+                    }
 
                     if job.status.isRetryable {
                         Button {

@@ -939,6 +939,26 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    func cancelRemoteFileTransfer(_ job: RemoteFileTransferJob) {
+        switch job.status {
+        case .pending:
+            guard let requestIndex = transferQueue.firstIndex(where: { $0.jobId == job.id }) else { return }
+            let request = transferQueue.remove(at: requestIndex)
+            cancelRemoteFileTransferJob(job.id)
+            persistRemoteFileTransferJob(job.id, profile: request.profile, repository: request.repository)
+        case .running:
+            guard let task = transferTasksByJobId[job.id] else { return }
+            task.cancel()
+            cancelRemoteFileTransferJobIfRunning(job.id)
+            if let request = runningTransferRequestsByJobId[job.id] {
+                persistRemoteFileTransferJob(job.id, profile: request.profile, repository: request.repository)
+            }
+            finishRunningRemoteFileTransfer(job.id)
+        case .succeeded, .failed, .cancelled, .interrupted:
+            return
+        }
+    }
+
     func cancelPendingRemoteFileTransfers() {
         let pendingRequests = transferQueue
         transferQueue.removeAll()
