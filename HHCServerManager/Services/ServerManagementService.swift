@@ -3530,6 +3530,21 @@ private struct DashboardCommandOutput: Sendable {
 }
 
 final class CloudMetricService: @unchecked Sendable {
+    private struct MetricDefinition {
+        var queryMetricName: String
+        var displayName: String
+        var fallbackUnit: String?
+    }
+
+    private static let metricDefinitions: [MetricDefinition] = [
+        MetricDefinition(queryMetricName: "CPUUsage", displayName: "Cloud CPU", fallbackUnit: "%"),
+        MetricDefinition(queryMetricName: "MemoryUsage", displayName: "Cloud Memory", fallbackUnit: "%"),
+        MetricDefinition(queryMetricName: "DiskReadBytes", displayName: "Cloud Disk Read", fallbackUnit: "B/s"),
+        MetricDefinition(queryMetricName: "DiskWriteBytes", displayName: "Cloud Disk Write", fallbackUnit: "B/s"),
+        MetricDefinition(queryMetricName: "NetworkInBytes", displayName: "Cloud Network In", fallbackUnit: "B/s"),
+        MetricDefinition(queryMetricName: "NetworkOutBytes", displayName: "Cloud Network Out", fallbackUnit: "B/s"),
+    ]
+
     private let repository: ServerRepository
     private let keychain: KeychainService
     private let registry: CloudProviderRegistry
@@ -3561,28 +3576,44 @@ final class CloudMetricService: @unchecked Sendable {
 
         let end = now()
         let start = end.addingTimeInterval(-30 * 60)
-        let series = try await registry.adapter(for: account.providerId).fetchMetricSeries(
-            credential: credential,
-            query: CloudMetricQuery(
-                namespace: "QCE/CVM",
-                metricName: "CPUUsage",
-                instanceId: link.instanceId,
-                regionId: link.regionId,
-                period: 300,
-                startTime: start,
-                endTime: end
-            )
-        )
+        let adapter = try registry.adapter(for: account.providerId)
+        var metrics: [DashboardMetric] = []
+        var firstError: Error?
 
-        guard let latest = series.values.last else { return [] }
-        return [
-            DashboardMetric(
-                name: "Cloud CPU",
-                value: String(format: "%.1f", latest),
-                unit: series.unit ?? "%",
-                source: "Cloud API"
-            )
-        ]
+        for definition in Self.metricDefinitions {
+            do {
+                let series = try await adapter.fetchMetricSeries(
+                    credential: credential,
+                    query: CloudMetricQuery(
+                        namespace: "QCE/CVM",
+                        metricName: definition.queryMetricName,
+                        instanceId: link.instanceId,
+                        regionId: link.regionId,
+                        period: 300,
+                        startTime: start,
+                        endTime: end
+                    )
+                )
+                guard let latest = series.values.last else {
+                    continue
+                }
+                metrics.append(DashboardMetric(
+                    name: definition.displayName,
+                    value: String(format: "%.1f", latest),
+                    unit: series.unit ?? definition.fallbackUnit,
+                    source: "Cloud API"
+                ))
+            } catch {
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+
+        if metrics.isEmpty, let firstError {
+            throw firstError
+        }
+        return metrics
     }
 }
 
@@ -5322,7 +5353,7 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
         let payload = TencentGetMonitorDataPayload(
             namespace: query.namespace,
-            metricName: query.metricName,
+            metricName: Self.tencentMetricName(query.metricName),
             instances: [
                 TencentMonitorInstance(dimensions: [
                     TencentMonitorDimension(name: "InstanceId", value: query.instanceId)
@@ -5349,7 +5380,7 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             metricName: query.metricName,
             instanceId: query.instanceId,
             regionId: query.regionId,
-            unit: response.response.metricName == "CPUUsage" ? "%" : nil,
+            unit: Self.tencentMetricUnit(query.metricName),
             values: dataPoint?.values ?? [],
             timestamps: (dataPoint?.timestamps ?? []).map { Date(timeIntervalSince1970: TimeInterval($0)) }
         )
@@ -5892,6 +5923,34 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         return formatter.string(from: date)
     }
 
+    private static func tencentMetricName(_ metricName: String) -> String {
+        switch metricName {
+        case "MemoryUsage":
+            return "MemUsage"
+        case "DiskReadBytes":
+            return "CvmDiskReadTraffic"
+        case "DiskWriteBytes":
+            return "CvmDiskWriteTraffic"
+        case "NetworkInBytes":
+            return "LanIntraffic"
+        case "NetworkOutBytes":
+            return "LanOuttraffic"
+        default:
+            return metricName
+        }
+    }
+
+    private static func tencentMetricUnit(_ metricName: String) -> String? {
+        switch metricName {
+        case "CPUUsage", "MemoryUsage":
+            return "%"
+        case "DiskReadBytes", "DiskWriteBytes", "NetworkInBytes", "NetworkOutBytes":
+            return "B/s"
+        default:
+            return nil
+        }
+    }
+
     private static func parseTencentDate(_ text: String) -> Date? {
         let formats = [
             "yyyy-MM-dd HH:mm:ss",
@@ -6082,7 +6141,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             metricName: query.metricName,
             instanceId: query.instanceId,
             regionId: query.regionId,
-            unit: "%",
+            unit: Self.alibabaMetricUnit(query.metricName),
             values: samples.map(\.value),
             timestamps: samples.map { Self.dateFromAlibabaMetricTimestamp($0.timestamp) }
         )
@@ -6589,7 +6648,33 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     }
 
     private static func alibabaMetricName(_ metricName: String) -> String {
-        metricName == "CPUUsage" ? "CPUUtilization" : metricName
+        switch metricName {
+        case "CPUUsage":
+            return "CPUUtilization"
+        case "MemoryUsage":
+            return "memory_usedutilization"
+        case "DiskReadBytes":
+            return "disk_readbytes"
+        case "DiskWriteBytes":
+            return "disk_writebytes"
+        case "NetworkInBytes":
+            return "networkin_rate"
+        case "NetworkOutBytes":
+            return "networkout_rate"
+        default:
+            return metricName
+        }
+    }
+
+    private static func alibabaMetricUnit(_ metricName: String) -> String? {
+        switch metricName {
+        case "CPUUsage", "MemoryUsage":
+            return "%"
+        case "DiskReadBytes", "DiskWriteBytes", "NetworkInBytes", "NetworkOutBytes":
+            return "B/s"
+        default:
+            return nil
+        }
     }
 
     private static func alibabaMetricDimensions(instanceId: String) throws -> String {
@@ -7415,7 +7500,22 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     }
 
     private static func huaweiMetricName(_ metricName: String) -> String {
-        metricName == "CPUUsage" ? "cpu_util" : metricName
+        switch metricName {
+        case "CPUUsage":
+            return "cpu_util"
+        case "MemoryUsage":
+            return "mem_util"
+        case "DiskReadBytes":
+            return "disk_read_bytes_rate"
+        case "DiskWriteBytes":
+            return "disk_write_bytes_rate"
+        case "NetworkInBytes":
+            return "network_incoming_bytes_rate"
+        case "NetworkOutBytes":
+            return "network_outgoing_bytes_rate"
+        default:
+            return metricName
+        }
     }
 
     private static func mapHuaweiSecurityGroupRules(

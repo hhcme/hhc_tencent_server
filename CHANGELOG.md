@@ -229,3 +229,4 @@ All notable changes to this project will be documented in this file.
 - 添加阿里云安全组单条 ingress/egress CIDR 规则新增/删除动作，包含 provider capability 门禁、ECS 签名请求 fixture、RequestId 捕获和统一风险确认/审计流程。
 - 添加华为云安全组单条规则创建/删除动作，包含 provider rule id 保留、VPC v3 签名请求 fixture 和统一风险确认/审计流程。
 - 统一云资源操作状态门禁，云资源中心 UI 现在按腾讯云、阿里云、华为云各自状态启用实例电源、快照删除和云盘挂载/卸载按钮。
+- 扩展 Dashboard 云监控聚合，已关联腾讯云、阿里云、华为云实例时会拉取云侧 CPU、内存、磁盘读写和网络入出指标。

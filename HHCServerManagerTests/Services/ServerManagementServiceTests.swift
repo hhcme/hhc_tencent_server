@@ -2073,6 +2073,11 @@ final class ServerManagementServiceTests: XCTestCase {
         )
 
         XCTAssertTrue(snapshot.metrics.contains(DashboardMetric(name: "Cloud CPU", value: "21.2", unit: "%", source: "Cloud API")))
+        XCTAssertTrue(snapshot.metrics.contains(DashboardMetric(name: "Cloud Memory", value: "21.2", unit: "%", source: "Cloud API")))
+        XCTAssertTrue(snapshot.metrics.contains(DashboardMetric(name: "Cloud Disk Read", value: "21.2", unit: "B/s", source: "Cloud API")))
+        XCTAssertTrue(snapshot.metrics.contains(DashboardMetric(name: "Cloud Disk Write", value: "21.2", unit: "B/s", source: "Cloud API")))
+        XCTAssertTrue(snapshot.metrics.contains(DashboardMetric(name: "Cloud Network In", value: "21.2", unit: "B/s", source: "Cloud API")))
+        XCTAssertTrue(snapshot.metrics.contains(DashboardMetric(name: "Cloud Network Out", value: "21.2", unit: "B/s", source: "Cloud API")))
         XCTAssertTrue(snapshot.metrics.contains { $0.source == "SSH" })
     }
 
@@ -3170,6 +3175,49 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(payload["Period"] as? Int, 300)
     }
 
+    func testTencentCloudAdapterMapsDashboardMetricNames() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "MetricName": "MemUsage",
+                "DataPoints": [
+                  {
+                    "Dimensions": [{"Name": "InstanceId", "Value": "ins-1"}],
+                    "Timestamps": [1700000300],
+                    "Values": [63.5]
+                  }
+                ],
+                "RequestId": "request-monitor-memory"
+              }
+            }
+            """
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+
+        let series = try await adapter.fetchMetricSeries(
+            credential: CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE"),
+            query: CloudMetricQuery(
+                namespace: "QCE/CVM",
+                metricName: "MemoryUsage",
+                instanceId: "ins-1",
+                regionId: "ap-guangzhou",
+                period: 300,
+                startTime: Date(timeIntervalSince1970: 1_700_000_000),
+                endTime: Date(timeIntervalSince1970: 1_700_000_300)
+            )
+        )
+
+        XCTAssertEqual(series.metricName, "MemoryUsage")
+        XCTAssertEqual(series.unit, "%")
+        XCTAssertEqual(series.values, [63.5])
+        XCTAssertEqual(transport.requests[0].jsonBody?["MetricName"] as? String, "MemUsage")
+    }
+
     func testTencentCloudAdapterFetchSecurityGroupsAndPoliciesUsesVpcAPI() async throws {
         let transport = MockTencentCloudTransport(responses: [
             """
@@ -3637,7 +3685,7 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(policies.egress.first?.protocolName, "ALL")
     }
 
-    func testCloudMetricServiceLoadsLinkedTencentCloudCPUMetric() async throws {
+    func testCloudMetricServiceLoadsLinkedTencentCloudDashboardMetrics() async throws {
         let harness = try Harness(adapters: [
             MockCloudProviderAdapter(
                 providerId: .tencentCloud,
@@ -3691,7 +3739,12 @@ final class ServerManagementServiceTests: XCTestCase {
         let metrics = try await service.loadMetrics(for: profile)
 
         XCTAssertEqual(metrics, [
-            DashboardMetric(name: "Cloud CPU", value: "21.2", unit: "%", source: "Cloud API")
+            DashboardMetric(name: "Cloud CPU", value: "21.2", unit: "%", source: "Cloud API"),
+            DashboardMetric(name: "Cloud Memory", value: "21.2", unit: "%", source: "Cloud API"),
+            DashboardMetric(name: "Cloud Disk Read", value: "21.2", unit: "B/s", source: "Cloud API"),
+            DashboardMetric(name: "Cloud Disk Write", value: "21.2", unit: "B/s", source: "Cloud API"),
+            DashboardMetric(name: "Cloud Network In", value: "21.2", unit: "B/s", source: "Cloud API"),
+            DashboardMetric(name: "Cloud Network Out", value: "21.2", unit: "B/s", source: "Cloud API"),
         ])
         link.serverId = nil
         try harness.repository.upsertCloudInstanceLink(link)
@@ -4209,6 +4262,45 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].queryValue("StartTime"), "1700000000000")
         XCTAssertEqual(transport.requests[0].queryValue("EndTime"), "1700000600000")
         XCTAssertEqual(transport.requests[0].queryValue("Period"), "300")
+    }
+
+    func testAlibabaCloudAdapterMapsDashboardMetricNames() async throws {
+        let startTime = Date(timeIntervalSince1970: 1_700_000_000)
+        let endTime = Date(timeIntervalSince1970: 1_700_000_600)
+        let transport = MockAlibabaCloudTransport(responses: [
+            #"""
+            {
+              "RequestId": "aliyun-network-metrics",
+              "Code": "200",
+              "Datapoints": "[{\"timestamp\":1700000600000,\"Average\":4096}]",
+              "Period": "300"
+            }
+            """#,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { startTime },
+            nonce: { "nonce-network" },
+            timeout: 1
+        )
+
+        let series = try await adapter.fetchMetricSeries(
+            credential: CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK"),
+            query: CloudMetricQuery(
+                namespace: "QCE/CVM",
+                metricName: "NetworkInBytes",
+                instanceId: "i-1",
+                regionId: "ap-southeast-1",
+                period: 300,
+                startTime: startTime,
+                endTime: endTime
+            )
+        )
+
+        XCTAssertEqual(series.metricName, "NetworkInBytes")
+        XCTAssertEqual(series.unit, "B/s")
+        XCTAssertEqual(series.values, [4096])
+        XCTAssertEqual(transport.requests[0].queryValue("MetricName"), "networkin_rate")
     }
 
     func testAlibabaCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedECSAPI() async throws {
@@ -4861,6 +4953,43 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].queryValue("to"), "1700000600000")
     }
 
+    func testHuaweiCloudAdapterMapsDashboardMetricNames() async throws {
+        let startTime = Date(timeIntervalSince1970: 1_700_000_000)
+        let endTime = Date(timeIntervalSince1970: 1_700_000_600)
+        let transport = MockHuaweiCloudTransport(responses: [
+            """
+            {
+              "datapoints": [
+                {"timestamp": 1700000600000, "average": 8192, "unit": "B/s"}
+              ]
+            }
+            """,
+        ])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { startTime },
+            timeout: 1
+        )
+
+        let series = try await adapter.fetchMetricSeries(
+            credential: CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK"),
+            query: CloudMetricQuery(
+                namespace: "QCE/CVM",
+                metricName: "NetworkOutBytes",
+                instanceId: "server-1",
+                regionId: "ap-southeast-1|project-1",
+                period: 300,
+                startTime: startTime,
+                endTime: endTime
+            )
+        )
+
+        XCTAssertEqual(series.metricName, "NetworkOutBytes")
+        XCTAssertEqual(series.unit, "B/s")
+        XCTAssertEqual(series.values, [8192])
+        XCTAssertEqual(transport.requests[0].queryValue("metric_name"), "network_outgoing_bytes_rate")
+    }
+
     func testHuaweiCloudAdapterFetchesBillingStatesFromInstancesAndDisks() async throws {
         let accountId = UUID()
         let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
@@ -5203,11 +5332,20 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
     }
 
     func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
-        CloudMetricSeries(
+        let unit: String?
+        switch query.metricName {
+        case "CPUUsage", "MemoryUsage":
+            unit = "%"
+        case "DiskReadBytes", "DiskWriteBytes", "NetworkInBytes", "NetworkOutBytes":
+            unit = "B/s"
+        default:
+            unit = nil
+        }
+        return CloudMetricSeries(
             metricName: query.metricName,
             instanceId: query.instanceId,
             regionId: query.regionId,
-            unit: "%",
+            unit: unit,
             values: [18.5, 21.25],
             timestamps: [query.startTime, query.endTime]
         )
