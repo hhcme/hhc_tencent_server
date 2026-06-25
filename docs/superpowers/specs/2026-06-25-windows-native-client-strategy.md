@@ -9,7 +9,7 @@ Windows 版本建议采用：
 | 层级 | 推荐选型 |
 |------|----------|
 | UI | WinUI 3 |
-| Platform SDK | Windows App SDK 2.x stable |
+| Platform SDK | Windows App SDK 2.2.0 stable |
 | 语言 | C# |
 | Runtime | .NET 10 LTS |
 | 架构 | MVVM |
@@ -133,7 +133,7 @@ Windows 版开工前，至少验证：
 
 ## 8. 路线图位置
 
-Windows 版本不进入当前 macOS MVP。建议阶段：
+Windows 版本不进入当前 macOS MVP。当前已启动 Phase 8 技术验证，建议阶段：
 
 - **Phase 1-6**：优先完成 macOS 原生版核心能力。
 - **Phase 7**：补齐更多云厂商和高级云资源能力。
@@ -146,6 +146,8 @@ Phase 8 的第一目标不是功能全量追平，而是：
 3. Windows Credential Manager 凭据存储。
 4. 真实 SSH 连接和 `printf hhc-ssh-ok` smoke test。
 5. 复用云 provider adapter 的领域模型。
+
+当前仓库已加入 WinUI 3 / Windows App SDK 2.2.0 / .NET 10 solution 骨架，并完成可在 macOS 上验证的核心层测试。WinUI XAML 编译、MSIX 打包、Credential Manager 真实读写和真实 SSH smoke test 仍需 Windows 主机补验。
 
 ## 9. 参考资料
 

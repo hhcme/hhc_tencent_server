@@ -28,7 +28,13 @@ Package.pins
 # Build outputs
 build/
 dist/
+bin/
+obj/
 *.app
+!HHCServerManager.Windows/src/HHCServerManager.Windows.App/
+!HHCServerManager.Windows/src/HHCServerManager.Windows.App/**
+HHCServerManager.Windows/src/HHCServerManager.Windows.App/bin/
+HHCServerManager.Windows/src/HHCServerManager.Windows.App/obj/
 *.ipa
 *.dSYM.zip
 *.dSYM

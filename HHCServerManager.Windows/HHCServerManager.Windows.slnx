@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HHCServerManager.Windows.App/HHCServerManager.Windows.App.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/HHCServerManager.Windows.Application/HHCServerManager.Windows.Application.csproj" />
+    <Project Path="src/HHCServerManager.Windows.Domain/HHCServerManager.Windows.Domain.csproj" />
+    <Project Path="src/HHCServerManager.Windows.Infrastructure/HHCServerManager.Windows.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HHCServerManager.Windows.Tests/HHCServerManager.Windows.Tests.csproj" />
+  </Folder>
+</Solution>

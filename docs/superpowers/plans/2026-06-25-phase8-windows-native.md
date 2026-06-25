@@ -38,26 +38,24 @@
 
 ```text
 HHCServerManager.Windows/
-├── App/
-│   ├── App.xaml
-│   └── MainWindow.xaml
-├── Presentation/
-│   ├── Views/
-│   ├── ViewModels/
-│   └── Controls/
-├── Application/
-│   ├── ServerManagement/
-│   ├── SSH/
-│   └── Settings/
-├── Domain/
-│   ├── Servers/
-│   ├── SSH/
-│   └── Security/
-├── Infrastructure/
-│   ├── Storage/
-│   ├── Credentials/
-│   └── SSH/
-└── Tests/
+├── HHCServerManager.Windows.slnx
+├── src/
+│   ├── HHCServerManager.Windows.App/
+│   │   ├── App.xaml
+│   │   └── MainWindow.xaml
+│   ├── HHCServerManager.Windows.Application/
+│   │   ├── Ports/
+│   │   └── ServerManagement/
+│   ├── HHCServerManager.Windows.Domain/
+│   │   ├── Security/
+│   │   ├── Servers/
+│   │   └── Ssh/
+│   └── HHCServerManager.Windows.Infrastructure/
+│       ├── Credentials/
+│       ├── Ssh/
+│       └── Storage/
+└── tests/
+    └── HHCServerManager.Windows.Tests/
 ```
 
 ## 5. 数据模型
@@ -105,50 +103,51 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 
 ### Task 1：技术验证
 
-- [ ] 验证当前 WinUI 3 + Windows App SDK stable 项目模板。
-- [ ] 验证 .NET 版本和 MSIX 打包。
-- [ ] 验证 SQLite 方案。
-- [ ] 验证 Credential Manager / DPAPI 凭据保存。
-- [ ] 验证 SSH.NET 对密码、私钥、host key verification 的支持。
+- [x] 验证当前 WinUI 3 + Windows App SDK stable 项目模板：已按 Windows App SDK 2.2.0 建立 WinUI 3 项目骨架；NuGet restore 可在 macOS 通过，完整 XAML 编译会调用 Windows `XamlCompiler.exe`，需在 Windows 环境补验。
+- [x] 验证 .NET 版本：本地使用 .NET SDK 10.0.301 完成核心层编译和测试。
+- [ ] 验证 MSIX 打包：保留 MSIX manifest 骨架，待 Windows/Visual Studio 环境完成 logo、证书和安装验证。
+- [x] 验证 SQLite 方案：`Microsoft.Data.Sqlite` repository/store 测试通过。
+- [x] 验证 Credential Manager / DPAPI 凭据保存边界：已实现 Win32 `CredWrite/CredRead/CredDelete` adapter，并通过非 Windows 平台保护测试；真实 Windows 凭据读写待 Windows 主机补验。
+- [x] 验证 SSH.NET 对密码、私钥、host key verification 的支持边界：已实现 SSH.NET adapter、host key 扫描和命令执行边界；真实 SSH 登录、ED25519/passphrase 组合待 Windows 主机补验。
 
 ### Task 2：项目骨架
 
-- [ ] 创建 solution 和项目结构。
+- [x] 创建 solution 和项目结构。
 - [ ] 建立 MVVM 基础。
 - [ ] 建立依赖注入。
 - [ ] 添加日志和错误处理基础。
 
 ### Task 3：存储和凭据
 
-- [ ] 实现 server profile repository。
-- [ ] 实现 trusted host key store。
-- [ ] 实现 credential store。
-- [ ] 删除服务器时清理 trusted host key 和凭据。
+- [x] 实现 server profile repository。
+- [x] 实现 trusted host key store。
+- [x] 实现 credential store。
+- [x] 删除服务器时清理 trusted host key 和凭据。
 
 ### Task 4：SSH MVP
 
 - [ ] 实现连接状态机。
-- [ ] 实现 host key 首次确认。
-- [ ] 实现 host key mismatch 阻断。
-- [ ] 实现密码认证。
-- [ ] 验证私钥认证。
-- [ ] 执行 `printf hhc-ssh-ok`。
+- [x] 实现 host key 首次确认的应用层判断。
+- [x] 实现 host key mismatch 阻断的应用层判断。
+- [x] 实现密码认证 adapter。
+- [x] 实现私钥认证 adapter；真实 Windows 主机上的私钥/passphrase 组合待验收。
+- [x] 实现 `printf hhc-ssh-ok` smoke test 编排；真实服务器执行待 Windows 主机验收。
 
 ### Task 5：Windows UI
 
-- [ ] 服务器列表。
+- [x] 服务器列表骨架。
 - [ ] 添加服务器 dialog。
-- [ ] 单服务器工作台。
-- [ ] 服务器切换器。
+- [x] 单服务器工作台骨架。
+- [x] 服务器切换器入口骨架。
 - [ ] Host key trust dialog。
 - [ ] 错误提示和输出复制。
 
 ### Task 6：测试
 
-- [ ] Domain model 测试。
-- [ ] SQLite repository 测试。
-- [ ] Credential store 测试。
-- [ ] Host key trust 测试。
+- [x] Domain model 测试。
+- [x] SQLite repository 测试。
+- [x] Credential store 平台边界测试。
+- [x] Host key trust 测试。
 - [ ] SSH 状态机测试。
 - [ ] 可选真实 SSH 集成测试。
 

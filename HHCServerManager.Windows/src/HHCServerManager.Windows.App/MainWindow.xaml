@@ -1,0 +1,118 @@
+<Window
+    x:Class="HHCServerManager.Windows.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="HHC Server Manager">
+
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <CommandBar Grid.Row="0" DefaultLabelPosition="Right">
+            <AppBarButton Icon="Add" Label="Add server" />
+            <AppBarButton Icon="Refresh" Label="Refresh" />
+            <CommandBar.SecondaryCommands>
+                <AppBarButton Icon="Setting" Label="Settings" />
+            </CommandBar.SecondaryCommands>
+        </CommandBar>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <NavigationView
+                Grid.Column="0"
+                IsBackButtonVisible="Collapsed"
+                IsSettingsVisible="False"
+                PaneDisplayMode="LeftMinimal"
+                SelectionFollowsFocus="Enabled">
+                <NavigationView.MenuItems>
+                    <NavigationViewItem Content="Servers" Icon="Computer" IsSelected="True" />
+                    <NavigationViewItem Content="Cloud Accounts" Icon="Cloud" />
+                    <NavigationViewItem Content="Operation Logs" Icon="Document" />
+                </NavigationView.MenuItems>
+                <Grid Padding="20,16,16,16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Servers" Style="{StaticResource TitleTextBlockStyle}" />
+                    <AutoSuggestBox Grid.Row="1" Margin="0,12,0,12" PlaceholderText="Search servers" />
+                    <ListView Grid.Row="2" SelectionMode="Single">
+                        <ListViewItem IsSelected="True">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="Production API" FontWeight="SemiBold" />
+                                <TextBlock Text="root@server.example.com" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </ListViewItem>
+                        <ListViewItem>
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="Staging" FontWeight="SemiBold" />
+                                <TextBlock Text="ubuntu@example.internal" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </ListViewItem>
+                    </ListView>
+                </Grid>
+            </NavigationView>
+
+            <Grid Grid.Column="1" Padding="28,20,28,28">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Production API" Style="{StaticResource TitleTextBlockStyle}" />
+                        <TextBlock Text="root@server.example.com · SSH pending" Style="{StaticResource BodyTextBlockStyle}" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Switch server" />
+                </Grid>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,20,0,16">
+                    <Button Content="Connect" />
+                    <Button Content="Smoke test" />
+                    <Button Content="Disconnect" />
+                </StackPanel>
+
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Spacing="16">
+                        <TextBlock Text="Overview" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <InfoBar
+                            IsOpen="True"
+                            Severity="Informational"
+                            Title="Host key trust is required before the first connection." />
+                        <TextBox
+                            AcceptsReturn="True"
+                            IsReadOnly="True"
+                            MinHeight="260"
+                            Text="Command output will appear here after connection." />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="24,0,0,0" Spacing="16">
+                        <TextBlock Text="Connection" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock Text="Authentication: private key" />
+                        <TextBlock Text="Host key: not trusted" />
+                        <TextBlock Text="Last smoke test: never" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

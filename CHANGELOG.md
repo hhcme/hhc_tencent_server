@@ -125,6 +125,7 @@ All notable changes to this project will be documented in this file.
 - Added Tencent Cloud security group single-rule add/remove actions with provider capability gating, risk confirmation, refreshed policy snapshots, RequestId capture, and remote change audit logs.
 - Added Alibaba Cloud security group single-rule add/remove actions for ingress and egress CIDR rules with provider capability gating, signed ECS API fixtures, RequestId capture, and the shared risk confirmation/audit flow.
 - Added Huawei Cloud security group single-rule create/delete actions with provider rule ID retention, signed VPC v3 API fixtures, and the shared risk confirmation/audit flow.
+- Started Windows native Phase 8 with a WinUI 3 / Windows App SDK / .NET solution skeleton, tested core domain/application/infrastructure layers, SQLite profile and host-key storage, Windows Credential Manager boundaries, and SSH.NET adapter foundations.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -246,3 +247,4 @@ All notable changes to this project will be documented in this file.
 - 统一云资源操作状态门禁，云资源中心 UI 现在按腾讯云、阿里云、华为云各自状态启用实例电源、快照删除和云盘挂载/卸载按钮。
 - 扩展 Dashboard 云监控聚合，已关联腾讯云、阿里云、华为云实例时会拉取云侧 CPU、内存、磁盘读写和网络入出指标。
 - 添加 `server_capabilities` 独立缓存，Dashboard 手动或自动刷新成功后会持久化最新系统能力探测结果。
+- 启动 Windows 原生版 Phase 8，加入 WinUI 3 / Windows App SDK / .NET solution 骨架、已测试的核心领域/应用/基础设施层、SQLite 服务器与主机指纹存储、Windows Credential Manager 边界和 SSH.NET adapter 基础。
