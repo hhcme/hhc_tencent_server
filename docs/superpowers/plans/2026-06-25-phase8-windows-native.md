@@ -150,6 +150,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] SQLite 凭据隔离测试：使用真实临时 SQLite 文件验证密码、私钥内容和 passphrase 不会写入业务库。
 - [x] Host key trust 测试。
 - [x] SSH 状态机测试：覆盖首次 host key trust、确认后 smoke test、mismatch 阻断和 reject。
+- [x] GitHub Actions Windows core tests：Windows runner 运行 `scripts/ci-windows-core.ps1`，覆盖不依赖 WinUI/XAML 编译器的核心层。
 - [ ] 可选真实 SSH 集成测试。
 
 ### Task 7：手动验收

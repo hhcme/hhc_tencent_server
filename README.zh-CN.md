@@ -4,7 +4,7 @@
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。它的目标是以 SSH 为核心管理多台 Linux 服务器，提供类似宝塔面板的桌面端体验，并在用户主动配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-当前仓库处于 macOS 活跃实现阶段，Windows 原生版 Phase 8 技术验证已经启动。macOS 应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/sftp/scp 排队批量传输文件并展示运行中字节进度、有限并发和中断重试、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，并支持按运行时权限失败自动降级云能力，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力并完成隔离真实生命周期验证，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。Windows 目录已加入 WinUI 3 / Windows App SDK / .NET solution 骨架，并完成领域模型、SQLite、Credential Manager 边界、主机指纹信任、SSH adapter、MVVM、依赖注入和连接状态机基础测试；完整 WinUI/MSIX/runtime 验证仍需 Windows 主机。
+当前仓库处于 macOS 活跃实现阶段，Windows 原生版 Phase 8 技术验证已经启动。macOS 应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/sftp/scp 排队批量传输文件并展示运行中字节进度、有限并发和中断重试、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，并支持按运行时权限失败自动降级云能力，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力并完成隔离真实生命周期验证，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。Windows 目录已加入 WinUI 3 / Windows App SDK / .NET solution 骨架，并通过 CI 覆盖领域模型、SQLite、Credential Manager 边界、主机指纹信任、SSH adapter、MVVM、依赖注入和连接状态机基础测试；完整 WinUI/MSIX/runtime 验证仍需 Windows 主机。
 
 ## 为什么做这个项目
 
@@ -43,7 +43,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 - GitLab 风格部署：项目管理、命令预览、日志、回滚、本地 webhook listener 和运行中日志刷新。
 - Verdaccio npm 私有仓库管理：preflight、安装、服务控制、用户、包列表、备份/恢复、Nginx proxy 和 npm smoke test，并提供 Dart/Flutter 外部 Hosted Pub Repository 配置辅助。
 - Verdaccio 已有受保护的真实服务器生命周期覆盖：隔离安装、用户创建、npm publish/install smoke、重启、配置备份和备份/恢复；生产环境部署和 proxy 暴露仍需按目标环境单独验收。
-- Windows 原生版 Phase 8 solution 骨架：WinUI 3、Windows App SDK、.NET、SQLite、Windows Credential Manager 边界、主机指纹信任和 SSH adapter 基础。
+- Windows 原生版 Phase 8 solution 骨架：WinUI 3、Windows App SDK、.NET、CI 覆盖的 SQLite/核心层测试、Windows Credential Manager 边界、主机指纹信任和 SSH adapter 基础。
 
 ## 技术方向
 
@@ -88,7 +88,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 
 ## 开发状态
 
-macOS 应用已经进入活跃实现阶段。Phase 1 到 Phase 6 的基础能力已经覆盖 SSH、可选云 API、Dashboard、文件管理、安全/环境工具、部署和私有仓库管理：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、腾讯云/阿里云/华为云 adapter、已关联云实例 Dashboard 指标、远程目录浏览和编辑、带 rsync 字节进度和 partial 保留、OpenSSH `sftp -b` 普通 batch fallback、scp 最终回退和中断历史重试的有限并发批量传输、systemd/Cron/Nginx/Firewall/Environment 工作流、远程变更审计日志、GitLab 风格部署运行/日志/回滚/webhook listener、Verdaccio preflight/安装/服务/用户/包列表/备份/恢复/Nginx proxy/npm smoke 流程、单元测试、CI，以及真实服务器上的 SSH、传输、临时部署和隔离 Verdaccio 安装/发布/重启/备份/恢复 smoke 验证。Windows 原生版 Phase 8 已启动，加入 WinUI 3 / Windows App SDK / .NET solution 骨架和已测试核心层。命令输出默认只保留在本次会话中，不落库持久化。SwiftNIO/libssh2 SFTP 固化、真正断点续传、生产项目部署验收、真实多云写操作验收、生产 Verdaccio/proxy 验收和完整 Windows 主机验收仍在后续阶段。
+macOS 应用已经进入活跃实现阶段。Phase 1 到 Phase 6 的基础能力已经覆盖 SSH、可选云 API、Dashboard、文件管理、安全/环境工具、部署和私有仓库管理：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、腾讯云/阿里云/华为云 adapter、已关联云实例 Dashboard 指标、远程目录浏览和编辑、带 rsync 字节进度和 partial 保留、OpenSSH `sftp -b` 普通 batch fallback、scp 最终回退和中断历史重试的有限并发批量传输、systemd/Cron/Nginx/Firewall/Environment 工作流、远程变更审计日志、GitLab 风格部署运行/日志/回滚/webhook listener、Verdaccio preflight/安装/服务/用户/包列表/备份/恢复/Nginx proxy/npm smoke 流程、单元测试、CI，以及真实服务器上的 SSH、传输、临时部署和隔离 Verdaccio 安装/发布/重启/备份/恢复 smoke 验证。Windows 原生版 Phase 8 已启动，加入 WinUI 3 / Windows App SDK / .NET solution 骨架和 CI 覆盖的核心层。命令输出默认只保留在本次会话中，不落库持久化。SwiftNIO/libssh2 SFTP 固化、真正断点续传、生产项目部署验收、真实多云写操作验收、生产 Verdaccio/proxy 验收和完整 Windows 主机验收仍在后续阶段。
 
 ## 参与贡献
 

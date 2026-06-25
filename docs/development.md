@@ -24,7 +24,15 @@ xcodebuild \
 scripts/ci.sh
 ```
 
-GitHub Actions workflow 位于 `.github/workflows/ci.yml`，会在 `main` 分支 push 和 pull request 时运行同一套 macOS 构建测试。
+GitHub Actions workflow 位于 `.github/workflows/ci.yml`，会在 `main` 分支 push 和 pull request 时运行同一套 macOS 构建测试，并在 Windows runner 上运行 Windows 原生版核心层 .NET 测试。
+
+Windows 核心层本地测试使用：
+
+```pwsh
+scripts/ci-windows-core.ps1
+```
+
+该脚本只覆盖不依赖 WinUI/XAML 编译器的 Domain、Application、Infrastructure 和 Tests 项目。WinUI app 启动、MSIX 打包和 Windows Credential Manager 真实读写仍需 Windows 主机验收。
 
 `scripts/ci.sh` 默认关闭 Xcode 并行测试 worker，减少 macOS app-hosted tests 在 Dock 中同时出现多份测试宿主 App 图标。需要临时提速时可以手动运行底层 `xcodebuild test` 并打开并行测试。
 
@@ -69,6 +77,7 @@ xcodebuild \
 - AddServerViewModel：表单校验。
 - ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行与取消、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史、历史命令重跑、Dashboard 手动/自动刷新、远程目录浏览、排队批量上传/下载、当前传输取消、待传队列清空、传输任务状态记录、重命名、chmod 权限修改、可恢复移入回收目录、轻量文本编辑、腾讯云安全组查看和单条规则变更、systemd 服务管理、Cron 管理、Nginx 配置管理、Firewall 状态流和 Environment 文件管理。
 - SSHIntegrationTests：通过环境变量启用，默认跳过；包含真实 SSH smoke test，以及在远端 `/tmp/hhc-deploy-*` 创建临时 Git 仓库并验证 `DeploymentRunner` 手动部署闭环的集成用例。
+- Windows core tests：通过 GitHub Actions Windows runner 或 `scripts/ci-windows-core.ps1` 运行，覆盖 Windows Domain、SQLite repository、Credential Manager 平台边界、SQLite 凭据隔离、host key trust、SSH 状态机和 ViewModel smoke test 编排。
 
 ## 真实 SSH 手动验证
 
