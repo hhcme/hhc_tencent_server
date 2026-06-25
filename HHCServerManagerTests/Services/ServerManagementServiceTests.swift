@@ -370,6 +370,89 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(logs.contains { $0.stepName == "finish" && $0.message == SSHClientError.cancelled.localizedDescription })
     }
 
+    func testDeploymentRunnerRedactsSensitiveLogOutput() async throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        var project = makeDeploymentProject(serverId: profile.id)
+        project.buildCommand = nil
+        project.restartCommand = nil
+        project.healthCheckCommand = nil
+        try harness.repository.upsertDeploymentProject(project)
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "token=abc123 password:super-secret Authorization: Bearer abc.def\n", stderr: "https://user:pass@example.com/repo.git", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "abc123\n", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "def456\n", stderr: "", exitCode: 0, duration: 0.1),
+        ])
+        let runner = DeploymentRunner(repository: harness.repository)
+
+        let run = try await runner.run(project: project, profile: profile, sshClient: client)
+
+        let combinedLogs = try harness.repository.fetchDeploymentLogs(runId: run.id)
+            .map(\.message)
+            .joined(separator: "\n")
+        XCTAssertTrue(combinedLogs.contains("token=<redacted>"))
+        XCTAssertTrue(combinedLogs.contains("password=<redacted>"))
+        XCTAssertTrue(combinedLogs.contains("Authorization=<redacted>"))
+        XCTAssertTrue(combinedLogs.contains("https://<redacted>@example.com/repo.git"))
+        XCTAssertFalse(combinedLogs.contains("abc.def"))
+        XCTAssertFalse(combinedLogs.contains("super-secret"))
+        XCTAssertFalse(combinedLogs.contains("user:pass"))
+    }
+
+    func testDeploymentRunnerRollsBackToPreviousCommit() async throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        let project = makeDeploymentProject(serverId: profile.id)
+        try harness.repository.upsertDeploymentProject(project)
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "def456\n", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "abc1234\n", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "built\n", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0.1),
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0.1),
+        ])
+        let runner = DeploymentRunner(
+            repository: harness.repository,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let run = try await runner.rollback(
+            project: project,
+            targetCommit: "abc1234",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(run.triggerType, .rollback)
+        XCTAssertEqual(run.requestedRef, "abc1234")
+        XCTAssertEqual(run.status, .succeeded)
+        XCTAssertEqual(run.previousCommit, "def456")
+        XCTAssertEqual(run.targetCommit, "abc1234")
+        XCTAssertEqual(run.summary, "Rollback completed.")
+        XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'abc1234'") })
+    }
+
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
         let os = DashboardService.parseOSRelease("""
         NAME="Ubuntu"

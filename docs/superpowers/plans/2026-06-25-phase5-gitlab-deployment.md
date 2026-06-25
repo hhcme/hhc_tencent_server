@@ -89,7 +89,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - 部署项目列表、添加、编辑、删除。（已完成基础 UI）
 - 手动部署按钮和部署前预览。（已完成基础 UI）
 - 部署运行详情：步骤、状态、日志、耗时、失败原因。（已完成基础 UI；实时流式刷新后续增强）
-- 回滚按钮：展示 previous commit 和风险说明。
+- 回滚按钮：展示 previous commit 并触发受控 rollback。（已完成基础 UI；风险说明后续接入统一确认）
 - webhook 设置：启用开关、本地监听地址、secret、允许分支。
 
 ## 7. 实施任务
@@ -119,16 +119,16 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 ### Task 4：部署命令执行
 
 - [x] 支持构建、重启服务、health check 命令。
-- [ ] 命令环境变量脱敏。
+- [x] 命令环境变量脱敏：Runner 保存日志前会脱敏 token、secret、password、Authorization/Bearer、URL credentials 和私钥块。
 - [x] 健康检查命令失败时标记部署失败。
 - [x] 支持用户复制日志：当前 UI 日志和命令预览支持文本选择复制。
 
 ### Task 5：回滚
 
-- [ ] 回滚到 previous commit。
-- [ ] 重新执行构建和重启。
-- [ ] 回滚也记录独立 run。
-- [ ] 没有 previous commit 时禁用回滚。
+- [x] 回滚到 previous commit。
+- [x] 重新执行构建和重启。
+- [x] 回滚也记录独立 run。
+- [x] 没有 previous commit 时禁用回滚。
 
 ### Task 6：Webhook
 
@@ -144,8 +144,9 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] DeploymentRunner 状态机测试：已覆盖成功执行、日志持久化、commit 捕获、步骤失败停止和取消落库。
 - [x] Deployment workspace ViewModel 测试：已覆盖项目表单保存、命令预览和 UI 触发手动部署后读取运行日志。
 - [x] 命令构建和目录白名单测试：已覆盖受控 clone/fetch/checkout/build/restart/health check 命令预览、危险路径拒绝、非法 branch/URL/多行命令拒绝。
+- [x] rollback 测试：已覆盖回滚 run、previous/target commit 捕获和 `git reset --hard <commit>` 命令。
 - [ ] webhook secret 常量时间比较测试。
-- [ ] 日志脱敏测试。当前 deployment logs 仅完成持久化顺序测试，脱敏在 Runner/LogStore 阶段接入。
+- [x] 日志脱敏测试：已覆盖 token、password、Authorization/Bearer、URL credentials。
 
 ### Task 8：手动验收
 
@@ -153,7 +154,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [ ] 手动部署成功，日志完整。
 - [ ] 构建失败时状态正确，后续步骤不执行。
 - [ ] health check 失败时部署标记失败。
-- [ ] 回滚能回到 previous commit。
+- [x] 回滚能回到 previous commit：mock/contract 测试已覆盖，真实服务器手动回滚仍需谨慎验收。
 - [ ] webhook secret 错误时拒绝触发。
 - [ ] 不在白名单目录内的部署配置被拒绝。
 

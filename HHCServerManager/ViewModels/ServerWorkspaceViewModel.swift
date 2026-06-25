@@ -1451,6 +1451,50 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    func rollbackDeployment(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        deploymentRunner: DeploymentRunner,
+        repository: ServerRepository
+    ) {
+        guard !isRunningDeployment else { return }
+        guard let project = selectedDeploymentProject else {
+            deploymentErrorMessage = "Select a deployment project before rollback."
+            return
+        }
+        guard let previousCommit = selectedDeploymentRun?.previousCommit else {
+            deploymentErrorMessage = "Selected run does not have a previous commit to roll back to."
+            return
+        }
+
+        isRunningDeployment = true
+        deploymentErrorMessage = nil
+        deploymentActionMessage = "Rollback started."
+
+        deploymentTask = Task {
+            do {
+                let run = try await deploymentRunner.rollback(
+                    project: project,
+                    targetCommit: previousCommit,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.selectedDeploymentRun = run
+                    self.deploymentActionMessage = run.summary
+                    self.isRunningDeployment = false
+                    self.reloadDeploymentRunState(project: project, runId: run.id, repository: repository)
+                }
+            } catch {
+                await MainActor.run {
+                    self.deploymentErrorMessage = error.localizedDescription
+                    self.isRunningDeployment = false
+                    self.reloadDeploymentRunState(project: project, runId: nil, repository: repository)
+                }
+            }
+        }
+    }
+
     func cancelDeployment() {
         deploymentTask?.cancel()
     }

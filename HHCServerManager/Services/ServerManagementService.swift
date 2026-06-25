@@ -264,6 +264,7 @@ final class CloudInstanceSyncService: @unchecked Sendable {
 enum DeploymentCommandBuilderError: LocalizedError, Equatable {
     case invalidRepositoryURL
     case invalidBranch
+    case invalidCommit
     case deployPathOutsideAllowedRoots(String)
     case invalidCommand(String)
 
@@ -273,6 +274,8 @@ enum DeploymentCommandBuilderError: LocalizedError, Equatable {
             "Repository URL must be an HTTPS, SSH, or git@ GitLab-style URL."
         case .invalidBranch:
             "Branch can only contain letters, numbers, slash, dot, underscore, and dash."
+        case .invalidCommit:
+            "Commit must be a 7 to 40 character hexadecimal Git commit."
         case let .deployPathOutsideAllowedRoots(path):
             "Deploy path \(path) is outside the allowed deployment roots."
         case let .invalidCommand(label):
@@ -397,6 +400,75 @@ enum DeploymentCommandBuilder {
         )
     }
 
+    static func buildRollbackPlan(
+        for project: DeploymentProject,
+        targetCommit: String,
+        pathPolicy: DeploymentPathPolicy = .defaultPolicy
+    ) throws -> DeploymentCommandPlan {
+        try validate(project: project, pathPolicy: pathPolicy)
+        guard isValidCommit(targetCommit.trimmed) else { throw DeploymentCommandBuilderError.invalidCommit }
+
+        let deployPath = project.deployPath.trimmed
+        let quotedPath = shellQuote(deployPath)
+        let quotedCommit = shellQuote(targetCommit.trimmed)
+        var steps = [
+            DeploymentCommandStep(
+                name: "git_check",
+                command: "command -v git",
+                isDestructive: false,
+                description: "Verify that git is installed on the remote server."
+            ),
+            DeploymentCommandStep(
+                name: "current_commit",
+                command: "cd \(quotedPath) && git rev-parse HEAD",
+                isDestructive: false,
+                description: "Capture the currently deployed commit before rollback."
+            ),
+            DeploymentCommandStep(
+                name: "checkout",
+                command: "cd \(quotedPath) && git checkout \(quotedCommit) && git reset --hard \(quotedCommit)",
+                isDestructive: true,
+                description: "Reset the deployment working tree to the previous commit."
+            ),
+            DeploymentCommandStep(
+                name: "target_commit",
+                command: "cd \(quotedPath) && git rev-parse HEAD",
+                isDestructive: false,
+                description: "Record the rollback target commit."
+            ),
+        ]
+
+        if let buildCommand = project.buildCommand?.trimmed.nilIfEmpty {
+            steps.append(DeploymentCommandStep(
+                name: "build",
+                command: "cd \(quotedPath) && \(buildCommand)",
+                isDestructive: false,
+                description: "Run the configured build command after rollback."
+            ))
+        }
+        if let restartCommand = project.restartCommand?.trimmed.nilIfEmpty {
+            steps.append(DeploymentCommandStep(
+                name: "restart",
+                command: "cd \(quotedPath) && \(restartCommand)",
+                isDestructive: true,
+                description: "Run the configured restart command after rollback."
+            ))
+        }
+        if let healthCheckCommand = project.healthCheckCommand?.trimmed.nilIfEmpty {
+            steps.append(DeploymentCommandStep(
+                name: "health_check",
+                command: "cd \(quotedPath) && \(healthCheckCommand)",
+                isDestructive: false,
+                description: "Run the configured health check command after rollback."
+            ))
+        }
+
+        guard let allowedRoot = pathPolicy.allowedRoot(for: deployPath) else {
+            throw DeploymentCommandBuilderError.deployPathOutsideAllowedRoots(deployPath)
+        }
+        return DeploymentCommandPlan(project: project, allowedRoot: allowedRoot, steps: steps)
+    }
+
     static func validate(
         project: DeploymentProject,
         pathPolicy: DeploymentPathPolicy = .defaultPolicy
@@ -430,6 +502,10 @@ enum DeploymentCommandBuilder {
         return !branch.contains("..") && !branch.hasSuffix("/") && !branch.contains("//")
     }
 
+    private static func isValidCommit(_ commit: String) -> Bool {
+        commit.range(of: #"^[A-Fa-f0-9]{7,40}$"#, options: .regularExpression) != nil
+    }
+
     private static func validateCommand(_ command: String?, label: String) throws {
         guard let command else { return }
         let trimmed = command.trimmed
@@ -455,6 +531,27 @@ enum DeploymentCommandBuilder {
     }
 }
 
+enum DeploymentLogRedactor {
+    private static let redacted = "<redacted>"
+    private static let patterns: [(String, String)] = [
+        (#"(?i)\b(authorization)\s*[:=]\s*(bearer\s+)?[A-Za-z0-9._~+/=-]+"#, "$1=<redacted>"),
+        (#"(?i)\b(token|secret|password|passwd|api[_-]?key|access[_-]?key|private[_-]?key)\s*[:=]\s*['"]?[^'"\s]+"#, "$1=<redacted>"),
+        (#"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]+"#, "$1 <redacted>"),
+        (#"(https?://)[^/\s:@]+:[^/\s@]+@"#, "$1<redacted>@"),
+        (#"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"#, redacted),
+    ]
+
+    static func redact(_ message: String) -> String {
+        patterns.reduce(message) { partial, pattern in
+            partial.replacingOccurrences(
+                of: pattern.0,
+                with: pattern.1,
+                options: [.regularExpression]
+            )
+        }
+    }
+}
+
 final class DeploymentRunner: @unchecked Sendable {
     private let repository: ServerRepository
     private let now: @Sendable () -> Date
@@ -475,20 +572,64 @@ final class DeploymentRunner: @unchecked Sendable {
         requestedRef: String? = nil
     ) async throws -> DeploymentRun {
         let plan = try DeploymentCommandBuilder.buildPlan(for: project)
+        return try await runPlan(
+            plan,
+            project: project,
+            profile: profile,
+            sshClient: sshClient,
+            triggerType: triggerType,
+            requestedRef: requestedRef ?? project.branch,
+            initialTargetCommit: nil,
+            startMessage: "Starting deployment for \(project.name).",
+            successSummary: "Deployment completed."
+        )
+    }
+
+    func rollback(
+        project: DeploymentProject,
+        targetCommit: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> DeploymentRun {
+        let plan = try DeploymentCommandBuilder.buildRollbackPlan(for: project, targetCommit: targetCommit)
+        return try await runPlan(
+            plan,
+            project: project,
+            profile: profile,
+            sshClient: sshClient,
+            triggerType: .rollback,
+            requestedRef: targetCommit,
+            initialTargetCommit: targetCommit,
+            startMessage: "Starting rollback for \(project.name) to \(targetCommit).",
+            successSummary: "Rollback completed."
+        )
+    }
+
+    private func runPlan(
+        _ plan: DeploymentCommandPlan,
+        project: DeploymentProject,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        triggerType: DeploymentTriggerType,
+        requestedRef: String?,
+        initialTargetCommit: String?,
+        startMessage: String,
+        successSummary: String
+    ) async throws -> DeploymentRun {
         var run = DeploymentRun(
             id: UUID(),
             projectId: project.id,
             triggerType: triggerType,
-            requestedRef: requestedRef ?? project.branch,
+            requestedRef: requestedRef,
             previousCommit: nil,
-            targetCommit: nil,
+            targetCommit: initialTargetCommit,
             status: .running,
             startedAt: now(),
             finishedAt: nil,
             summary: nil
         )
         try repository.saveDeploymentRun(run)
-        try saveLog(runId: run.id, stepName: "plan", stream: .system, message: "Starting deployment for \(project.name).")
+        try saveLog(runId: run.id, stepName: "plan", stream: .system, message: startMessage)
 
         for step in plan.steps {
             if Task.isCancelled {
@@ -522,7 +663,7 @@ final class DeploymentRunner: @unchecked Sendable {
             }
         }
 
-        return try finish(run, status: .succeeded, summary: "Deployment completed.")
+        return try finish(run, status: .succeeded, summary: successSummary)
     }
 
     private func saveCommandOutput(
@@ -564,7 +705,7 @@ final class DeploymentRunner: @unchecked Sendable {
             runId: runId,
             stepName: stepName,
             stream: stream,
-            message: message,
+            message: DeploymentLogRedactor.redact(message),
             createdAt: now()
         ))
     }

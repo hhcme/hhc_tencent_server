@@ -694,6 +694,19 @@ struct ServerWorkspaceView: View {
                 .disabled(viewModel.isRunningDeployment || viewModel.deploymentCommandPlan == nil)
 
                 Button {
+                    viewModel.rollbackDeployment(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        deploymentRunner: appState.deploymentRunner,
+                        repository: appState.repository
+                    )
+                } label: {
+                    Label("Rollback", systemImage: "arrow.uturn.backward")
+                }
+                .disabled(viewModel.isRunningDeployment || viewModel.selectedDeploymentRun?.previousCommit == nil)
+                .help("Roll back to the previous commit captured by the selected run")
+
+                Button {
                     viewModel.cancelDeployment()
                 } label: {
                     Label("Cancel", systemImage: "stop.fill")
