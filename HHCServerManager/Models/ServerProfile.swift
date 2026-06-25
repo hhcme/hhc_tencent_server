@@ -443,6 +443,15 @@ enum RemoteFileTransferStatus: String, Equatable, Hashable, Sendable {
     case failed
     case cancelled
     case interrupted
+
+    var isRetryable: Bool {
+        switch self {
+        case .failed, .cancelled, .interrupted:
+            true
+        case .pending, .running, .succeeded:
+            false
+        }
+    }
 }
 
 struct RemoteFileTransferJob: Identifiable, Equatable, Hashable, Sendable {

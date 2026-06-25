@@ -735,6 +735,60 @@ final class ServerWorkspaceViewModel: ObservableObject {
         startNextRemoteFileTransferIfNeeded()
     }
 
+    func retryRemoteFileTransfer(
+        _ job: RemoteFileTransferJob,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
+    ) {
+        guard job.status.isRetryable else { return }
+        let jobId = enqueueRemoteFileTransferJob(
+            direction: job.direction,
+            remotePath: job.remotePath,
+            localPath: job.localPath,
+            message: "Retrying previous transfer.",
+            profile: profile,
+            repository: repository
+        )
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = "Queued retry for \(Self.remoteFileTransferDisplayName(job))."
+
+        switch job.direction {
+        case .upload:
+            transferQueue.append(.upload(
+                jobId: jobId,
+                localURL: URL(fileURLWithPath: job.localPath),
+                directoryPath: RemoteFileService.normalizedDirectoryPath((job.remotePath as NSString).deletingLastPathComponent),
+                profile: profile,
+                sshClient: sshClient,
+                transferClient: transferClient,
+                remoteFileService: remoteFileService,
+                repository: repository
+            ))
+        case .download:
+            let entry = RemoteFileEntry(
+                name: URL(fileURLWithPath: job.remotePath).lastPathComponent,
+                path: job.remotePath,
+                kind: .file,
+                size: job.byteCount,
+                modifiedAt: nil,
+                permissions: "-rw-r--r--"
+            )
+            transferQueue.append(.download(
+                jobId: jobId,
+                entry: entry,
+                localURL: URL(fileURLWithPath: job.localPath),
+                profile: profile,
+                transferClient: transferClient,
+                remoteFileService: remoteFileService,
+                repository: repository
+            ))
+        }
+        startNextRemoteFileTransferIfNeeded()
+    }
+
     func cancelRemoteFileTransfer() {
         guard isTransferringRemoteFile else { return }
         let runningRequests = runningTransferRequestsByJobId
@@ -2730,6 +2784,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         direction: RemoteFileTransferDirection,
         remotePath: String,
         localPath: String,
+        message: String? = nil,
         profile: ServerProfile,
         repository: ServerRepository?
     ) -> UUID {
@@ -2742,7 +2797,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
             status: .pending,
             byteCount: nil,
             progressFraction: 0,
-            message: nil,
+            message: message,
             startedAt: Date(),
             finishedAt: nil
         ), at: 0)
@@ -2992,6 +3047,15 @@ final class ServerWorkspaceViewModel: ObservableObject {
             return "Transferred \(completed) of \(total) bytes."
         }
         return "Transferred \(completed) bytes."
+    }
+
+    private static func remoteFileTransferDisplayName(_ job: RemoteFileTransferJob) -> String {
+        switch job.direction {
+        case .upload:
+            return URL(fileURLWithPath: job.localPath).lastPathComponent
+        case .download:
+            return URL(fileURLWithPath: job.remotePath).lastPathComponent
+        }
     }
 
     private func persistRemoteFileTransferJob(_ id: UUID, profile: ServerProfile, repository: ServerRepository?) {

@@ -51,6 +51,7 @@ All notable changes to this project will be documented in this file.
 - Added single-file upload/download bootstrap through OpenSSH/scp with file picker/save panel UI, transfer state, tests, sandbox entitlement update, and real-server smoke validation.
 - Added visible remote transfer job records with pending/running/succeeded/failed/cancelled states, serial single-file queueing, current-transfer cancellation, and pending-queue clearing coverage.
 - Added batch remote file transfer flows with multi-file upload selection, selected-file download to a local directory, serial queue reuse, and ViewModel coverage.
+- Added retry actions for failed, cancelled, and interrupted remote transfer history while preserving the previous job audit record.
 - Added remote text Save As and chmod-based permission changes with validation, refreshed listings, UI sheets, and tests.
 - Added Dashboard auto-refresh toggle with immediate refresh, periodic refresh, cancellation on disable/disappear, and ViewModel coverage.
 - Added Tencent Cloud Monitor `GetMonitorData` support for linked CVM Cloud CPU metrics, with Cloud API source labeling and dashboard aggregation tests.

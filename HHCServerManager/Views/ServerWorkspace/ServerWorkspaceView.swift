@@ -1668,6 +1668,16 @@ struct ServerWorkspaceView: View {
                         },
                         clearPending: {
                             viewModel.cancelPendingRemoteFileTransfers()
+                        },
+                        retry: { job in
+                            viewModel.retryRemoteFileTransfer(
+                                job,
+                                profile: profile,
+                                sshClient: appState.sshClient,
+                                transferClient: appState.sshClient,
+                                remoteFileService: appState.remoteFileService,
+                                repository: appState.repository
+                            )
                         }
                     )
                 }
@@ -4289,6 +4299,7 @@ private struct RemoteTransferJobsView: View {
     let jobs: [RemoteFileTransferJob]
     let cancel: () -> Void
     let clearPending: () -> Void
+    let retry: (RemoteFileTransferJob) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -4342,6 +4353,16 @@ private struct RemoteTransferJobsView: View {
                     }
 
                     Spacer()
+
+                    if job.status.isRetryable {
+                        Button {
+                            retry(job)
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Retry transfer")
+                    }
                 }
                 .padding(8)
                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))

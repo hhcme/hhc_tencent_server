@@ -27,7 +27,7 @@
 - 指标命令必须有超时；解析失败时展示“能力不可用”而不是崩溃。
 - 云监控指标必须标明来源：Cloud API。
 - SSH 指标必须标明来源：SSH。
-- 正式 SFTP 和真正断点续传队列未落地前，文件管理器只能宣称支持 OpenSSH/rsync/scp bootstrap 批量传输；当前队列支持有限并发，rsync 路径可提供运行中字节进度和部分文件保留，scp 回退路径只保证开始/完成进度。
+- 正式 SFTP 和真正断点续传队列未落地前，文件管理器只能宣称支持 OpenSSH/rsync/scp bootstrap 批量传输；当前队列支持有限并发，失败/取消/中断任务可从历史记录重试，rsync 路径可提供运行中字节进度和部分文件保留，scp 回退路径只保证开始/完成进度。
 - 文件编辑保存必须先写临时文件，再原子替换或备份原文件。
 
 ## 4. 数据模型
@@ -142,6 +142,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 增加 rsync bootstrap 传输路径，支持字节进度解析和部分文件保留，失败时回退 scp。
 - [x] 实现 pending/running 任务持久化，重新进入工作台时将遗留未完成任务标记为 interrupted。
 - [x] 实现 bootstrap 有限并发传输队列。
+- [x] 实现失败、取消和中断传输任务的历史重试入口；rsync 路径可利用 `--partial` 保留的部分文件继续传输。
 - [ ] 实现正式 SFTP 和真正可恢复/断点续传队列。
 - [x] 实现重命名。
 - [x] 实现权限查看基础展示。
@@ -164,6 +165,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 单文件和批量上传/下载服务与 ViewModel 测试。
 - [x] 当前传输取消 ViewModel 测试。
 - [x] 有限并发传输队列、pending 溢出和待传队列清空 ViewModel 测试。
+- [x] 失败/中断传输重试 ViewModel 测试。
 - [x] 传输历史 SQLite 持久化、恢复和级联删除测试。
 - [x] 运行中传输进度回调、UI 状态更新和持久化测试。
 - [x] rsync 进度输出解析测试。

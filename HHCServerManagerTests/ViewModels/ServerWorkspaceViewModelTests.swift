@@ -1103,6 +1103,91 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.remoteFileErrorMessage)
     }
 
+    func testRetryRemoteFileTransferQueuesNewUploadJobFromFailedHistory() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = RemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let failed = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .upload,
+            remotePath: "/var/www/retry.env",
+            localPath: "/tmp/retry.env",
+            status: .failed,
+            byteCount: nil,
+            progressFraction: 0.5,
+            message: "Network dropped.",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_001)
+        )
+        try repository.upsertRemoteFileTransferJob(failed, serverId: profile.id)
+        viewModel.remoteFileTransferJobs = [failed]
+
+        viewModel.retryRemoteFileTransfer(
+            failed,
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service,
+            repository: repository
+        )
+
+        try await waitUntil {
+            viewModel.remoteFileTransferJobs.count == 2 &&
+                viewModel.remoteFileTransferJobs.first?.status == .succeeded
+        }
+
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.last, failed)
+        XCTAssertEqual(client.uploads.map(\.remotePath), ["/var/www/retry.env"])
+        let persisted = try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+        XCTAssertEqual(persisted.filter { $0.status == .succeeded }.count, 1)
+        XCTAssertEqual(persisted.filter { $0.status == .failed }.count, 1)
+    }
+
+    func testRetryRemoteFileTransferQueuesNewDownloadJobFromInterruptedHistory() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = RemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let interrupted = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .download,
+            remotePath: "/var/www/app.env",
+            localPath: "/tmp/downloads/app.env",
+            status: .interrupted,
+            byteCount: 8,
+            progressFraction: 0.25,
+            message: "Transfer was interrupted before completion.",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_001)
+        )
+        try repository.upsertRemoteFileTransferJob(interrupted, serverId: profile.id)
+        viewModel.remoteFileTransferJobs = [interrupted]
+
+        viewModel.retryRemoteFileTransfer(
+            interrupted,
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service,
+            repository: repository
+        )
+
+        try await waitUntil {
+            viewModel.remoteFileTransferJobs.count == 2 &&
+                viewModel.remoteFileTransferJobs.first?.status == .succeeded
+        }
+
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.last, interrupted)
+        XCTAssertEqual(client.downloads.map(\.remotePath), ["/var/www/app.env"])
+        XCTAssertEqual(client.downloads.map(\.localURL.path), ["/tmp/downloads/app.env"])
+        let persisted = try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+        XCTAssertEqual(persisted.filter { $0.status == .succeeded }.count, 1)
+        XCTAssertEqual(persisted.filter { $0.status == .interrupted }.count, 1)
+    }
+
     func testRemoteFileTransferCancellationMarksRunningJobCancelled() async throws {
         let profile = makeProfile()
         let client = SlowRemoteFileTransferMockSSHClient()
