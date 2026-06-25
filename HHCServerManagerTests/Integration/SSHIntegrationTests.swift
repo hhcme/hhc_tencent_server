@@ -8,11 +8,15 @@ final class SSHIntegrationTests: XCTestCase {
 
         try await trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
         let result = try await harness.sshClient.runSmokeTest(profile: harness.profile)
-        XCTAssertEqual(result.exitCode, 0)
-        XCTAssertEqual(result.stdout, "hhc-ssh-ok")
+        XCTAssertEqual(result.exitCode, 0, result.stderr)
+        XCTAssertEqual(result.stdout, "hhc-ssh-ok", result.stderr)
     }
 
     func testRealDeploymentRunnerDeploysTemporaryRepositoryWhenEnvironmentIsConfigured() async throws {
+        guard Self.testEnvironment()["HHC_TEST_DEPLOYMENT_REAL"] == "1" else {
+            throw XCTSkip("Set HHC_TEST_DEPLOYMENT_REAL=1 with the real SSH environment to run the deployment integration test.")
+        }
+
         let harness = try makeRealSSHHarness()
         defer { try? harness.service.deleteServer(harness.profile) }
         try await trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
@@ -217,7 +221,7 @@ final class SSHIntegrationTests: XCTestCase {
     }
 
     private func makeRealSSHHarness() throws -> RealSSHHarness {
-        let environment = ProcessInfo.processInfo.environment
+        let environment = Self.testEnvironment()
         guard
             let host = environment["HHC_TEST_SSH_HOST"], !host.isEmpty,
             let user = environment["HHC_TEST_SSH_USER"], !user.isEmpty,
@@ -249,6 +253,35 @@ final class SSHIntegrationTests: XCTestCase {
             profile: profile,
             sshClient: sshClient
         )
+    }
+
+    private static func testEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        guard
+            let home = environment["HOME"],
+            let localEnvironment = try? readLocalTestEnvironment(
+                from: URL(fileURLWithPath: home).appendingPathComponent(".hhc_tencent_server_test_env")
+            )
+        else {
+            return environment
+        }
+
+        environment.merge(localEnvironment) { processValue, _ in processValue }
+        return environment
+    }
+
+    private static func readLocalTestEnvironment(from url: URL) throws -> [String: String] {
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        return contents
+            .split(whereSeparator: \.isNewline)
+            .reduce(into: [:]) { result, rawLine in
+                let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !line.isEmpty, !line.hasPrefix("#"), let separator = line.firstIndex(of: "=") else { return }
+                let key = String(line[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let value = String(line[line.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else { return }
+                result[key] = value
+            }
     }
 
     private func trustHostKeyIfNeeded(_ sshClient: OpenSSHClient, profile: ServerProfile) async throws {

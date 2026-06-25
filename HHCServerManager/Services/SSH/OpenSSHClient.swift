@@ -313,7 +313,7 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             portFlag, "\(profile.port)",
             "-o", "ConnectTimeout=10",
             "-o", "StrictHostKeyChecking=yes",
-            "-o", "UserKnownHostsFile=\(knownHostsURL.path)",
+            "-o", "UserKnownHostsFile=\(Self.sshConfigValue(knownHostsURL.path))",
         ]
 
         switch profile.authType {
@@ -457,6 +457,12 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
 
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    static func sshConfigValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: " ", with: "\\ ")
     }
 
     static func sftpResumeBatchCommand(

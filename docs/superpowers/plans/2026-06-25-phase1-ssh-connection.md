@@ -534,18 +534,19 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 - [x] ServerManagementService 补偿逻辑测试：`ServerManagementServiceTests` 覆盖服务器创建/更新/删除、凭据清理和云账号凭据生命周期。
 - [x] HostKeyTrustStore 测试：`HostKeyTrustStoreTests` 覆盖首次未知指纹、已信任匹配和指纹变化阻断。
 - [x] SSH 状态机测试：`ServerWorkspaceViewModelTests` 覆盖连接成功、连接失败、未知 host key 等待/拒绝、重复连接防抖和断开连接状态。
-- [ ] 可选真实 SSH 集成测试。
+- [x] 可选真实 SSH 集成测试：`SSHIntegrationTests.testRealPrivateKeySmokeTestWhenEnvironmentIsConfigured` 已使用真实腾讯云服务器验证 host key trust 和 `printf hhc-ssh-ok` smoke test；部署类真实集成测试需要额外设置 `HHC_TEST_DEPLOYMENT_REAL=1`，避免普通 CI 误改服务器。
 
-真实 SSH 集成测试通过环境变量启用：
+真实 SSH 集成测试通过环境变量或本机测试配置文件启用：
 
 ```sh
 HHC_TEST_SSH_HOST=127.0.0.1
 HHC_TEST_SSH_PORT=22
 HHC_TEST_SSH_USER=tester
-HHC_TEST_SSH_PASSWORD=...
+HHC_TEST_SSH_PRIVATE_KEY=/path/to/private/key
+HHC_TEST_SSH_PASSPHRASE=optional
 ```
 
-没有这些环境变量时跳过集成测试，不让 CI 失败。
+没有这些环境变量或 `~/.hhc_tencent_server_test_env` 时跳过集成测试，不让 CI 失败。
 
 ### Task 10: 手动验收
 

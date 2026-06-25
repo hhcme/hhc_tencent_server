@@ -85,6 +85,17 @@ final class OpenSSHClientTests: XCTestCase {
         XCTAssertEqual(download, "reget \"/srv/app/app config.json\" \"/Users/hhc/Downloads/app config.json\"\n")
     }
 
+    func testSSHConfigValueEscapesSpacesAndBackslashes() {
+        XCTAssertEqual(
+            OpenSSHClient.sshConfigValue("/Users/hhc/Library/Application Support/HHCServerManager/known_hosts"),
+            "/Users/hhc/Library/Application\\ Support/HHCServerManager/known_hosts"
+        )
+        XCTAssertEqual(
+            OpenSSHClient.sshConfigValue("/tmp/hhc\\known hosts"),
+            "/tmp/hhc\\\\known\\ hosts"
+        )
+    }
+
     private final class AuthHarness {
         let repository: ServerRepository
         let keychain: KeychainService
