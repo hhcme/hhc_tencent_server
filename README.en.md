@@ -4,7 +4,7 @@ English | [中文](README.zh-CN.md)
 
 HHC Server Manager is an open-source macOS native server management client. It aims to manage multiple Linux servers through SSH and provide a desktop experience similar to Baota Panel, with optional cloud provider API enhancements for instance discovery, cloud-side metrics, security groups, and power operations.
 
-The repository is in early macOS implementation. The app can already save server profiles, store SSH and cloud credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, execute single remote commands, browse remote directories, queue batch file transfers, inspect Tencent Cloud security groups, apply confirmed single-rule Tencent Cloud security group changes, inspect and edit limited firewall rules, manage systemd/Cron/Nginx/Environment foundations, and persist command/cloud/remote-change metadata in SQLite.
+The repository is in active macOS implementation. The app can already save server profiles, store SSH and cloud credentials in Keychain, verify SSH host keys, run real OpenSSH smoke tests, execute single remote commands, browse and edit remote files, queue rsync/scp-backed batch transfers with running byte progress, show SSH and linked-cloud dashboard metrics, inspect and mutate selected cloud/security resources, manage systemd/Cron/Nginx/Firewall/Environment foundations, run GitLab-style deployment workflows, manage Verdaccio npm registry foundations, and persist command/cloud/deployment/registry/remote-change metadata in SQLite.
 
 ## Why
 
@@ -25,10 +25,10 @@ Target users include:
 - Real OpenSSH smoke test, cancellable single-command panel, persisted command metadata history, stdout/stderr split output, and history reruns.
 - Cloud account metadata and cloud credential storage foundation.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper.
-- Tencent Cloud adapter with TC3 request signing plus Region, CVM instance query parsing, Cloud Monitor CPU metric query support, VPC security group/rule read support, and single-rule security group add/remove actions.
+- Tencent Cloud, Alibaba Cloud, and Huawei Cloud adapters covering instance discovery, selected power/disk/snapshot/security-group operations, and linked dashboard metrics with mock-backed tests.
 - Tencent Cloud security group foundations with VPC security group/rule read APIs, confirmed single-rule add/remove actions, and audit records for the linked account and region.
 - Cloud import sheet for verifying Tencent Cloud accounts, loading regions, syncing CVM instances, and importing instances as SSH profiles.
-- Dashboard foundations with SSH-based OS/capability detection plus load, memory, disk, CPU, network, process summary metric cards, linked Tencent Cloud CVM CPU metrics, manual refresh, and auto-refresh.
+- Dashboard foundations with SSH-based OS/capability detection plus load, memory, disk, CPU, network, process summary metric cards, linked cloud metrics, manual refresh, and auto-refresh.
 - Remote file browser foundations with path navigation, directory listing, file metadata display, queued batch upload/download through OpenSSH/scp, visible transfer states, current-transfer cancellation, pending-queue clearing, rename, chmod-based permission changes, recoverable move-to-trash, and lightweight UTF-8 text editing with backup-on-save and Save As.
 - Services foundations with systemd unit listing, state display, journal reading, and confirmed start/stop/restart/reload actions.
 - Cron foundations with crontab reading, entry parsing, add/enable/disable/delete flows, and pre-install remote backups.
@@ -40,8 +40,8 @@ Target users include:
 - Simplified command panel and server dashboard.
 - SFTP file manager.
 - systemd, Nginx, firewall, cron, and environment management.
-- GitLab deployment, logs, rollback, and webhook automation.
-- Verdaccio npm registry management, plus Dart/Flutter external Hosted Pub Repository configuration assistance.
+- GitLab-style deployments with project CRUD, command previews, logs, rollback, local webhook listener, and live run/log refresh.
+- Verdaccio npm registry management with preflight, install, service control, users, package listing, backup/restore, Nginx proxy support, and npm smoke tests, plus Dart/Flutter external Hosted Pub Repository configuration assistance.
 
 ## Technology Direction
 
@@ -87,7 +87,7 @@ Target users include:
 
 ## Development Status
 
-The macOS app is now under active implementation. Phase 1 foundations are in place, Phase 2 foundations are largely in place, Phase 3 Dashboard/file browser foundations have started, and Phase 4 Security Groups/Services/Cron/Nginx/Firewall/Environment has begun: SwiftUI app structure, local SQLite persistence, Keychain-backed SSH/cloud credentials, host-key trust, OpenSSH-based real command execution with cancellation, command metadata history with reruns, split stdout/stderr output, cloud account metadata, cloud instance links, cloud instance sync/import UI foundations, provider adapter registry, normalized cloud errors, Tencent Cloud TC3 request signing, Region/CVM instance response parsing, Tencent Cloud security group discovery/rule inspection and single-rule writes, SSH-based Dashboard capability and metric collection including network and process summaries, Dashboard per-metric warning fallback, manual and auto-refresh, remote directory browsing, queued batch upload/download with visible task states, current-transfer cancellation and pending-queue clearing, rename, chmod-based permission changes, recoverable move-to-trash, lightweight UTF-8 text editing with backup-on-save and Save As, systemd service listing/logs/actions, crontab reading and Cron entry management, dynamic Nginx config discovery/read/edit/test/reload with rollback, firewall detection/rules display and limited write actions, guarded environment file discovery/editing with backups, remote change audit logs, unit tests, and GitHub Actions CI. Command output remains session-scoped and is not persisted by default. SFTP hardening, byte-level progress, concurrent/resumable transfers, more cloud-provider security group writes, deployment, package registry, and Windows native work remain planned later phases.
+The macOS app is now under active implementation. Phase 1 through Phase 6 foundations are in place across SSH, optional cloud APIs, dashboard, file management, security/environment tools, deployments, and private registry management: SwiftUI app structure, local SQLite persistence, Keychain-backed SSH/cloud credentials, host-key trust, OpenSSH-based real command execution with cancellation, command metadata history with reruns, split stdout/stderr output, cloud account metadata, cloud instance links, Tencent/Alibaba/Huawei adapters, linked-cloud dashboard metrics, remote directory browsing and editing, rsync/scp batch transfers with byte progress, systemd/Cron/Nginx/Firewall/Environment workflows, remote change audit logs, GitLab-style deployment runs/logs/rollback/webhook listener, Verdaccio preflight/install/service/users/packages/backup/restore/Nginx proxy/npm smoke flows, unit tests, CI, and real-server smoke validation for SSH, transfers, and temporary deployment. Command output remains session-scoped and is not persisted by default. SFTP hardening, concurrent/resumable transfers, production deployment validation, real multi-cloud write-operation validation, production Verdaccio validation, and Windows native work remain planned later phases.
 
 ## Contributing
 
