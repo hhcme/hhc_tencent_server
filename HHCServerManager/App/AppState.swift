@@ -18,6 +18,7 @@ final class AppState: ObservableObject {
     let remoteFileService: RemoteFileService
     let deploymentRunner: DeploymentRunner
     let deploymentWebhookService: DeploymentWebhookService
+    let deploymentWebhookHTTPServer: DeploymentWebhookHTTPServer
     let sshClient: OpenSSHClient
 
     @Published var servers: [ServerProfile] = []
@@ -52,13 +53,18 @@ final class AppState: ObservableObject {
                 keychain: keychain,
                 runner: deploymentRunner
             )
+            let sshClient = OpenSSHClient(repository: repository, keychain: keychain)
+            self.sshClient = sshClient
+            deploymentWebhookHTTPServer = DeploymentWebhookHTTPServer(
+                webhookService: deploymentWebhookService,
+                sshClient: sshClient
+            )
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,
                 keychain: keychain,
                 registry: registry,
                 serverManagementService: serverManagementService
             )
-            sshClient = OpenSSHClient(repository: repository, keychain: keychain)
             reloadServers()
         } catch {
             startupError = error.localizedDescription
@@ -85,13 +91,18 @@ final class AppState: ObservableObject {
                 keychain: keychain,
                 runner: deploymentRunner
             )
+            let sshClient = OpenSSHClient(repository: repository, keychain: keychain)
+            self.sshClient = sshClient
+            deploymentWebhookHTTPServer = DeploymentWebhookHTTPServer(
+                webhookService: deploymentWebhookService,
+                sshClient: sshClient
+            )
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,
                 keychain: keychain,
                 registry: registry,
                 serverManagementService: serverManagementService
             )
-            sshClient = OpenSSHClient(repository: repository, keychain: keychain)
         }
     }
 

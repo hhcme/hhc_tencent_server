@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Network
 
 final class ServerManagementService: @unchecked Sendable {
     private let repository: ServerRepository
@@ -820,13 +821,24 @@ final class DeploymentWebhookService: @unchecked Sendable {
         guard let profile = try repository.fetchServers().first(where: { $0.id == project.serverId }) else {
             throw DeploymentWebhookError.serverNotFound
         }
-        return try await runner.run(
+        try saveWebhookOperationLog(
+            project: project,
+            status: "started",
+            message: "Webhook push \(event.requestedRef) accepted for \(project.name)."
+        )
+        let run = try await runner.run(
             project: project,
             profile: profile,
             sshClient: sshClient,
             triggerType: .webhook,
             requestedRef: event.requestedRef
         )
+        try saveWebhookOperationLog(
+            project: project,
+            status: run.status.rawValue,
+            message: "Webhook deployment run \(run.id.uuidString) finished with \(run.status.rawValue)."
+        )
+        return run
     }
 
     static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
@@ -875,6 +887,18 @@ final class DeploymentWebhookService: @unchecked Sendable {
         return project
     }
 
+    private func saveWebhookOperationLog(project: DeploymentProject, status: String, message: String) throws {
+        try repository.saveOperationLog(OperationLogEntry(
+            id: UUID(),
+            scope: "deployment",
+            action: "webhook_trigger",
+            targetId: project.id.uuidString,
+            status: status,
+            message: message,
+            createdAt: Date()
+        ))
+    }
+
     private func header(_ name: String, in headers: [String: String]) -> String? {
         headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
     }
@@ -907,6 +931,168 @@ final class DeploymentWebhookService: @unchecked Sendable {
             value.removeLast()
         }
         return value
+    }
+}
+
+struct DeploymentWebhookHTTPRequest: Equatable, Sendable {
+    var method: String
+    var path: String
+    var headers: [String: String]
+    var body: Data
+}
+
+enum DeploymentWebhookHTTPError: LocalizedError, Equatable {
+    case malformedRequest
+    case bodyTooLarge
+    case unsupportedMethod
+    case unsupportedPath
+
+    var errorDescription: String? {
+        switch self {
+        case .malformedRequest:
+            "Webhook HTTP request is malformed."
+        case .bodyTooLarge:
+            "Webhook HTTP request body is too large."
+        case .unsupportedMethod:
+            "Webhook listener only accepts POST requests."
+        case .unsupportedPath:
+            "Webhook listener only accepts /webhooks/gitlab."
+        }
+    }
+}
+
+final class DeploymentWebhookHTTPServer: @unchecked Sendable {
+    private let webhookService: DeploymentWebhookService
+    private let sshClient: SSHClient
+    private let queue = DispatchQueue(label: "me.hhc.HHCServerManager.webhook")
+    private var listener: NWListener?
+
+    init(webhookService: DeploymentWebhookService, sshClient: SSHClient) {
+        self.webhookService = webhookService
+        self.sshClient = sshClient
+    }
+
+    var port: UInt16? {
+        listener?.port?.rawValue
+    }
+
+    func start(port: UInt16 = 0) throws {
+        stop()
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            throw DeploymentWebhookHTTPError.malformedRequest
+        }
+        let listener = try NWListener(using: .tcp, on: nwPort)
+        listener.newConnectionHandler = { [weak self] connection in
+            self?.handle(connection)
+        }
+        listener.start(queue: queue)
+        self.listener = listener
+    }
+
+    func stop() {
+        listener?.cancel()
+        listener = nil
+    }
+
+    static func parseRequest(_ data: Data, maxBodyBytes: Int = 1_048_576) throws -> DeploymentWebhookHTTPRequest {
+        guard let separatorRange = data.range(of: Data("\r\n\r\n".utf8)) else {
+            throw DeploymentWebhookHTTPError.malformedRequest
+        }
+        let headerData = data[..<separatorRange.lowerBound]
+        let body = Data(data[separatorRange.upperBound...])
+        guard body.count <= maxBodyBytes,
+              let headerText = String(data: headerData, encoding: .utf8)
+        else {
+            throw body.count > maxBodyBytes ? DeploymentWebhookHTTPError.bodyTooLarge : DeploymentWebhookHTTPError.malformedRequest
+        }
+
+        var lines = headerText.components(separatedBy: "\r\n")
+        guard let requestLine = lines.first else {
+            throw DeploymentWebhookHTTPError.malformedRequest
+        }
+        lines.removeFirst()
+        let requestParts = requestLine.split(separator: " ", maxSplits: 2).map(String.init)
+        guard requestParts.count >= 2 else {
+            throw DeploymentWebhookHTTPError.malformedRequest
+        }
+
+        var headers: [String: String] = [:]
+        for line in lines {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = String(line[..<colon]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            headers[key] = value
+        }
+
+        return DeploymentWebhookHTTPRequest(
+            method: requestParts[0],
+            path: requestParts[1],
+            headers: headers,
+            body: body
+        )
+    }
+
+    static func response(statusCode: Int, reason: String, body: String) -> Data {
+        let bodyData = Data(body.utf8)
+        return Data([
+            "HTTP/1.1 \(statusCode) \(reason)",
+            "Content-Type: text/plain; charset=utf-8",
+            "Content-Length: \(bodyData.count)",
+            "Connection: close",
+            "",
+            body,
+        ].joined(separator: "\r\n").utf8)
+    }
+
+    private func handle(_ connection: NWConnection) {
+        connection.start(queue: queue)
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1_100_000) { [weak self] data, _, _, error in
+            guard let self else { return }
+            if let error {
+                let responseData = Self.response(statusCode: 500, reason: "Internal Server Error", body: error.localizedDescription)
+                connection.send(content: responseData, completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+                return
+            }
+            guard let data else {
+                let responseData = Self.response(statusCode: 400, reason: "Bad Request", body: "Missing request data.")
+                connection.send(content: responseData, completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+                return
+            }
+
+            Task {
+                let responseData = await self.handleRequestData(data)
+                connection.send(content: responseData, completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+            }
+        }
+    }
+
+    private func handleRequestData(_ data: Data) async -> Data {
+        do {
+            let request = try Self.parseRequest(data)
+            guard request.method == "POST" else {
+                throw DeploymentWebhookHTTPError.unsupportedMethod
+            }
+            guard request.path == "/webhooks/gitlab" else {
+                throw DeploymentWebhookHTTPError.unsupportedPath
+            }
+
+            _ = try await webhookService.handleGitLabPush(
+                headers: request.headers,
+                body: request.body,
+                sshClient: sshClient
+            )
+            return Self.response(statusCode: 202, reason: "Accepted", body: "Webhook accepted.")
+        } catch let error as DeploymentWebhookHTTPError {
+            return Self.response(statusCode: 400, reason: "Bad Request", body: error.localizedDescription)
+        } catch {
+            return Self.response(statusCode: 401, reason: "Unauthorized", body: error.localizedDescription)
+        }
     }
 }
 

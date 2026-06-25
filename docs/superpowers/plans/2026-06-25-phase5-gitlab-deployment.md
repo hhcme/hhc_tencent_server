@@ -90,7 +90,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - 手动部署按钮和部署前预览。（已完成基础 UI）
 - 部署运行详情：步骤、状态、日志、耗时、失败原因。（已完成基础 UI；实时流式刷新后续增强）
 - 回滚按钮：展示 previous commit 并触发受控 rollback。（已完成基础 UI；风险说明后续接入统一确认）
-- webhook 设置：启用开关、secret、允许分支。（已完成配置和核心校验；本地监听地址后续接入）
+- webhook 设置：启用开关、secret、允许分支。（已完成配置、核心校验和本地 HTTP listener 基础；监听开关和地址展示后续接入 UI）
 
 ## 7. 实施任务
 
@@ -132,10 +132,10 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 
 ### Task 6：Webhook
 
-- [ ] 实现可选本地 HTTP listener。
+- [x] 实现可选本地 HTTP listener 基础：当前 `DeploymentWebhookHTTPServer` 使用 `NWListener` 接收 `/webhooks/gitlab`，解析 HTTP 请求，校验方法和路径，并根据 webhook 核心服务结果返回状态。
 - [x] 校验 GitLab `X-Gitlab-Token`，使用常量时间比较。
 - [x] 过滤项目、分支和事件类型。
-- [ ] 触发部署前写入操作日志。
+- [x] 触发部署前写入操作日志：webhook run 开始和结束都会写入 `operation_logs`，记录 project id、状态和摘要。
 - [ ] UI 明确说明桌面客户端离线时不会自动部署。
 
 ### Task 7：测试
@@ -147,6 +147,8 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] rollback 测试：已覆盖回滚 run、previous/target commit 捕获和 `git reset --hard <commit>` 命令。
 - [x] webhook secret 常量时间比较测试。
 - [x] GitLab webhook 核心测试：已覆盖 secret Keychain 存储、push payload 解析、repo/branch 匹配、错误 token 拒绝和 webhook run 触发。
+- [x] GitLab webhook HTTP listener 测试：已覆盖 HTTP 请求解析、header/body 保留和响应格式。
+- [x] webhook 操作日志测试：已覆盖 started/succeeded 状态和 project target id。
 - [x] 日志脱敏测试：已覆盖 token、password、Authorization/Bearer、URL credentials。
 
 ### Task 8：手动验收

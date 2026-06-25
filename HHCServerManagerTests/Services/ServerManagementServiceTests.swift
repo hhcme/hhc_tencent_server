@@ -531,6 +531,12 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(run.requestedRef, "refs/heads/main")
         XCTAssertEqual(run.status, .succeeded)
         XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'origin/main'") })
+
+        let operationLogs = try harness.repository.fetchOperationLogs()
+        XCTAssertEqual(operationLogs.map(\.action), ["webhook_trigger", "webhook_trigger"])
+        XCTAssertTrue(operationLogs.contains { $0.status == "started" })
+        XCTAssertTrue(operationLogs.contains { $0.status == "succeeded" })
+        XCTAssertTrue(operationLogs.allSatisfy { $0.targetId == project.id.uuidString })
     }
 
     func testDeploymentWebhookServiceRejectsInvalidTokenAndBranch() async throws {
@@ -581,6 +587,34 @@ final class ServerManagementServiceTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? DeploymentWebhookError, .projectNotFound)
         }
+    }
+
+    func testDeploymentWebhookHTTPServerParsesRequestsAndResponses() throws {
+        let body = gitLabPushPayload(branch: "main", sshURL: "git@gitlab.com:hhc/site.git")
+        let headers = [
+            "POST /webhooks/gitlab HTTP/1.1",
+            "Host: 127.0.0.1:8787",
+            "X-Gitlab-Event: Push Hook",
+            "X-Gitlab-Token: gitlab-token",
+            "Content-Length: \(body.count)",
+            "",
+            "",
+        ].joined(separator: "\r\n")
+        let raw = Data(headers.utf8) + body
+
+        let request = try DeploymentWebhookHTTPServer.parseRequest(raw)
+
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/webhooks/gitlab")
+        XCTAssertEqual(request.headers["X-Gitlab-Token"], "gitlab-token")
+        XCTAssertEqual(request.body, body)
+
+        let response = String(
+            data: DeploymentWebhookHTTPServer.response(statusCode: 202, reason: "Accepted", body: "ok"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(response?.contains("HTTP/1.1 202 Accepted") == true)
+        XCTAssertTrue(response?.contains("Content-Length: 2") == true)
     }
 
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
