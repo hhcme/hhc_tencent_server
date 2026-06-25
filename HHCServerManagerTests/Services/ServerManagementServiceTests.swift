@@ -459,6 +459,29 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testCloudProviderRequestLimiterCapsConcurrentOperations() async throws {
+        let limiter = CloudProviderRequestLimiter(maxConcurrentRequests: 2)
+        let probe = CloudProviderRequestLimiterProbe()
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<6 {
+                group.addTask {
+                    try await CloudProviderRequestRunner.run(timeout: 1, limiter: limiter) {
+                        await probe.enter()
+                        try await Task.sleep(nanoseconds: 20_000_000)
+                        await probe.leave()
+                    }
+                }
+            }
+
+            try await group.waitForAll()
+        }
+
+        let snapshot = await probe.snapshot()
+        XCTAssertEqual(snapshot.maxRunning, 2)
+        XCTAssertEqual(snapshot.running, 0)
+    }
+
     func testDeploymentCommandBuilderBuildsControlledPlan() throws {
         let project = DeploymentProject(
             id: UUID(),
@@ -6541,6 +6564,24 @@ private final class MockHuaweiCloudTransport: HuaweiCloudHTTPTransport, @uncheck
             headerFields: [:]
         )!
         return (Data(body.utf8), response)
+    }
+}
+
+private actor CloudProviderRequestLimiterProbe {
+    private(set) var running = 0
+    private(set) var maxRunning = 0
+
+    func enter() {
+        running += 1
+        maxRunning = max(maxRunning, running)
+    }
+
+    func leave() {
+        running -= 1
+    }
+
+    func snapshot() -> (running: Int, maxRunning: Int) {
+        (running, maxRunning)
     }
 }
 

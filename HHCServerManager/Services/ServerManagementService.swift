@@ -5447,6 +5447,16 @@ enum CloudResourceSearchService {
 }
 
 enum CloudProviderRequestRunner {
+    static func run<T: Sendable>(
+        timeout seconds: TimeInterval,
+        limiter: CloudProviderRequestLimiter,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await limiter.run {
+            try await withTimeout(seconds, operation: operation)
+        }
+    }
+
     static func withTimeout<T: Sendable>(
         _ seconds: TimeInterval,
         operation: @escaping @Sendable () async throws -> T
@@ -5469,6 +5479,52 @@ enum CloudProviderRequestRunner {
             }
             group.cancelAll()
             return value
+        }
+    }
+}
+
+actor CloudProviderRequestLimiter {
+    static let shared = CloudProviderRequestLimiter(maxConcurrentRequests: 4)
+
+    private let maxConcurrentRequests: Int
+    private var runningRequests = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(maxConcurrentRequests: Int) {
+        self.maxConcurrentRequests = max(1, maxConcurrentRequests)
+    }
+
+    func run<T: Sendable>(
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        await acquire()
+        do {
+            let value = try await operation()
+            release()
+            return value
+        } catch {
+            release()
+            throw error
+        }
+    }
+
+    private func acquire() async {
+        if runningRequests < maxConcurrentRequests {
+            runningRequests += 1
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    private func release() {
+        if waiters.isEmpty {
+            runningRequests = max(0, runningRequests - 1)
+        } else {
+            let continuation = waiters.removeFirst()
+            continuation.resume()
         }
     }
 }
@@ -5508,17 +5564,20 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     private let transport: TencentCloudHTTPTransport
     private let now: @Sendable () -> Date
     private let timeout: TimeInterval
+    private let requestLimiter: CloudProviderRequestLimiter
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
     init(
         transport: TencentCloudHTTPTransport = URLSessionTencentCloudHTTPTransport(),
         now: @escaping @Sendable () -> Date = Date.init,
-        timeout: TimeInterval = 15
+        timeout: TimeInterval = 15,
+        requestLimiter: CloudProviderRequestLimiter = .shared
     ) {
         self.transport = transport
         self.now = now
         self.timeout = timeout
+        self.requestLimiter = requestLimiter
     }
 
     func validateCredential(_ credential: CloudProviderCredential) async throws {
@@ -6052,7 +6111,7 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     ) async throws -> TencentCloudEnvelope<Response> {
         let body = try encoder.encode(payload)
         let request = try signedRequest(credential: credential, endpoint: endpoint, body: body)
-        let (data, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
+        let (data, httpResponse) = try await CloudProviderRequestRunner.run(timeout: timeout, limiter: requestLimiter) {
             try await self.transport.send(request)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
@@ -6286,18 +6345,21 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     private let now: @Sendable () -> Date
     private let nonce: @Sendable () -> String
     private let timeout: TimeInterval
+    private let requestLimiter: CloudProviderRequestLimiter
     private let decoder = JSONDecoder()
 
     init(
         transport: AlibabaCloudHTTPTransport = URLSessionAlibabaCloudHTTPTransport(),
         now: @escaping @Sendable () -> Date = Date.init,
         nonce: @escaping @Sendable () -> String = { UUID().uuidString },
-        timeout: TimeInterval = 15
+        timeout: TimeInterval = 15,
+        requestLimiter: CloudProviderRequestLimiter = .shared
     ) {
         self.transport = transport
         self.now = now
         self.nonce = nonce
         self.timeout = timeout
+        self.requestLimiter = requestLimiter
     }
 
     func validateCredential(_ credential: CloudProviderCredential) async throws {
@@ -6766,7 +6828,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             queryItems: queryItems,
             version: version
         )
-        let (data, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
+        let (data, httpResponse) = try await CloudProviderRequestRunner.run(timeout: timeout, limiter: requestLimiter) {
             try await self.transport.send(request)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
@@ -7056,17 +7118,20 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     private let transport: HuaweiCloudHTTPTransport
     private let now: @Sendable () -> Date
     private let timeout: TimeInterval
+    private let requestLimiter: CloudProviderRequestLimiter
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
     init(
         transport: HuaweiCloudHTTPTransport = URLSessionHuaweiCloudHTTPTransport(),
         now: @escaping @Sendable () -> Date = Date.init,
-        timeout: TimeInterval = 15
+        timeout: TimeInterval = 15,
+        requestLimiter: CloudProviderRequestLimiter = .shared
     ) {
         self.transport = transport
         self.now = now
         self.timeout = timeout
+        self.requestLimiter = requestLimiter
     }
 
     func validateCredential(_ credential: CloudProviderCredential) async throws {
@@ -7601,7 +7666,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         body: Data = Data()
     ) async throws -> Response {
         let request = try signedRequest(credential: credential, host: host, path: path, queryItems: queryItems, method: method, body: body)
-        let (data, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
+        let (data, httpResponse) = try await CloudProviderRequestRunner.run(timeout: timeout, limiter: requestLimiter) {
             try await self.transport.send(request)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
@@ -7623,7 +7688,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         body: Data = Data()
     ) async throws {
         let request = try signedRequest(credential: credential, host: host, path: path, queryItems: queryItems, method: method, body: body)
-        let (_, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
+        let (_, httpResponse) = try await CloudProviderRequestRunner.run(timeout: timeout, limiter: requestLimiter) {
             try await self.transport.send(request)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
