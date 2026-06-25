@@ -88,7 +88,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 
 ## 开发状态
 
-macOS 应用已经进入活跃实现阶段。Phase 1 到 Phase 6 的基础能力已经覆盖 SSH、可选云 API、Dashboard、文件管理、安全/环境工具、部署和私有仓库管理：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、腾讯云/阿里云/华为云 adapter、已关联云实例 Dashboard 指标、远程目录浏览和编辑、带 rsync 字节进度、sftp reget/reput fallback 和中断历史重试的有限并发批量传输、systemd/Cron/Nginx/Firewall/Environment 工作流、远程变更审计日志、GitLab 风格部署运行/日志/回滚/webhook listener、Verdaccio preflight/安装/服务/用户/包列表/备份/恢复/Nginx proxy/npm smoke 流程、单元测试、CI，以及真实服务器上的 SSH、传输、临时部署和隔离 Verdaccio 安装/发布/重启/备份/恢复 smoke 验证。Windows 原生版 Phase 8 已启动，加入 WinUI 3 / Windows App SDK / .NET solution 骨架和已测试核心层。命令输出默认只保留在本次会话中，不落库持久化。SwiftNIO/libssh2 SFTP 固化、真正断点续传、生产项目部署验收、真实多云写操作验收、生产 Verdaccio/proxy 验收和完整 Windows 主机验收仍在后续阶段。
+macOS 应用已经进入活跃实现阶段。Phase 1 到 Phase 6 的基础能力已经覆盖 SSH、可选云 API、Dashboard、文件管理、安全/环境工具、部署和私有仓库管理：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、腾讯云/阿里云/华为云 adapter、已关联云实例 Dashboard 指标、远程目录浏览和编辑、带 rsync 字节进度和 partial 保留、OpenSSH `sftp -b` 普通 batch fallback、scp 最终回退和中断历史重试的有限并发批量传输、systemd/Cron/Nginx/Firewall/Environment 工作流、远程变更审计日志、GitLab 风格部署运行/日志/回滚/webhook listener、Verdaccio preflight/安装/服务/用户/包列表/备份/恢复/Nginx proxy/npm smoke 流程、单元测试、CI，以及真实服务器上的 SSH、传输、临时部署和隔离 Verdaccio 安装/发布/重启/备份/恢复 smoke 验证。Windows 原生版 Phase 8 已启动，加入 WinUI 3 / Windows App SDK / .NET solution 骨架和已测试核心层。命令输出默认只保留在本次会话中，不落库持久化。SwiftNIO/libssh2 SFTP 固化、真正断点续传、生产项目部署验收、真实多云写操作验收、生产 Verdaccio/proxy 验收和完整 Windows 主机验收仍在后续阶段。
 
 ## 参与贡献
 

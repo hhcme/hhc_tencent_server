@@ -31,7 +31,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - SSH 密码、私钥等敏感信息存入 macOS Keychain。
 - 把主机指纹验证作为基础安全能力。
 - 服务器列表、单服务器工作台、真实 smoke test、简化命令面板和命令元数据历史已进入实现。
-- Dashboard 自动刷新、SSH 指标、已关联云实例指标、安全组查看和经确认的单条规则变更、远程文件浏览、带另存为的轻量文本编辑、权限修改、带 rsync 字节进度、sftp reget/reput fallback 和 scp 最终回退的排队批量上传/下载、systemd Services、Cron 管理、受保护的 Nginx 配置编辑/测试/reload、有限防火墙规则变更、受保护的环境变量文件编辑、GitLab 风格部署和 Verdaccio 仓库管理已进入实现。
+- Dashboard 自动刷新、SSH 指标、已关联云实例指标、安全组查看和经确认的单条规则变更、远程文件浏览、带另存为的轻量文本编辑、权限修改、带 rsync 字节进度和 partial 保留、OpenSSH `sftp -b` 普通 batch fallback、scp 最终回退的排队批量上传/下载、systemd Services、Cron 管理、受保护的 Nginx 配置编辑/测试/reload、有限防火墙规则变更、受保护的环境变量文件编辑、GitLab 风格部署和 Verdaccio 仓库管理已进入实现。
 - Verdaccio 已有受保护的真实服务器生命周期覆盖：隔离安装、用户创建、npm publish/install smoke、重启、配置备份和备份/恢复；生产环境部署和 proxy 暴露仍需按目标环境单独验收。
 - 云账号元数据和云凭据存储基础已经落地。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装已经落地。

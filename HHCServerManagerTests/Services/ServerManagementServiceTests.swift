@@ -3128,6 +3128,161 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(logs.first { $0.action == "stop_instance" }?.status, "success")
     }
 
+    func testCloudSnapshotActionFailureWritesAuditLogWithoutPersistingSnapshot() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .alibabaCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudSnapshots, .snapshotActions],
+            actionFailures: ["create_snapshot"]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_540)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .alibabaCloud,
+            displayName: "Alibaba",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+
+        do {
+            _ = try await harness.cloudInstanceSyncService.createSnapshot(
+                account: account,
+                regionId: "ap-southeast-1",
+                diskId: "d-1",
+                snapshotName: "before-risky-change"
+            )
+            XCTFail("Expected create snapshot failure.")
+        } catch {
+            XCTAssertEqual(
+                error as? CloudProviderError,
+                .providerFailure("forced create_snapshot failure")
+            )
+        }
+
+        XCTAssertTrue(try harness.repository.fetchCloudSnapshots(accountId: account.id).isEmpty)
+        let log = try XCTUnwrap(try harness.repository.fetchRemoteChangeLogs().first { $0.action == "create_snapshot" })
+        XCTAssertEqual(log.providerId, .alibabaCloud)
+        XCTAssertEqual(log.targetId, "d-1")
+        XCTAssertEqual(log.status, "failed")
+        XCTAssertTrue(log.message?.contains("forced create_snapshot failure") == true)
+    }
+
+    func testCloudDiskActionFailureWritesAuditLogWithoutMutatingDiskCache() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .huaweiCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudDisks, .diskAttachmentActions],
+            actionFailures: ["attach_disk"]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_550)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .huaweiCloud,
+            displayName: "Huawei",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        try harness.repository.upsertCloudDisk(CloudDisk(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .huaweiCloud,
+            regionId: "ap-southeast-1|project-1",
+            diskId: "vol-fail",
+            instanceId: nil,
+            name: "data",
+            diskType: "SSD",
+            sizeGB: 100,
+            status: "available",
+            billingType: "postPaid",
+            expiredTime: nil,
+            rawJSON: nil,
+            lastSyncedAt: nil
+        ))
+
+        do {
+            try await harness.cloudInstanceSyncService.attachDisk(
+                account: account,
+                regionId: "ap-southeast-1|project-1",
+                diskId: "vol-fail",
+                instanceId: "server-target",
+                currentStatus: "available"
+            )
+            XCTFail("Expected attach disk failure.")
+        } catch {
+            XCTAssertEqual(
+                error as? CloudProviderError,
+                .providerFailure("forced attach_disk failure")
+            )
+        }
+
+        let disk = try XCTUnwrap(try harness.repository.fetchCloudDisks(accountId: account.id).first { $0.diskId == "vol-fail" })
+        XCTAssertNil(disk.instanceId)
+        XCTAssertEqual(disk.status, "available")
+        let log = try XCTUnwrap(try harness.repository.fetchRemoteChangeLogs().first { $0.action == "attach_disk" })
+        XCTAssertEqual(log.providerId, .huaweiCloud)
+        XCTAssertEqual(log.targetId, "vol-fail")
+        XCTAssertEqual(log.status, "failed")
+        XCTAssertTrue(log.message?.contains("forced attach_disk failure") == true)
+    }
+
+    func testCloudInstancePowerActionFailureWritesAuditLogWithoutMutatingInstanceCache() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .alibabaCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .powerActions],
+            actionFailures: ["stop_instance"]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_560)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .alibabaCloud,
+            displayName: "Alibaba",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        let link = CloudInstanceLink(
+            id: UUID(),
+            serverId: nil,
+            accountId: account.id,
+            providerId: .alibabaCloud,
+            regionId: "ap-southeast-1",
+            instanceId: "i-fail",
+            displayName: "prod",
+            publicIp: "203.0.113.12",
+            privateIp: "10.0.0.12",
+            status: "Running",
+            instanceType: "ecs.g7.large",
+            zoneId: "ap-southeast-1a",
+            vpcId: "vpc-1",
+            securityGroupIds: [],
+            rawJSON: nil,
+            lastSyncedAt: nil
+        )
+        try harness.repository.upsertCloudInstanceLink(link)
+
+        do {
+            try await harness.cloudInstanceSyncService.stopInstance(
+                account: account,
+                regionId: "ap-southeast-1",
+                instanceId: "i-fail",
+                currentStatus: "Running"
+            )
+            XCTFail("Expected stop instance failure.")
+        } catch {
+            XCTAssertEqual(
+                error as? CloudProviderError,
+                .providerFailure("forced stop_instance failure")
+            )
+        }
+
+        let storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-southeast-1",
+            instanceId: "i-fail"
+        )
+        XCTAssertEqual(storedLink.status, "Running")
+        XCTAssertNil(storedLink.lastSyncedAt)
+        let log = try XCTUnwrap(try harness.repository.fetchRemoteChangeLogs().first { $0.action == "stop_instance" })
+        XCTAssertEqual(log.providerId, .alibabaCloud)
+        XCTAssertEqual(log.targetId, "i-fail")
+        XCTAssertEqual(log.status, "failed")
+        XCTAssertTrue(log.message?.contains("forced stop_instance failure") == true)
+    }
+
     func testCloudInstanceSyncCreatesServerFromInstanceAndLinksIt() throws {
         let harness = try Harness()
         let account = try harness.cloudAccountService.createAccount(
@@ -5518,6 +5673,7 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
     let providerId: CloudProviderID
     let displayName = "Mock Cloud"
     let capabilities: Set<CloudCapability>
+    var actionFailures: Set<String> = []
 
     func validateCredential(_ credential: CloudProviderCredential) async throws {}
 
@@ -5723,7 +5879,8 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
         snapshotName: String,
         capturedAt: Date
     ) async throws -> CloudSnapshot {
-        CloudSnapshot(
+        try throwFailureIfNeeded("create_snapshot")
+        return CloudSnapshot(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000999")!,
             accountId: accountId,
             providerId: providerId,
@@ -5743,38 +5900,56 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
         credential: CloudProviderCredential,
         regionId: String,
         snapshotId: String
-    ) async throws {}
+    ) async throws {
+        try throwFailureIfNeeded("delete_snapshot")
+    }
 
     func attachDisk(
         credential: CloudProviderCredential,
         regionId: String,
         diskId: String,
         instanceId: String
-    ) async throws {}
+    ) async throws {
+        try throwFailureIfNeeded("attach_disk")
+    }
 
     func detachDisk(
         credential: CloudProviderCredential,
         regionId: String,
         diskId: String
-    ) async throws {}
+    ) async throws {
+        try throwFailureIfNeeded("detach_disk")
+    }
 
     func startInstance(
         credential: CloudProviderCredential,
         regionId: String,
         instanceId: String
-    ) async throws {}
+    ) async throws {
+        try throwFailureIfNeeded("start_instance")
+    }
 
     func stopInstance(
         credential: CloudProviderCredential,
         regionId: String,
         instanceId: String
-    ) async throws {}
+    ) async throws {
+        try throwFailureIfNeeded("stop_instance")
+    }
 
     func rebootInstance(
         credential: CloudProviderCredential,
         regionId: String,
         instanceId: String
-    ) async throws {}
+    ) async throws {
+        try throwFailureIfNeeded("reboot_instance")
+    }
+
+    private func throwFailureIfNeeded(_ action: String) throws {
+        if actionFailures.contains(action) {
+            throw CloudProviderError.providerFailure("forced \(action) failure")
+        }
+    }
 }
 
 private func makeServiceTestProfile() -> ServerProfile {
