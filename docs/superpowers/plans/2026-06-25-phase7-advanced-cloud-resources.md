@@ -97,6 +97,7 @@ CREATE TABLE cloud_billing_states (
 - 已新增 `ProviderCapabilityMatrixBuilder` 和 `CloudResourceSearchService`。
 - 已扩展 `CloudInstanceSyncService`，支持腾讯云云盘、快照、计费状态同步入库，并从本地库加载统一云资源。
 - 已新增 macOS 云资源中心，支持按账号/地域同步、跨资源搜索过滤、能力矩阵展示和资源详情查看。
+- 已新增 `AlibabaCloudAdapter` 和 `HuaweiCloudAdapter`，支持签名后的只读地域/项目发现、ECS 实例发现、分页和核心字段映射，并通过 fixture 测试覆盖请求签名与解析。
 
 ## 6. UI 范围
 
@@ -118,19 +119,19 @@ CREATE TABLE cloud_billing_states (
 
 ### Task 2：Alibaba Cloud adapter
 
-- [ ] 验证当前 SDK 或签名方案。
-- [ ] 实现凭据校验。
-- [ ] 实现地域和 ECS 实例发现。
-- [ ] 解析公网 IP、私网 IP、规格、状态。
-- [ ] 添加 fixture 测试。
+- [x] 验证当前 SDK 或签名方案。
+- [x] 实现凭据校验。
+- [x] 实现地域和 ECS 实例发现。
+- [x] 解析公网 IP、私网 IP、规格、状态。
+- [x] 添加 fixture 测试。
 
 ### Task 3：Huawei Cloud adapter
 
-- [ ] 验证当前 SDK 或签名方案。
-- [ ] 实现凭据校验。
-- [ ] 实现地域和 ECS 实例发现。
-- [ ] 解析网络、状态和规格。
-- [ ] 添加 fixture 测试。
+- [x] 验证当前 SDK 或签名方案。
+- [x] 实现凭据校验。
+- [x] 实现地域和 ECS 实例发现。
+- [x] 解析网络、状态和规格。
+- [x] 添加 fixture 测试。
 
 ### Task 4：高级资源
 
@@ -156,7 +157,7 @@ CREATE TABLE cloud_billing_states (
 ### Task 7：测试
 
 - [x] Provider adapter 契约测试。
-- [ ] 三家云实例解析测试。
+- [x] 三家云实例解析测试。
 - [x] 云盘/快照/计费解析测试。
 - [x] 跨云搜索测试。
 - [ ] 危险操作确认状态机测试。

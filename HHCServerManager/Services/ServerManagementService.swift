@@ -5134,6 +5134,772 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     }
 }
 
+protocol AlibabaCloudHTTPTransport: Sendable {
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+}
+
+final class URLSessionAlibabaCloudHTTPTransport: AlibabaCloudHTTPTransport, @unchecked Sendable {
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudProviderError.networkFailure("Alibaba Cloud returned a non-HTTP response.")
+        }
+        return (data, httpResponse)
+    }
+}
+
+final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
+    let providerId: CloudProviderID = .alibabaCloud
+    let displayName = "Alibaba Cloud"
+    let capabilities: Set<CloudCapability> = [
+        .regions,
+        .instanceDiscovery,
+        .instanceMetadata,
+        .cloudBilling,
+    ]
+
+    private let transport: AlibabaCloudHTTPTransport
+    private let now: @Sendable () -> Date
+    private let nonce: @Sendable () -> String
+    private let timeout: TimeInterval
+    private let decoder = JSONDecoder()
+
+    init(
+        transport: AlibabaCloudHTTPTransport = URLSessionAlibabaCloudHTTPTransport(),
+        now: @escaping @Sendable () -> Date = Date.init,
+        nonce: @escaping @Sendable () -> String = { UUID().uuidString },
+        timeout: TimeInterval = 15
+    ) {
+        self.transport = transport
+        self.now = now
+        self.nonce = nonce
+        self.timeout = timeout
+    }
+
+    func validateCredential(_ credential: CloudProviderCredential) async throws {
+        _ = try await fetchRegions(credential: credential)
+    }
+
+    func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion] {
+        let response: AlibabaDescribeRegionsResponse = try await request(
+            credential: credential,
+            host: "ecs.aliyuncs.com",
+            action: "DescribeRegions",
+            queryItems: [
+                URLQueryItem(name: "AcceptLanguage", value: "en-US"),
+            ]
+        )
+        return response.regions?.region.map {
+            CloudRegion(id: $0.regionId, displayName: $0.localName ?? $0.regionId, available: true)
+        } ?? []
+    }
+
+    func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance] {
+        var pageNumber = 1
+        let pageSize = 100
+        var totalCount: Int?
+        var instances: [CloudProviderInstance] = []
+
+        repeat {
+            let response: AlibabaDescribeInstancesResponse = try await request(
+                credential: credential,
+                host: "ecs.\(regionId).aliyuncs.com",
+                action: "DescribeInstances",
+                queryItems: [
+                    URLQueryItem(name: "RegionId", value: regionId),
+                    URLQueryItem(name: "PageNumber", value: "\(pageNumber)"),
+                    URLQueryItem(name: "PageSize", value: "\(pageSize)"),
+                ]
+            )
+            let page = response.instances?.instance ?? []
+            instances.append(contentsOf: page.map { instance in
+                CloudProviderInstance(
+                    id: instance.instanceId,
+                    providerId: .alibabaCloud,
+                    regionId: regionId,
+                    displayName: instance.instanceName,
+                    publicIp: instance.publicIpAddress?.ipAddress?.first ?? instance.eipAddress?.ipAddress,
+                    privateIp: instance.vpcAttributes?.privateIpAddress?.ipAddress?.first ?? instance.innerIpAddress?.ipAddress?.first,
+                    status: instance.status,
+                    instanceType: instance.instanceType,
+                    zoneId: instance.zoneId,
+                    vpcId: instance.vpcAttributes?.vpcId,
+                    billingType: instance.instanceChargeType,
+                    expiredTime: instance.expiredTime.flatMap(Self.parseAlibabaDate),
+                    rawJSON: nil
+                )
+            })
+            totalCount = response.totalCount
+            pageNumber += 1
+        } while instances.count < (totalCount ?? 0)
+
+        return instances
+    }
+
+    func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudMetrics)
+    }
+
+    func fetchSecurityGroups(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String
+    ) async throws -> [CloudSecurityGroup] {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .securityGroups)
+    }
+
+    func fetchSecurityGroupPolicies(
+        credential: CloudProviderCredential,
+        group: CloudSecurityGroup,
+        capturedAt: Date
+    ) async throws -> CloudSecurityGroupPolicySnapshot {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .securityGroups)
+    }
+
+    func fetchDisks(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudDisk] {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudDisks)
+    }
+
+    func fetchSnapshots(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudSnapshot] {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudSnapshots)
+    }
+
+    func fetchBillingStates(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudBillingState] {
+        let instances = try await fetchInstances(credential: credential, regionId: regionId)
+        return instances.map { instance in
+            CloudBillingState(
+                id: UUID(),
+                accountId: accountId,
+                providerId: .alibabaCloud,
+                resourceType: "instance",
+                resourceId: instance.id,
+                billingType: instance.billingType,
+                expireAt: instance.expiredTime,
+                status: instance.status,
+                rawJSON: instance.rawJSON,
+                lastSyncedAt: capturedAt
+            )
+        }
+    }
+
+    private func request<Response: Decodable>(
+        credential: CloudProviderCredential,
+        host: String,
+        action: String,
+        queryItems: [URLQueryItem]
+    ) async throws -> Response {
+        let request = try signedRequest(credential: credential, host: host, action: action, queryItems: queryItems)
+        let (data, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
+            try await self.transport.send(request)
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw mapAlibabaHTTPError(data: data, statusCode: httpResponse.statusCode)
+        }
+        do {
+            return try decoder.decode(Response.self, from: data)
+        } catch {
+            throw CloudProviderError.providerFailure("Could not decode Alibaba Cloud response: \(error.localizedDescription)")
+        }
+    }
+
+    private func signedRequest(
+        credential: CloudProviderCredential,
+        host: String,
+        action: String,
+        queryItems: [URLQueryItem]
+    ) throws -> URLRequest {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = "/"
+        components.queryItems = queryItems
+        guard let url = components.url else {
+            throw CloudProviderError.providerFailure("Invalid Alibaba Cloud endpoint: \(host)")
+        }
+
+        let date = Self.acsDateString(now())
+        let hashedPayload = CloudSignature.sha256Hex(Data())
+        let signedHeaders = "host;x-acs-action;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;x-acs-version"
+        let headers: [(String, String)] = [
+            ("host", host),
+            ("x-acs-action", action),
+            ("x-acs-content-sha256", hashedPayload),
+            ("x-acs-date", date),
+            ("x-acs-signature-nonce", nonce()),
+            ("x-acs-version", "2014-05-26"),
+        ]
+        let canonicalHeaders = headers
+            .map { "\($0.0):\($0.1.trimmingCharacters(in: .whitespacesAndNewlines))\n" }
+            .joined()
+        let canonicalQuery = Self.canonicalQueryString(queryItems)
+        let canonicalRequest = [
+            "GET",
+            "/",
+            canonicalQuery,
+            canonicalHeaders,
+            signedHeaders,
+            hashedPayload,
+        ].joined(separator: "\n")
+        let stringToSign = "ACS3-HMAC-SHA256\n\(CloudSignature.sha256Hex(Data(canonicalRequest.utf8)))"
+        let signature = CloudSignature.hmacSHA256Hex(key: Data(credential.secretKey.utf8), data: Data(stringToSign.utf8))
+        let authorization = "ACS3-HMAC-SHA256 Credential=\(credential.secretId),SignedHeaders=\(signedHeaders),Signature=\(signature)"
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        for header in headers where header.0 != "host" {
+            request.setValue(header.1, forHTTPHeaderField: header.0)
+        }
+        request.setValue(host, forHTTPHeaderField: "Host")
+        return request
+    }
+
+    private func mapAlibabaHTTPError(data: Data, statusCode: Int) -> CloudProviderError {
+        if let error = try? decoder.decode(AlibabaErrorResponse.self, from: data) {
+            if error.code.contains("InvalidAccessKeyId") || error.code.contains("Signature") {
+                return .authenticationFailed(error.message ?? error.code)
+            }
+            if error.code.contains("Forbidden") || error.code.contains("Unauthorized") || error.code.contains("NoPermission") {
+                return .permissionDenied(error.message ?? error.code)
+            }
+            if error.code.contains("Throttling") || error.code.contains("LimitExceeded") {
+                return .rateLimited(error.message ?? error.code)
+            }
+            return .providerFailure("\(error.code): \(error.message ?? "HTTP \(statusCode)")")
+        }
+        return .networkFailure("HTTP \(statusCode)")
+    }
+
+    private static func canonicalQueryString(_ items: [URLQueryItem]) -> String {
+        var pairs: [(String, String)] = []
+        for item in items {
+            pairs.append((item.name, item.value ?? ""))
+        }
+        pairs.sort { left, right in
+            left.0 == right.0 ? left.1 < right.1 : left.0 < right.0
+        }
+        var encoded: [String] = []
+        for pair in pairs {
+            let name = CloudSignature.percentEncode(pair.0)
+            let value = CloudSignature.percentEncode(pair.1)
+            encoded.append("\(name)=\(value)")
+        }
+        return encoded.joined(separator: "&")
+    }
+
+    private static func acsDateString(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
+    private static func parseAlibabaDate(_ text: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: text)
+    }
+}
+
+protocol HuaweiCloudHTTPTransport: Sendable {
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+}
+
+final class URLSessionHuaweiCloudHTTPTransport: HuaweiCloudHTTPTransport, @unchecked Sendable {
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw CloudProviderError.networkFailure("Huawei Cloud returned a non-HTTP response.")
+        }
+        return (data, httpResponse)
+    }
+}
+
+final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
+    let providerId: CloudProviderID = .huaweiCloud
+    let displayName = "Huawei Cloud"
+    let capabilities: Set<CloudCapability> = [
+        .regions,
+        .instanceDiscovery,
+        .instanceMetadata,
+    ]
+
+    private let transport: HuaweiCloudHTTPTransport
+    private let now: @Sendable () -> Date
+    private let timeout: TimeInterval
+    private let decoder = JSONDecoder()
+
+    init(
+        transport: HuaweiCloudHTTPTransport = URLSessionHuaweiCloudHTTPTransport(),
+        now: @escaping @Sendable () -> Date = Date.init,
+        timeout: TimeInterval = 15
+    ) {
+        self.transport = transport
+        self.now = now
+        self.timeout = timeout
+    }
+
+    func validateCredential(_ credential: CloudProviderCredential) async throws {
+        _ = try await fetchRegions(credential: credential)
+    }
+
+    func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion] {
+        let response: HuaweiProjectsResponse = try await request(
+            credential: credential,
+            host: "iam.myhuaweicloud.com",
+            path: "/v3/projects",
+            queryItems: []
+        )
+        return response.projects.compactMap { project in
+            guard let name = project.name, let id = project.id else { return nil }
+            return CloudRegion(
+                id: Self.encodedRegionId(regionName: name, projectId: id),
+                displayName: name,
+                available: project.enabled ?? true
+            )
+        }
+        .sorted { $0.displayName < $1.displayName }
+    }
+
+    func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance] {
+        let region = Self.decodeRegionId(regionId)
+        var offset = 0
+        let limit = 100
+        var totalCount: Int?
+        var instances: [CloudProviderInstance] = []
+
+        repeat {
+            let response: HuaweiServersDetailResponse = try await request(
+                credential: credential,
+                host: "ecs.\(region.regionName).myhuaweicloud.com",
+                path: "/v1.1/\(CloudSignature.percentEncode(region.projectId))/cloudservers/detail",
+                queryItems: [
+                    URLQueryItem(name: "limit", value: "\(limit)"),
+                    URLQueryItem(name: "offset", value: "\(offset)"),
+                ]
+            )
+            instances.append(contentsOf: response.servers.map { server in
+                CloudProviderInstance(
+                    id: server.id,
+                    providerId: .huaweiCloud,
+                    regionId: region.regionName,
+                    displayName: server.name,
+                    publicIp: server.addresses?.firstAddress(type: "floating"),
+                    privateIp: server.addresses?.firstAddress(type: "fixed"),
+                    status: server.status ?? server.vmState,
+                    instanceType: server.flavor?.id,
+                    zoneId: server.availabilityZone,
+                    vpcId: nil,
+                    billingType: server.metadata?.chargingMode,
+                    expiredTime: nil,
+                    rawJSON: nil
+                )
+            })
+            totalCount = response.count
+            offset += response.servers.count
+        } while offset < (totalCount ?? 0) && offset > 0
+
+        return instances
+    }
+
+    func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudMetrics)
+    }
+
+    func fetchSecurityGroups(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String
+    ) async throws -> [CloudSecurityGroup] {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .securityGroups)
+    }
+
+    func fetchSecurityGroupPolicies(
+        credential: CloudProviderCredential,
+        group: CloudSecurityGroup,
+        capturedAt: Date
+    ) async throws -> CloudSecurityGroupPolicySnapshot {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .securityGroups)
+    }
+
+    func fetchDisks(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudDisk] {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudDisks)
+    }
+
+    func fetchSnapshots(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudSnapshot] {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudSnapshots)
+    }
+
+    func fetchBillingStates(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudBillingState] {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudBilling)
+    }
+
+    private func request<Response: Decodable>(
+        credential: CloudProviderCredential,
+        host: String,
+        path: String,
+        queryItems: [URLQueryItem]
+    ) async throws -> Response {
+        let request = try signedRequest(credential: credential, host: host, path: path, queryItems: queryItems)
+        let (data, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
+            try await self.transport.send(request)
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw mapHuaweiHTTPError(data: data, statusCode: httpResponse.statusCode)
+        }
+        do {
+            return try decoder.decode(Response.self, from: data)
+        } catch {
+            throw CloudProviderError.providerFailure("Could not decode Huawei Cloud response: \(error.localizedDescription)")
+        }
+    }
+
+    private func signedRequest(
+        credential: CloudProviderCredential,
+        host: String,
+        path: String,
+        queryItems: [URLQueryItem]
+    ) throws -> URLRequest {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = path
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else {
+            throw CloudProviderError.providerFailure("Invalid Huawei Cloud endpoint: \(host)\(path)")
+        }
+
+        let date = Self.sdkDateString(now())
+        let canonicalQuery = Self.canonicalQueryString(queryItems)
+        let canonicalURI = path.hasSuffix("/") ? path : "\(path)"
+        let signedHeaders = "host;x-sdk-date"
+        let canonicalHeaders = "host:\(host)\nx-sdk-date:\(date)\n"
+        let canonicalRequest = [
+            "GET",
+            canonicalURI,
+            canonicalQuery,
+            canonicalHeaders,
+            signedHeaders,
+            CloudSignature.sha256Hex(Data()),
+        ].joined(separator: "\n")
+        let stringToSign = [
+            "SDK-HMAC-SHA256",
+            date,
+            CloudSignature.sha256Hex(Data(canonicalRequest.utf8)),
+        ].joined(separator: "\n")
+        let signature = CloudSignature.hmacSHA256Hex(key: Data(credential.secretKey.utf8), data: Data(stringToSign.utf8))
+        let authorization = "SDK-HMAC-SHA256 Access=\(credential.secretId), SignedHeaders=\(signedHeaders), Signature=\(signature)"
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(host, forHTTPHeaderField: "Host")
+        request.setValue(date, forHTTPHeaderField: "X-Sdk-Date")
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    private func mapHuaweiHTTPError(data: Data, statusCode: Int) -> CloudProviderError {
+        if let error = try? decoder.decode(HuaweiErrorResponse.self, from: data) {
+            let code = error.errorCode ?? error.code ?? "HTTP \(statusCode)"
+            let message = error.errorMessage ?? error.message ?? code
+            if code.contains("APIGW.0301") || code.localizedCaseInsensitiveContains("auth") || code.localizedCaseInsensitiveContains("signature") {
+                return .authenticationFailed(message)
+            }
+            if statusCode == 403 || code.localizedCaseInsensitiveContains("forbidden") || code.localizedCaseInsensitiveContains("denied") {
+                return .permissionDenied(message)
+            }
+            if statusCode == 429 || code.localizedCaseInsensitiveContains("throttl") || code.localizedCaseInsensitiveContains("limit") {
+                return .rateLimited(message)
+            }
+            return .providerFailure("\(code): \(message)")
+        }
+        return .networkFailure("HTTP \(statusCode)")
+    }
+
+    private static func encodedRegionId(regionName: String, projectId: String) -> String {
+        "\(regionName)|\(projectId)"
+    }
+
+    private static func decodeRegionId(_ value: String) -> (regionName: String, projectId: String) {
+        let parts = value.split(separator: "|", maxSplits: 1).map(String.init)
+        if parts.count == 2 {
+            return (parts[0], parts[1])
+        }
+        return (value, value)
+    }
+
+    private static func canonicalQueryString(_ items: [URLQueryItem]) -> String {
+        var pairs: [(String, String)] = []
+        for item in items {
+            pairs.append((item.name, item.value ?? ""))
+        }
+        pairs.sort { left, right in
+            left.0 == right.0 ? left.1 < right.1 : left.0 < right.0
+        }
+        var encoded: [String] = []
+        for pair in pairs {
+            let name = CloudSignature.percentEncode(pair.0)
+            let value = CloudSignature.percentEncode(pair.1)
+            encoded.append("\(name)=\(value)")
+        }
+        return encoded.joined(separator: "&")
+    }
+
+    private static func sdkDateString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        return formatter.string(from: date)
+    }
+}
+
+private enum CloudSignature {
+    static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func hmacSHA256Hex(key: Data, data: Data) -> String {
+        let key = SymmetricKey(data: key)
+        return HMAC<SHA256>.authenticationCode(for: data, using: key)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    static func percentEncode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+}
+
+private struct AlibabaErrorResponse: Decodable {
+    var code: String
+    var message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case code = "Code"
+        case message = "Message"
+    }
+}
+
+private struct AlibabaDescribeRegionsResponse: Decodable {
+    var regions: AlibabaRegions?
+
+    enum CodingKeys: String, CodingKey {
+        case regions = "Regions"
+    }
+}
+
+private struct AlibabaRegions: Decodable {
+    var region: [AlibabaRegion]
+
+    enum CodingKeys: String, CodingKey {
+        case region = "Region"
+    }
+}
+
+private struct AlibabaRegion: Decodable {
+    var regionId: String
+    var localName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case regionId = "RegionId"
+        case localName = "LocalName"
+    }
+}
+
+private struct AlibabaDescribeInstancesResponse: Decodable {
+    var totalCount: Int?
+    var instances: AlibabaInstances?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCount = "TotalCount"
+        case instances = "Instances"
+    }
+}
+
+private struct AlibabaInstances: Decodable {
+    var instance: [AlibabaInstance]
+
+    enum CodingKeys: String, CodingKey {
+        case instance = "Instance"
+    }
+}
+
+private struct AlibabaInstance: Decodable {
+    var instanceId: String
+    var instanceName: String?
+    var status: String?
+    var instanceType: String?
+    var zoneId: String?
+    var instanceChargeType: String?
+    var expiredTime: String?
+    var publicIpAddress: AlibabaIPAddressSet?
+    var innerIpAddress: AlibabaIPAddressSet?
+    var eipAddress: AlibabaEIPAddress?
+    var vpcAttributes: AlibabaVpcAttributes?
+
+    enum CodingKeys: String, CodingKey {
+        case instanceId = "InstanceId"
+        case instanceName = "InstanceName"
+        case status = "Status"
+        case instanceType = "InstanceType"
+        case zoneId = "ZoneId"
+        case instanceChargeType = "InstanceChargeType"
+        case expiredTime = "ExpiredTime"
+        case publicIpAddress = "PublicIpAddress"
+        case innerIpAddress = "InnerIpAddress"
+        case eipAddress = "EipAddress"
+        case vpcAttributes = "VpcAttributes"
+    }
+}
+
+private struct AlibabaIPAddressSet: Decodable {
+    var ipAddress: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case ipAddress = "IpAddress"
+    }
+}
+
+private struct AlibabaEIPAddress: Decodable {
+    var ipAddress: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ipAddress = "IpAddress"
+    }
+}
+
+private struct AlibabaVpcAttributes: Decodable {
+    var vpcId: String?
+    var privateIpAddress: AlibabaIPAddressSet?
+
+    enum CodingKeys: String, CodingKey {
+        case vpcId = "VpcId"
+        case privateIpAddress = "PrivateIpAddress"
+    }
+}
+
+private struct HuaweiErrorResponse: Decodable {
+    var errorCode: String?
+    var errorMessage: String?
+    var code: String?
+    var message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case errorCode = "error_code"
+        case errorMessage = "error_msg"
+        case code
+        case message
+    }
+}
+
+private struct HuaweiProjectsResponse: Decodable {
+    var projects: [HuaweiProject]
+}
+
+private struct HuaweiProject: Decodable {
+    var id: String?
+    var name: String?
+    var enabled: Bool?
+}
+
+private struct HuaweiServersDetailResponse: Decodable {
+    var count: Int?
+    var servers: [HuaweiServer]
+}
+
+private struct HuaweiServer: Decodable {
+    var id: String
+    var name: String?
+    var status: String?
+    var vmState: String?
+    var addresses: HuaweiAddressMap?
+    var flavor: HuaweiFlavor?
+    var availabilityZone: String?
+    var metadata: HuaweiServerMetadata?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case status
+        case vmState = "OS-EXT-STS:vm_state"
+        case addresses
+        case flavor
+        case availabilityZone = "OS-EXT-AZ:availability_zone"
+        case metadata
+    }
+}
+
+private struct HuaweiAddressMap: Decodable {
+    var networks: [String: [HuaweiAddress]]
+
+    init(from decoder: Decoder) throws {
+        networks = try [String: [HuaweiAddress]](from: decoder)
+    }
+
+    func firstAddress(type: String) -> String? {
+        networks.values
+            .flatMap { $0 }
+            .first { $0.type?.localizedCaseInsensitiveCompare(type) == .orderedSame }?
+            .addr
+    }
+}
+
+private struct HuaweiAddress: Decodable {
+    var addr: String?
+    var type: String?
+
+    enum CodingKeys: String, CodingKey {
+        case addr
+        case type = "OS-EXT-IPS:type"
+    }
+}
+
+private struct HuaweiFlavor: Decodable {
+    var id: String?
+}
+
+private struct HuaweiServerMetadata: Decodable {
+    var chargingMode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case chargingMode = "charging_mode"
+    }
+}
+
 private struct TencentCloudEndpoint {
     var host: String
     var service: String

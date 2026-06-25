@@ -36,7 +36,11 @@ final class AppState: ObservableObject {
             let database = try AppDatabase.production()
             let repository = ServerRepository(database: database)
             let keychain = KeychainService()
-            let registry = CloudProviderRegistry(adapters: [TencentCloudAdapter()])
+            let registry = CloudProviderRegistry(adapters: [
+                TencentCloudAdapter(),
+                AlibabaCloudAdapter(),
+                HuaweiCloudAdapter(),
+            ])
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
@@ -77,7 +81,11 @@ final class AppState: ObservableObject {
             let database = try! AppDatabase.inMemory()
             let repository = ServerRepository(database: database)
             let keychain = KeychainService(serviceName: "me.hhc.HHCServerManager.fallback")
-            let registry = CloudProviderRegistry(adapters: [TencentCloudAdapter()])
+            let registry = CloudProviderRegistry(adapters: [
+                TencentCloudAdapter(),
+                AlibabaCloudAdapter(),
+                HuaweiCloudAdapter(),
+            ])
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)

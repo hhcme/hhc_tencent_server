@@ -2886,6 +2886,165 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testAlibabaCloudAdapterFetchRegionsAndInstancesUsesSignedECSAPI() async throws {
+        let transport = MockAlibabaCloudTransport(responses: [
+            """
+            {
+              "RequestId": "aliyun-regions",
+              "Regions": {
+                "Region": [
+                  {"RegionId": "cn-hangzhou", "LocalName": "China (Hangzhou)"},
+                  {"RegionId": "ap-southeast-1", "LocalName": "Singapore"}
+                ]
+              }
+            }
+            """,
+            """
+            {
+              "RequestId": "aliyun-instances-1",
+              "TotalCount": 2,
+              "Instances": {
+                "Instance": [
+                  {
+                    "InstanceId": "i-1",
+                    "InstanceName": "prod-a",
+                    "Status": "Running",
+                    "InstanceType": "ecs.g7.large",
+                    "ZoneId": "ap-southeast-1a",
+                    "InstanceChargeType": "PrePaid",
+                    "ExpiredTime": "2026-07-01T00:00Z",
+                    "PublicIpAddress": {"IpAddress": ["203.0.113.10"]},
+                    "VpcAttributes": {
+                      "VpcId": "vpc-1",
+                      "PrivateIpAddress": {"IpAddress": ["10.0.0.10"]}
+                    }
+                  }
+                ]
+              }
+            }
+            """,
+            """
+            {
+              "RequestId": "aliyun-instances-2",
+              "TotalCount": 2,
+              "Instances": {
+                "Instance": [
+                  {
+                    "InstanceId": "i-2",
+                    "InstanceName": "prod-b",
+                    "Status": "Stopped",
+                    "InstanceType": "ecs.g7.xlarge",
+                    "ZoneId": "ap-southeast-1b",
+                    "EipAddress": {"IpAddress": "198.51.100.20"},
+                    "VpcAttributes": {
+                      "VpcId": "vpc-2",
+                      "PrivateIpAddress": {"IpAddress": ["10.0.0.20"]}
+                    }
+                  }
+                ]
+              }
+            }
+            """,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) },
+            nonce: { "nonce-1" },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK")
+
+        let regions = try await adapter.fetchRegions(credential: credential)
+        let instances = try await adapter.fetchInstances(credential: credential, regionId: "ap-southeast-1")
+
+        XCTAssertEqual(regions.map(\.id), ["cn-hangzhou", "ap-southeast-1"])
+        XCTAssertEqual(instances.map(\.id), ["i-1", "i-2"])
+        XCTAssertEqual(instances[0].providerId, .alibabaCloud)
+        XCTAssertEqual(instances[0].publicIp, "203.0.113.10")
+        XCTAssertEqual(instances[0].privateIp, "10.0.0.10")
+        XCTAssertEqual(instances[0].vpcId, "vpc-1")
+        XCTAssertEqual(instances[0].billingType, "PrePaid")
+        XCTAssertEqual(instances[1].publicIp, "198.51.100.20")
+
+        XCTAssertEqual(transport.requests.count, 3)
+        XCTAssertEqual(transport.requests[0].url?.host, "ecs.aliyuncs.com")
+        XCTAssertEqual(transport.requests[0].queryValue("Action"), nil)
+        XCTAssertEqual(transport.requests[0].queryValue("Version"), nil)
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-action"), "DescribeRegions")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-version"), "2014-05-26")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-signature-nonce"), "nonce-1")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("ACS3-HMAC-SHA256 Credential=ALIYUNAK") == true)
+        XCTAssertEqual(transport.requests[1].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[1].queryValue("RegionId"), "ap-southeast-1")
+        XCTAssertEqual(transport.requests[1].queryValue("PageNumber"), "1")
+        XCTAssertEqual(transport.requests[2].queryValue("PageNumber"), "2")
+    }
+
+    func testHuaweiCloudAdapterFetchRegionsAndInstancesUsesSignedECSAPI() async throws {
+        let transport = MockHuaweiCloudTransport(responses: [
+            """
+            {
+              "projects": [
+                {"id": "project-1", "name": "ap-southeast-1", "enabled": true},
+                {"id": "project-2", "name": "ap-southeast-2", "enabled": false}
+              ]
+            }
+            """,
+            """
+            {
+              "count": 1,
+              "servers": [
+                {
+                  "id": "server-1",
+                  "name": "prod-hw",
+                  "status": "ACTIVE",
+                  "OS-EXT-STS:vm_state": "active",
+                  "OS-EXT-AZ:availability_zone": "ap-southeast-1a",
+                  "flavor": {"id": "s6.large.2"},
+                  "metadata": {"charging_mode": "prePaid"},
+                  "addresses": {
+                    "net-a": [
+                      {"addr": "10.0.1.5", "OS-EXT-IPS:type": "fixed"},
+                      {"addr": "203.0.113.55", "OS-EXT-IPS:type": "floating"}
+                    ]
+                  }
+                }
+              ]
+            }
+            """,
+        ])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        let regions = try await adapter.fetchRegions(credential: credential)
+        let instances = try await adapter.fetchInstances(credential: credential, regionId: regions[0].id)
+
+        XCTAssertEqual(regions[0].displayName, "ap-southeast-1")
+        XCTAssertEqual(regions[0].id, "ap-southeast-1|project-1")
+        XCTAssertEqual(instances.map(\.id), ["server-1"])
+        XCTAssertEqual(instances[0].providerId, .huaweiCloud)
+        XCTAssertEqual(instances[0].regionId, "ap-southeast-1")
+        XCTAssertEqual(instances[0].publicIp, "203.0.113.55")
+        XCTAssertEqual(instances[0].privateIp, "10.0.1.5")
+        XCTAssertEqual(instances[0].instanceType, "s6.large.2")
+        XCTAssertEqual(instances[0].zoneId, "ap-southeast-1a")
+        XCTAssertEqual(instances[0].billingType, "prePaid")
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "iam.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[0].url?.path, "/v3/projects")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-Sdk-Date"), "20231114T221320Z")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("SDK-HMAC-SHA256 Access=HUAWEIAK") == true)
+        XCTAssertEqual(transport.requests[1].url?.host, "ecs.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[1].url?.path, "/v1.1/project-1/cloudservers/detail")
+        XCTAssertEqual(transport.requests[1].queryValue("limit"), "100")
+        XCTAssertEqual(transport.requests[1].queryValue("offset"), "0")
+    }
+
     private final class Harness {
         let repository: ServerRepository
         let keychain: KeychainService
@@ -3645,9 +3804,59 @@ private final class MockTencentCloudTransport: TencentCloudHTTPTransport, @unche
     }
 }
 
+private final class MockAlibabaCloudTransport: AlibabaCloudHTTPTransport, @unchecked Sendable {
+    private var responses: [String]
+    private(set) var requests: [URLRequest] = []
+
+    init(responses: [String]) {
+        self.responses = responses
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let body = responses.isEmpty ? #"{"RequestId":"empty"}"# : responses.removeFirst()
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: [:]
+        )!
+        return (Data(body.utf8), response)
+    }
+}
+
+private final class MockHuaweiCloudTransport: HuaweiCloudHTTPTransport, @unchecked Sendable {
+    private var responses: [String]
+    private(set) var requests: [URLRequest] = []
+
+    init(responses: [String]) {
+        self.responses = responses
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let body = responses.isEmpty ? #"{"servers":[]}"# : responses.removeFirst()
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: [:]
+        )!
+        return (Data(body.utf8), response)
+    }
+}
+
 private extension URLRequest {
     var jsonBody: [String: Any]? {
         guard let httpBody else { return nil }
         return try? JSONSerialization.jsonObject(with: httpBody) as? [String: Any]
+    }
+
+    func queryValue(_ name: String) -> String? {
+        guard let url else { return nil }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first { $0.name == name }?
+            .value
     }
 }
