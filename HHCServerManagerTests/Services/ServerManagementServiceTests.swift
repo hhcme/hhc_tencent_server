@@ -3481,6 +3481,88 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].queryValue("PageNumber"), "2")
     }
 
+    func testAlibabaCloudAdapterFetchesSnapshotsUsesSignedECSAPI() async throws {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockAlibabaCloudTransport(responses: [
+            """
+            {
+              "RequestId": "aliyun-snapshots-1",
+              "TotalCount": 2,
+              "Snapshots": {
+                "Snapshot": [
+                  {
+                    "SnapshotId": "s-1",
+                    "SnapshotName": "before-upgrade",
+                    "Status": "accomplished",
+                    "SourceDiskId": "d-1",
+                    "SourceDiskSize": 80,
+                    "CreationTime": "2026-07-01T00:00:00Z"
+                  }
+                ]
+              }
+            }
+            """,
+            """
+            {
+              "RequestId": "aliyun-snapshots-2",
+              "TotalCount": 2,
+              "Snapshots": {
+                "Snapshot": [
+                  {
+                    "SnapshotId": "s-2",
+                    "SnapshotName": "manual-backup",
+                    "Status": "progressing",
+                    "DiskId": "d-2",
+                    "Size": 200,
+                    "CreateTime": "2026-07-02T00:00:00Z"
+                  }
+                ]
+              }
+            }
+            """,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            nonce: { "nonce-snapshot" },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK")
+
+        let snapshots = try await adapter.fetchSnapshots(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-southeast-1",
+            capturedAt: capturedAt
+        )
+
+        XCTAssertEqual(snapshots.map(\.snapshotId), ["s-1", "s-2"])
+        XCTAssertEqual(snapshots[0].accountId, accountId)
+        XCTAssertEqual(snapshots[0].providerId, .alibabaCloud)
+        XCTAssertEqual(snapshots[0].regionId, "ap-southeast-1")
+        XCTAssertEqual(snapshots[0].diskId, "d-1")
+        XCTAssertEqual(snapshots[0].name, "before-upgrade")
+        XCTAssertEqual(snapshots[0].status, "accomplished")
+        XCTAssertEqual(snapshots[0].sizeGB, 80)
+        XCTAssertNotNil(snapshots[0].createdAtProvider)
+        XCTAssertEqual(snapshots[0].lastSyncedAt, capturedAt)
+        XCTAssertEqual(snapshots[1].diskId, "d-2")
+        XCTAssertEqual(snapshots[1].sizeGB, 200)
+        XCTAssertNotNil(snapshots[1].createdAtProvider)
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-action"), "DescribeSnapshots")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-version"), "2014-05-26")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-signature-nonce"), "nonce-snapshot")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("ACS3-HMAC-SHA256 Credential=ALIYUNAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("RegionId"), "ap-southeast-1")
+        XCTAssertEqual(transport.requests[0].queryValue("PageNumber"), "1")
+        XCTAssertEqual(transport.requests[0].queryValue("PageSize"), "100")
+        XCTAssertEqual(transport.requests[1].queryValue("PageNumber"), "2")
+    }
+
     func testHuaweiCloudAdapterFetchRegionsAndInstancesUsesSignedECSAPI() async throws {
         let transport = MockHuaweiCloudTransport(responses: [
             """

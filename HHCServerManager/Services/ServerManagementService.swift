@@ -5927,6 +5927,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .instanceDiscovery,
         .instanceMetadata,
         .cloudDisks,
+        .cloudSnapshots,
         .cloudBilling,
     ]
 
@@ -6085,7 +6086,47 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         capturedAt: Date
     ) async throws -> [CloudSnapshot] {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudSnapshots)
+        var pageNumber = 1
+        let pageSize = 100
+        var totalCount: Int?
+        var snapshots: [CloudSnapshot] = []
+
+        repeat {
+            let response: AlibabaDescribeSnapshotsResponse = try await request(
+                credential: credential,
+                host: "ecs.\(regionId).aliyuncs.com",
+                action: "DescribeSnapshots",
+                queryItems: [
+                    URLQueryItem(name: "RegionId", value: regionId),
+                    URLQueryItem(name: "PageNumber", value: "\(pageNumber)"),
+                    URLQueryItem(name: "PageSize", value: "\(pageSize)"),
+                ]
+            )
+            let page = response.snapshots?.snapshot ?? []
+            guard !page.isEmpty else {
+                break
+            }
+            snapshots.append(contentsOf: page.map { snapshot in
+                CloudSnapshot(
+                    id: UUID(),
+                    accountId: accountId,
+                    providerId: .alibabaCloud,
+                    regionId: regionId,
+                    snapshotId: snapshot.snapshotId,
+                    diskId: snapshot.sourceDiskId ?? snapshot.diskId,
+                    name: snapshot.snapshotName,
+                    status: snapshot.status,
+                    sizeGB: snapshot.sourceDiskSize ?? snapshot.size,
+                    createdAtProvider: (snapshot.creationTime ?? snapshot.createTime).flatMap(Self.parseAlibabaDate),
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                )
+            })
+            totalCount = response.totalCount
+            pageNumber += 1
+        } while snapshots.count < (totalCount ?? 0)
+
+        return snapshots
     }
 
     func fetchBillingStates(
@@ -6767,6 +6808,48 @@ private struct AlibabaDisk: Decodable {
         case instanceId = "InstanceId"
         case diskChargeType = "DiskChargeType"
         case expiredTime = "ExpiredTime"
+    }
+}
+
+private struct AlibabaDescribeSnapshotsResponse: Decodable {
+    var totalCount: Int?
+    var snapshots: AlibabaSnapshots?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCount = "TotalCount"
+        case snapshots = "Snapshots"
+    }
+}
+
+private struct AlibabaSnapshots: Decodable {
+    var snapshot: [AlibabaSnapshot]
+
+    enum CodingKeys: String, CodingKey {
+        case snapshot = "Snapshot"
+    }
+}
+
+private struct AlibabaSnapshot: Decodable {
+    var snapshotId: String
+    var snapshotName: String?
+    var status: String?
+    var sourceDiskId: String?
+    var diskId: String?
+    var sourceDiskSize: Int?
+    var size: Int?
+    var creationTime: String?
+    var createTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case snapshotId = "SnapshotId"
+        case snapshotName = "SnapshotName"
+        case status = "Status"
+        case sourceDiskId = "SourceDiskId"
+        case diskId = "DiskId"
+        case sourceDiskSize = "SourceDiskSize"
+        case size = "Size"
+        case creationTime = "CreationTime"
+        case createTime = "CreateTime"
     }
 }
 
