@@ -5,6 +5,7 @@ using HHCServerManager.Windows.Domain.Security;
 using HHCServerManager.Windows.Domain.Servers;
 using HHCServerManager.Windows.Domain.Ssh;
 using HHCServerManager.Windows.Infrastructure.Credentials;
+using HHCServerManager.Windows.Infrastructure.Ssh;
 using HHCServerManager.Windows.Infrastructure.Storage;
 
 namespace HHCServerManager.Windows.Tests;
@@ -409,6 +410,86 @@ public sealed class WindowsPhase8CoreTests
         Assert.False(viewModel.CanConfirmHostKey);
     }
 
+    [Fact]
+    public async Task RealWindowsSshSmokeTestWhenEnvironmentIsConfigured()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var config = WindowsSshIntegrationConfig.TryLoad();
+        if (config is null)
+        {
+            return;
+        }
+
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hhc-windows-real-ssh-{Guid.NewGuid():N}.sqlite");
+        var connectionString = $"Data Source={databasePath};Pooling=False";
+        var credentialPrefix = $"HHCServerManager.Windows.Tests/{Guid.NewGuid():N}";
+
+        try
+        {
+            await using var hostKeys = new SqliteHostKeyTrustStore(connectionString);
+            await using var repository = new SqliteServerRepository(connectionString);
+            var credentials = new WindowsCredentialStore(credentialPrefix);
+            var service = new ServerManagementService(repository, hostKeys, credentials);
+            var ssh = new SshNetClient();
+            var viewModel = new MainWindowViewModel(repository, service, ssh);
+
+            if (config.Credential is CredentialInput.Password password)
+            {
+                await viewModel.AddPasswordServerAsync(
+                    "Windows Real SSH",
+                    config.Host,
+                    config.Port,
+                    config.Username,
+                    password.Value,
+                    "integration");
+            }
+            else if (config.Credential is CredentialInput.PrivateKey privateKey)
+            {
+                await viewModel.AddPrivateKeyServerAsync(
+                    "Windows Real SSH",
+                    config.Host,
+                    config.Port,
+                    config.Username,
+                    System.Text.Encoding.UTF8.GetString(privateKey.Data),
+                    privateKey.Passphrase,
+                    "integration");
+            }
+
+            var profile = Assert.Single(viewModel.Servers);
+            Assert.Equal("Windows Real SSH", profile.Name);
+            Assert.NotNull(await credentials.ReadAsync(profile.CredentialRef));
+
+            await viewModel.ConnectAsync();
+            Assert.Equal(WindowsConnectionState.AwaitingHostKeyTrust, viewModel.ConnectionState);
+            Assert.True(viewModel.CanConfirmHostKey);
+            Assert.Contains("SHA256:", viewModel.HostKeyTrustMessage);
+
+            await viewModel.TrustPendingHostKeyAndConnectAsync();
+            await viewModel.RunSmokeTestAsync();
+
+            Assert.Equal(WindowsConnectionState.Connected, viewModel.ConnectionState);
+            Assert.Equal("hhc-ssh-ok", viewModel.CommandOutput);
+            Assert.Equal("Smoke test succeeded.", viewModel.StatusMessage);
+            Assert.NotNull(await hostKeys.FindAsync(profile.Id, profile.Endpoint));
+
+            await viewModel.DeleteSelectedServerAsync();
+            Assert.Null(await repository.FindAsync(profile.Id));
+            Assert.Null(await hostKeys.FindAsync(profile.Id, profile.Endpoint));
+            Assert.Null(await credentials.ReadAsync(profile.CredentialRef));
+        }
+        finally
+        {
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+        }
+    }
+
     private sealed class FakeWindowsSshClient(SshHostKey hostKey, CommandResult result) : IWindowsSshClient
     {
         public SshHostKey HostKey { get; } = hostKey;
@@ -425,5 +506,66 @@ public sealed class WindowsPhase8CoreTests
             string command,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(result with { Command = command });
+    }
+
+    private sealed record WindowsSshIntegrationConfig(
+        string Host,
+        int Port,
+        string Username,
+        CredentialInput Credential)
+    {
+        public static WindowsSshIntegrationConfig? TryLoad()
+        {
+            if (!IsEnabled("HHC_WINDOWS_TEST_SSH_REAL"))
+            {
+                return null;
+            }
+
+            var host = Environment.GetEnvironmentVariable("HHC_WINDOWS_TEST_SSH_HOST");
+            var username = Environment.GetEnvironmentVariable("HHC_WINDOWS_TEST_SSH_USER");
+            if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(username))
+            {
+                return null;
+            }
+
+            var portText = Environment.GetEnvironmentVariable("HHC_WINDOWS_TEST_SSH_PORT");
+            var port = int.TryParse(portText, out var parsedPort) ? parsedPort : 22;
+            if (port is < 1 or > 65535)
+            {
+                return null;
+            }
+
+            var password = Environment.GetEnvironmentVariable("HHC_WINDOWS_TEST_SSH_PASSWORD");
+            if (!string.IsNullOrEmpty(password))
+            {
+                return new WindowsSshIntegrationConfig(
+                    host.Trim(),
+                    port,
+                    username.Trim(),
+                    new CredentialInput.Password(password));
+            }
+
+            var privateKeyPath = Environment.GetEnvironmentVariable("HHC_WINDOWS_TEST_SSH_PRIVATE_KEY");
+            if (string.IsNullOrWhiteSpace(privateKeyPath) || !File.Exists(privateKeyPath))
+            {
+                return null;
+            }
+
+            var privateKey = File.ReadAllBytes(privateKeyPath);
+            var passphrase = Environment.GetEnvironmentVariable("HHC_WINDOWS_TEST_SSH_PASSPHRASE");
+            return new WindowsSshIntegrationConfig(
+                host.Trim(),
+                port,
+                username.Trim(),
+                new CredentialInput.PrivateKey(privateKey, string.IsNullOrEmpty(passphrase) ? null : passphrase));
+        }
+
+        private static bool IsEnabled(string name)
+        {
+            var value = Environment.GetEnvironmentVariable(name);
+            return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
+        }
     }
 }

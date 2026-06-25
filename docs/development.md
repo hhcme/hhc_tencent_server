@@ -121,6 +121,24 @@ export HHC_TEST_SSH_PRIVATE_KEY="$HOME/.ssh/id_ed25519"
 export HHC_TEST_SSH_PASSPHRASE=""
 ```
 
+Windows Phase 8 的真实 SSH 集成测试使用独立的环境变量，并且只在 Windows 上显式启用时运行。它会创建临时 SQLite 文件、使用 Windows Credential Manager 保存凭据、通过 SSH.NET 扫描 host key、确认 trust、执行 `printf hhc-ssh-ok`，最后删除 server profile 并验证 Credential Manager 和 trusted host key 都被清理：
+
+```powershell
+$env:HHC_WINDOWS_TEST_SSH_REAL = "1"
+$env:HHC_WINDOWS_TEST_SSH_HOST = "example.com"
+$env:HHC_WINDOWS_TEST_SSH_PORT = "22"
+$env:HHC_WINDOWS_TEST_SSH_USER = "root"
+$env:HHC_WINDOWS_TEST_SSH_PRIVATE_KEY = "$HOME\.ssh\id_ed25519"
+$env:HHC_WINDOWS_TEST_SSH_PASSPHRASE = ""
+```
+
+也可以改用密码认证：
+
+```powershell
+$env:HHC_WINDOWS_TEST_SSH_REAL = "1"
+$env:HHC_WINDOWS_TEST_SSH_PASSWORD = "<password from local secret store>"
+```
+
 Verdaccio 真实 lifecycle 集成测试默认跳过。确认目标服务器允许创建临时 systemd service、system user、`/srv/hhc-verdaccio-*` 目录，并已安装 Node.js、npm 和 `htpasswd` 后再显式启用：
 
 ```sh

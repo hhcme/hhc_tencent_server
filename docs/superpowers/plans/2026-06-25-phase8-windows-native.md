@@ -107,8 +107,8 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] 验证 .NET 版本：本地使用 .NET SDK 10.0.301 完成核心层编译和测试。
 - [ ] 验证 MSIX 打包：保留 MSIX manifest 骨架，待 Windows/Visual Studio 环境完成 logo、证书和安装验证。
 - [x] 验证 SQLite 方案：`Microsoft.Data.Sqlite` repository/store 测试通过。
-- [x] 验证 Credential Manager / DPAPI 凭据保存边界：已实现 Win32 `CredWrite/CredRead/CredDelete` adapter，并通过非 Windows 平台保护测试；真实 Windows 凭据读写待 Windows 主机补验。
-- [x] 验证 SSH.NET 对密码、私钥、host key verification 的支持边界：已实现 SSH.NET adapter、host key 扫描和命令执行边界；真实 SSH 登录、ED25519/passphrase 组合待 Windows 主机补验。
+- [x] 验证 Credential Manager / DPAPI 凭据保存边界：已实现 Win32 `CredWrite/CredRead/CredDelete` adapter，并通过非 Windows 平台保护测试；已加入 Windows-only 真实集成测试入口，真实 Windows 凭据读写待 Windows 主机补验。
+- [x] 验证 SSH.NET 对密码、私钥、host key verification 的支持边界：已实现 SSH.NET adapter、host key 扫描和命令执行边界；已加入 Windows-only 真实 SSH smoke 测试入口，真实 SSH 登录、ED25519/passphrase 组合待 Windows 主机补验。
 
 ### Task 2：项目骨架
 
@@ -131,8 +131,8 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] 实现 host key 首次确认的应用层判断。
 - [x] 实现 host key mismatch 阻断的应用层判断。
 - [x] 实现密码认证 adapter。
-- [x] 实现私钥认证 adapter；真实 Windows 主机上的私钥/passphrase 组合待验收。
-- [x] 实现 `printf hhc-ssh-ok` smoke test 编排；真实服务器执行待 Windows 主机验收。
+- [x] 实现私钥认证 adapter；已提供 Windows-only 真实私钥/passphrase 测试入口，真实 Windows 主机上的私钥/passphrase 组合待验收。
+- [x] 实现 `printf hhc-ssh-ok` smoke test 编排；已提供 Windows-only 真实服务器执行测试入口，真实执行待 Windows 主机验收。
 
 ### Task 5：Windows UI
 
@@ -155,7 +155,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] Windows 添加私钥服务器 ViewModel 测试：覆盖私钥/passphrase 进入 Credential Store、profile 记录为 `PrivateKey`、SQLite 不保存私钥材料、空私钥拒绝。
 - [x] Windows 编辑服务器测试：覆盖 profile 更新、保留/替换凭据、认证类型切换必须提供新凭据、host/port 变化清理旧 trusted host key、ViewModel 替换当前选中服务器。
 - [x] GitHub Actions Windows core tests：Windows runner 运行 `scripts/ci-windows-core.ps1`，覆盖不依赖 WinUI/XAML 编译器的核心层。
-- [ ] 可选真实 SSH 集成测试。
+- [x] 可选真实 SSH 集成测试：`RealWindowsSshSmokeTestWhenEnvironmentIsConfigured` 默认跳过，Windows 主机设置 `HHC_WINDOWS_TEST_SSH_REAL=1` 和 SSH 环境变量后会覆盖 Credential Manager、SSH.NET host key scan、trust、`printf hhc-ssh-ok`、删除清理。
 
 ### Task 7：手动验收
 
