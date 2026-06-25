@@ -534,7 +534,7 @@ final class CloudInstanceSyncService: @unchecked Sendable {
                 try await adapter.startInstance(credential: credential, regionId: regionId, instanceId: instanceId)
             },
             action: "start_instance",
-            allowedStatuses: ["STOPPED"],
+            powerAction: .start,
             transitionStatus: "STARTING"
         )
     }
@@ -554,7 +554,7 @@ final class CloudInstanceSyncService: @unchecked Sendable {
                 try await adapter.stopInstance(credential: credential, regionId: regionId, instanceId: instanceId)
             },
             action: "stop_instance",
-            allowedStatuses: ["RUNNING"],
+            powerAction: .stop,
             transitionStatus: "STOPPING"
         )
     }
@@ -574,7 +574,7 @@ final class CloudInstanceSyncService: @unchecked Sendable {
                 try await adapter.rebootInstance(credential: credential, regionId: regionId, instanceId: instanceId)
             },
             action: "reboot_instance",
-            allowedStatuses: ["RUNNING"],
+            powerAction: .reboot,
             transitionStatus: "REBOOTING"
         )
     }
@@ -719,13 +719,17 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         currentStatus: String?,
         adapterAction: (any CloudProviderAdapter, CloudProviderCredential) async throws -> Void,
         action: String,
-        allowedStatuses: Set<String>,
+        powerAction: InstancePowerAction,
         transitionStatus: String
     ) async throws {
         guard account.enabled else {
             throw CloudProviderError.providerFailure("Cloud account is disabled.")
         }
-        if let currentStatus, !allowedStatuses.contains(currentStatus.uppercased()) {
+        if let currentStatus, !Self.canPerformInstancePowerAction(
+            providerId: account.providerId,
+            action: powerAction,
+            status: currentStatus
+        ) {
             throw CloudProviderError.providerFailure("Instance status \(currentStatus) is not valid for \(action).")
         }
         try registry.require(.powerActions, providerId: account.providerId)
@@ -764,6 +768,36 @@ final class CloudInstanceSyncService: @unchecked Sendable {
                 createdAt: capturedAt
             )
             throw error
+        }
+    }
+
+    private enum InstancePowerAction {
+        case start
+        case stop
+        case reboot
+    }
+
+    private static func canPerformInstancePowerAction(
+        providerId: CloudProviderID,
+        action: InstancePowerAction,
+        status: String
+    ) -> Bool {
+        let normalizedStatus = status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch action {
+        case .start:
+            switch providerId {
+            case .tencentCloud, .alibabaCloud:
+                return normalizedStatus == "STOPPED"
+            case .huaweiCloud:
+                return normalizedStatus == "SHUTOFF" || normalizedStatus == "STOPPED"
+            }
+        case .stop, .reboot:
+            switch providerId {
+            case .tencentCloud, .alibabaCloud:
+                return normalizedStatus == "RUNNING"
+            case .huaweiCloud:
+                return normalizedStatus == "ACTIVE" || normalizedStatus == "RUNNING"
+            }
         }
     }
 
@@ -6552,6 +6586,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .securityGroups,
         .snapshotActions,
         .diskAttachmentActions,
+        .powerActions,
     ]
 
     private let transport: HuaweiCloudHTTPTransport
@@ -6928,7 +6963,12 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         instanceId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+        let payload = HuaweiServerStartPayload(
+            start: HuaweiServerStartPayload.Start(
+                servers: [HuaweiServerActionServer(id: instanceId)]
+            )
+        )
+        try await performInstanceAction(credential: credential, regionId: regionId, payload: payload)
     }
 
     func stopInstance(
@@ -6936,7 +6976,13 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         instanceId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+        let payload = HuaweiServerStopPayload(
+            stop: HuaweiServerStopPayload.Stop(
+                type: "SOFT",
+                servers: [HuaweiServerActionServer(id: instanceId)]
+            )
+        )
+        try await performInstanceAction(credential: credential, regionId: regionId, payload: payload)
     }
 
     func rebootInstance(
@@ -6944,7 +6990,29 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         instanceId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+        let payload = HuaweiServerRebootPayload(
+            reboot: HuaweiServerRebootPayload.Reboot(
+                type: "SOFT",
+                servers: [HuaweiServerActionServer(id: instanceId)]
+            )
+        )
+        try await performInstanceAction(credential: credential, regionId: regionId, payload: payload)
+    }
+
+    private func performInstanceAction<Payload: Encodable>(
+        credential: CloudProviderCredential,
+        regionId: String,
+        payload: Payload
+    ) async throws {
+        let region = Self.decodeRegionId(regionId)
+        try await requestWithoutResponse(
+            credential: credential,
+            host: "ecs.\(region.regionName).myhuaweicloud.com",
+            path: "/v1/\(CloudSignature.percentEncode(region.projectId))/cloudservers/action",
+            queryItems: [],
+            method: "POST",
+            body: try encoder.encode(payload)
+        )
     }
 
     private func request<Response: Decodable>(
@@ -7574,6 +7642,44 @@ private struct HuaweiVolumeDetachPayload: Encodable {
         enum CodingKeys: String, CodingKey {
             case attachmentId = "attachment_id"
         }
+    }
+}
+
+private struct HuaweiServerActionServer: Encodable {
+    var id: String
+}
+
+private struct HuaweiServerStartPayload: Encodable {
+    var start: Start
+
+    enum CodingKeys: String, CodingKey {
+        case start = "os-start"
+    }
+
+    struct Start: Encodable {
+        var servers: [HuaweiServerActionServer]
+    }
+}
+
+private struct HuaweiServerStopPayload: Encodable {
+    var stop: Stop
+
+    enum CodingKeys: String, CodingKey {
+        case stop = "os-stop"
+    }
+
+    struct Stop: Encodable {
+        var type: String
+        var servers: [HuaweiServerActionServer]
+    }
+}
+
+private struct HuaweiServerRebootPayload: Encodable {
+    var reboot: Reboot
+
+    struct Reboot: Encodable {
+        var type: String
+        var servers: [HuaweiServerActionServer]
     }
 }
 

@@ -2834,6 +2834,88 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(logs.first { $0.action == "stop_instance" }?.status, "success")
     }
 
+    func testCloudInstancePowerActionsAllowHuaweiStatuses() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .huaweiCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .powerActions]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_530)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .huaweiCloud,
+            displayName: "Huawei",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        var link = CloudInstanceLink(
+            id: UUID(),
+            serverId: nil,
+            accountId: account.id,
+            providerId: .huaweiCloud,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-power",
+            displayName: "prod",
+            publicIp: "203.0.113.13",
+            privateIp: "10.0.0.13",
+            status: "SHUTOFF",
+            instanceType: "s6.large.2",
+            zoneId: "ap-southeast-1a",
+            vpcId: nil,
+            rawJSON: nil,
+            lastSyncedAt: nil
+        )
+        try harness.repository.upsertCloudInstanceLink(link)
+
+        try await harness.cloudInstanceSyncService.startInstance(
+            account: account,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-power",
+            currentStatus: "SHUTOFF"
+        )
+
+        var storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-power"
+        )
+        XCTAssertEqual(storedLink.status, "STARTING")
+        XCTAssertEqual(storedLink.lastSyncedAt, capturedAt)
+
+        link.status = "ACTIVE"
+        try harness.repository.upsertCloudInstanceLink(link)
+        try await harness.cloudInstanceSyncService.rebootInstance(
+            account: account,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-power",
+            currentStatus: "ACTIVE"
+        )
+        storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-power"
+        )
+        XCTAssertEqual(storedLink.status, "REBOOTING")
+
+        link.status = "ACTIVE"
+        try harness.repository.upsertCloudInstanceLink(link)
+        try await harness.cloudInstanceSyncService.stopInstance(
+            account: account,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-power",
+            currentStatus: "ACTIVE"
+        )
+        storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-power"
+        )
+        XCTAssertEqual(storedLink.status, "STOPPING")
+        let logs = try harness.repository.fetchRemoteChangeLogs()
+        XCTAssertEqual(logs.first { $0.action == "start_instance" }?.providerId, .huaweiCloud)
+        XCTAssertEqual(logs.first { $0.action == "start_instance" }?.status, "success")
+        XCTAssertEqual(logs.first { $0.action == "reboot_instance" }?.status, "success")
+        XCTAssertEqual(logs.first { $0.action == "stop_instance" }?.status, "success")
+    }
+
     func testCloudInstanceSyncCreatesServerFromInstanceAndLinksIt() throws {
         let harness = try Harness()
         let account = try harness.cloudAccountService.createAccount(
@@ -4470,6 +4552,56 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].url?.path, "/v2/project-1/volumes/vol-1/action")
         let detachBody = try XCTUnwrap(transport.requests[1].jsonBody?["os-detach"] as? [String: Any])
         XCTAssertNil(detachBody["attachment_id"])
+    }
+
+    func testHuaweiCloudAdapterRunsInstancePowerActionsUsesSignedECSAPI() async throws {
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockHuaweiCloudTransport(responses: ["{}", "", "{}"])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        try await adapter.startInstance(
+            credential: credential,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-1"
+        )
+        try await adapter.stopInstance(
+            credential: credential,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-1"
+        )
+        try await adapter.rebootInstance(
+            credential: credential,
+            regionId: "ap-southeast-1|project-1",
+            instanceId: "server-1"
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.powerActions))
+        XCTAssertEqual(transport.requests.count, 3)
+        for request in transport.requests {
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.host, "ecs.ap-southeast-1.myhuaweicloud.com")
+            XCTAssertEqual(request.url?.path, "/v1/project-1/cloudservers/action")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Sdk-Date"), "20231114T221320Z")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertTrue(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("SDK-HMAC-SHA256 Access=HUAWEIAK") == true)
+        }
+
+        let startBody = try XCTUnwrap(transport.requests[0].jsonBody?["os-start"] as? [String: Any])
+        let startServers = try XCTUnwrap(startBody["servers"] as? [[String: Any]])
+        XCTAssertEqual(startServers.first?["id"] as? String, "server-1")
+        let stopBody = try XCTUnwrap(transport.requests[1].jsonBody?["os-stop"] as? [String: Any])
+        XCTAssertEqual(stopBody["type"] as? String, "SOFT")
+        let stopServers = try XCTUnwrap(stopBody["servers"] as? [[String: Any]])
+        XCTAssertEqual(stopServers.first?["id"] as? String, "server-1")
+        let rebootBody = try XCTUnwrap(transport.requests[2].jsonBody?["reboot"] as? [String: Any])
+        XCTAssertEqual(rebootBody["type"] as? String, "SOFT")
+        let rebootServers = try XCTUnwrap(rebootBody["servers"] as? [[String: Any]])
+        XCTAssertEqual(rebootServers.first?["id"] as? String, "server-1")
     }
 
     func testHuaweiCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedVPCAPI() async throws {

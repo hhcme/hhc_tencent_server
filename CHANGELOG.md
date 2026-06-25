@@ -105,6 +105,7 @@ All notable changes to this project will be documented in this file.
 - Added Alibaba Cloud ECS snapshot create/delete actions with provider-aware delete status gating, local cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Tencent Cloud CBS disk attach/detach actions with status gating, risk confirmation, local transition cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Tencent Cloud CVM start/stop/reboot actions with status gating, risk confirmation, local transition cache updates, remote change audit logs, and fixture-backed API tests.
+- Added Huawei Cloud ECS start/stop/reboot actions with provider-aware `SHUTOFF`/`ACTIVE` status gating, soft stop/reboot requests, local transition cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Dashboard snapshot persistence so successful refreshes are cached in SQLite and restored when reopening a server workspace.
 - Persisted remote file transfer history with progress state restoration in the macOS workspace.
 - Added limited Firewall rule add/delete actions with validation, risk confirmation, refreshed snapshots, and remote change audit logs.
