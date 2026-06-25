@@ -238,6 +238,10 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(RemoteFileService.normalizedDirectoryPath(" /tmp/ "), "/tmp")
         XCTAssertEqual(RemoteFileService.parentPath(for: "/var/www"), "/var")
         XCTAssertEqual(RemoteFileService.parentPath(for: "/"), "/")
+        XCTAssertEqual(RemoteFileService.parentPath(for: "~/app.env"), "~")
+        XCTAssertEqual(RemoteFileService.parentPath(for: "~/sites/app.env"), "~/sites")
+        XCTAssertEqual(RemoteFileService.normalizedFilePath("copy.env"), "~/copy.env")
+        XCTAssertEqual(RemoteFileService.normalizedFilePath("/var/www/copy.env"), "/var/www/copy.env")
     }
 
     func testRemoteFileServiceRenamesAndMovesToTrashWithSafeCommands() async throws {
@@ -318,12 +322,72 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(textFile.content, "hello\n")
         XCTAssertEqual(textFile.byteCount, 6)
         XCTAssertEqual(saveResult.path, "/var/www/app.env")
-        XCTAssertTrue(saveResult.backupPath.hasPrefix("/var/www/app.env.hhc-backup-"))
+        XCTAssertTrue(saveResult.backupPath?.hasPrefix("/var/www/app.env.hhc-backup-") == true)
         XCTAssertEqual(client.commands.count, 2)
         XCTAssertTrue(client.commands[0].contains("base64 < '/var/www/app.env'"))
         XCTAssertTrue(client.commands[1].contains("base64 -d > \"$tmp\""))
         XCTAssertTrue(client.commands[1].contains("cp -p -- '/var/www/app.env' \"$backup\""))
         XCTAssertTrue(client.commands[1].contains("mv -- \"$tmp\" '/var/www/app.env'"))
+    }
+
+    func testRemoteFileServiceSavesTextAsNewRemotePathWithoutBackup() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await service.saveTextFileAs(
+            sourcePath: "/var/www/app.env",
+            targetPath: "/var/www/app.env.copy",
+            content: "copy\n",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(result.path, "/var/www/app.env.copy")
+        XCTAssertNil(result.backupPath)
+        XCTAssertEqual(client.commands.count, 1)
+        XCTAssertTrue(client.commands[0].contains("test ! -e \"$target\""))
+        XCTAssertTrue(client.commands[0].contains("mv -- \"$tmp\" \"$target\""))
+    }
+
+    func testRemoteFileServiceChangesPermissionsWithValidatedOctalMode() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let service = RemoteFileService()
+        let entry = RemoteFileEntry(
+            name: "app.env",
+            path: "/var/www/app.env",
+            kind: .file,
+            size: 6,
+            modifiedAt: nil,
+            permissions: "-rw-r--r--"
+        )
+
+        try await service.changePermissions(entry: entry, mode: " 640 ", profile: profile, sshClient: client)
+
+        XCTAssertEqual(client.commands, ["chmod -- '640' '/var/www/app.env'"])
+    }
+
+    func testRemoteFileServiceRejectsInvalidPermissionModesBeforeSSH() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let service = RemoteFileService()
+        let entry = RemoteFileEntry(
+            name: "app.env",
+            path: "/var/www/app.env",
+            kind: .file,
+            size: 6,
+            modifiedAt: nil,
+            permissions: "-rw-r--r--"
+        )
+
+        do {
+            try await service.changePermissions(entry: entry, mode: "88x", profile: profile, sshClient: client)
+            XCTFail("Expected invalid mode to be rejected.")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "Permissions must be a 3 or 4 digit octal mode, for example 644 or 0755.")
+            XCTAssertTrue(client.commands.isEmpty)
+        }
     }
 
     func testRemoteFileServiceRejectsOversizedKnownTextFileBeforeSSHRead() async {

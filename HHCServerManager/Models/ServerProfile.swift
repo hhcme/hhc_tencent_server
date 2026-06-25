@@ -124,7 +124,7 @@ struct RemoteTextFile: Identifiable, Equatable, Hashable, Sendable {
 
 struct RemoteTextSaveResult: Equatable, Hashable, Sendable {
     var path: String
-    var backupPath: String
+    var backupPath: String?
 }
 
 struct RemoteFileTransferResult: Equatable, Hashable, Sendable {

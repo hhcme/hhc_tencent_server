@@ -210,6 +210,45 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    func changeRemoteFilePermissions(
+        _ entry: RemoteFileEntry,
+        mode: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService
+    ) {
+        isMutatingRemoteFile = true
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+
+        Task {
+            do {
+                try await remoteFileService.changePermissions(
+                    entry: entry,
+                    mode: mode,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let listing = try await remoteFileService.listDirectory(
+                    path: self.remoteFilePath,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.remoteDirectoryListing = listing
+                    self.remoteFilePath = listing.path
+                    self.remoteFileActionMessage = "Changed permissions for \(entry.name) to \(mode)."
+                    self.isMutatingRemoteFile = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.isMutatingRemoteFile = false
+                }
+            }
+        }
+    }
+
     func openRemoteTextFile(
         _ entry: RemoteFileEntry,
         profile: ServerProfile,
@@ -273,7 +312,54 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.remoteTextFile = updatedFile
                     self.remoteDirectoryListing = listing
-                    self.remoteFileActionMessage = "Saved \(result.path). Backup: \(result.backupPath)."
+                    self.remoteFileActionMessage = self.remoteTextSaveMessage(result)
+                    self.isSavingRemoteText = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.isSavingRemoteText = false
+                }
+            }
+        }
+    }
+
+    func saveRemoteTextFileAs(
+        targetPath: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService
+    ) {
+        guard let remoteTextFile else { return }
+        isSavingRemoteText = true
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+
+        Task {
+            do {
+                let result = try await remoteFileService.saveTextFileAs(
+                    sourcePath: remoteTextFile.path,
+                    targetPath: targetPath,
+                    content: remoteTextDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let updatedFile = RemoteTextFile(
+                    path: result.path,
+                    content: self.remoteTextDraft,
+                    byteCount: Data(self.remoteTextDraft.utf8).count,
+                    capturedAt: Date()
+                )
+                let listing = try await remoteFileService.listDirectory(
+                    path: RemoteFileService.parentPath(for: result.path),
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.remoteTextFile = updatedFile
+                    self.remoteDirectoryListing = listing
+                    self.remoteFilePath = listing.path
+                    self.remoteFileActionMessage = self.remoteTextSaveMessage(result)
                     self.isSavingRemoteText = false
                 }
             } catch {
@@ -707,6 +793,13 @@ final class ServerWorkspaceViewModel: ObservableObject {
             return
         }
         cancelRemoteFileTransferJob(id)
+    }
+
+    private func remoteTextSaveMessage(_ result: RemoteTextSaveResult) -> String {
+        if let backupPath = result.backupPath {
+            return "Saved \(result.path). Backup: \(backupPath)."
+        }
+        return "Saved \(result.path)."
     }
 
     private func persistCommandResult(

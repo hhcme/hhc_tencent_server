@@ -142,7 +142,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 实现权限查看基础展示。
 - [x] 删除前二次确认，优先移动到远端应用回收目录。
 - [x] 文本文件编辑保存前创建备份。
-- [ ] 实现另存为和权限修改。
+- [x] 实现另存为和权限修改。
 
 ### Task 7：测试
 
@@ -153,6 +153,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 文件浏览 ViewModel 测试。
 - [x] 文件重命名和可恢复删除测试。
 - [x] 轻量文本读取、保存和备份测试。
+- [x] 另存为和权限修改 ViewModel/Service 测试。
 - [x] 单文件上传/下载服务和 ViewModel 测试。
 - [x] 当前传输取消 ViewModel 测试。
 - [x] 串行传输队列和待传队列清空 ViewModel 测试。

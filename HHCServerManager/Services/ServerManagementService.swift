@@ -605,6 +605,69 @@ final class RemoteFileService: @unchecked Sendable {
         return RemoteTextSaveResult(path: path, backupPath: backupPath)
     }
 
+    func saveTextFileAs(
+        sourcePath: String,
+        targetPath: String,
+        content: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> RemoteTextSaveResult {
+        let normalizedTargetPath = Self.normalizedFilePath(targetPath)
+        guard !normalizedTargetPath.isEmpty else {
+            throw SSHClientError.processFailed("Save As path cannot be empty, '/', '~', or a directory path.")
+        }
+        guard normalizedTargetPath != sourcePath else {
+            return try await saveTextFile(
+                path: sourcePath,
+                content: content,
+                profile: profile,
+                sshClient: sshClient
+            )
+        }
+
+        let data = Data(content.utf8)
+        guard data.count <= Self.maxEditableTextBytes else {
+            throw SSHClientError.processFailed("File is larger than the 256 KiB text editing limit.")
+        }
+        let encoded = data.base64EncodedString()
+        let temporaryPath = "\(normalizedTargetPath).hhc-tmp-\(UUID().uuidString)"
+        let command = """
+        set -e; \
+        tmp=\(Self.shellQuote(temporaryPath)); \
+        target=\(Self.shellQuote(normalizedTargetPath)); \
+        trap 'rm -f -- "$tmp"' EXIT; \
+        test ! -e "$target"; \
+        base64 -d > "$tmp" <<'__HHC_TEXT_EOF__'
+        \(encoded)
+        __HHC_TEXT_EOF__
+        mv -- "$tmp" "$target"; \
+        trap - EXIT
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not save \(normalizedTargetPath).")
+        }
+        return RemoteTextSaveResult(path: normalizedTargetPath, backupPath: nil)
+    }
+
+    func changePermissions(
+        entry: RemoteFileEntry,
+        mode: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws {
+        let normalizedMode = try Self.validatedPermissionMode(mode)
+        let command = "chmod -- \(Self.shellQuote(normalizedMode)) \(Self.shellQuote(entry.path))"
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not change permissions for \(entry.name).")
+        }
+    }
+
     func uploadFile(
         localURL: URL,
         toDirectoryPath directoryPath: String,
@@ -634,6 +697,11 @@ final class RemoteFileService: @unchecked Sendable {
     static func parentPath(for path: String) -> String {
         let normalized = normalizedDirectoryPath(path)
         guard normalized != "/" else { return "/" }
+        if normalized.hasPrefix("~/") {
+            let components = normalized.dropFirst(2).split(separator: "/").map(String.init)
+            let parent = components.dropLast().joined(separator: "/")
+            return parent.isEmpty ? "~" : "~/\(parent)"
+        }
         let components = normalized.split(separator: "/").map(String.init)
         let parent = components.dropLast().joined(separator: "/")
         return parent.isEmpty ? "/" : "/\(parent)"
@@ -648,10 +716,30 @@ final class RemoteFileService: @unchecked Sendable {
         return trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
     }
 
+    static func normalizedFilePath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "/", trimmed != "~", !trimmed.hasSuffix("/") else {
+            return ""
+        }
+        if trimmed.hasPrefix("/") || trimmed.hasPrefix("~/") {
+            return trimmed
+        }
+        return joinedPath(basePath: "~", name: trimmed)
+    }
+
     static func validatedFileName(_ name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != ".", trimmed != "..", !trimmed.contains("/") else {
             return ""
+        }
+        return trimmed
+    }
+
+    static func validatedPermissionMode(_ mode: String) throws -> String {
+        let trimmed = mode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let characters = Array(trimmed)
+        guard [3, 4].contains(characters.count), characters.allSatisfy({ "01234567".contains($0) }) else {
+            throw SSHClientError.processFailed("Permissions must be a 3 or 4 digit octal mode, for example 644 or 0755.")
         }
         return trimmed
     }

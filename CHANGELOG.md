@@ -48,6 +48,7 @@ All notable changes to this project will be documented in this file.
 - Added lightweight remote UTF-8 text editing with a 256 KiB guard, temporary-file replacement, backup-on-save, UI sheet, and tests.
 - Added single-file upload/download bootstrap through OpenSSH/scp with file picker/save panel UI, transfer state, tests, sandbox entitlement update, and real-server smoke validation.
 - Added visible remote transfer job records with pending/running/succeeded/failed/cancelled states, serial single-file queueing, current-transfer cancellation, and pending-queue clearing coverage.
+- Added remote text Save As and chmod-based permission changes with validation, refreshed listings, UI sheets, and tests.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -91,3 +92,4 @@ All notable changes to this project will be documented in this file.
 - 添加轻量远程 UTF-8 文本编辑，包含 256 KiB 限制、临时文件替换、保存前备份、UI sheet 和测试。
 - 添加基于 OpenSSH/scp 的单文件上传/下载 bootstrap，包含文件选择/保存面板、传输状态、测试、沙盒权限更新和真实服务器 smoke 验证。
 - 添加可见的远程传输任务记录，支持 pending/running/succeeded/failed/cancelled 状态、串行单文件队列、当前传输取消和待传队列清空测试。
+- 添加远程文本另存为和基于 chmod 的权限修改，包含校验、列表刷新、UI sheet 和测试。

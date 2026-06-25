@@ -368,6 +368,72 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.remoteFileErrorMessage)
     }
 
+    func testRemoteTextFileSaveAsRefreshesTargetDirectoryWithoutBackupMessage() async throws {
+        let profile = makeProfile()
+        let client = RemoteTextFileMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadRemoteFiles(
+            path: "/var/www",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["app.env"] }
+        let entry = try XCTUnwrap(viewModel.remoteDirectoryListing?.entries.first)
+
+        viewModel.openRemoteTextFile(
+            entry,
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteTextFile?.content == "hello\n" }
+
+        viewModel.remoteTextDraft = "copy\n"
+        viewModel.saveRemoteTextFileAs(
+            targetPath: "/var/www/copy.env",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteFileActionMessage == "Saved /var/www/copy.env." }
+
+        XCTAssertEqual(viewModel.remoteTextFile?.path, "/var/www/copy.env")
+        XCTAssertEqual(viewModel.remoteTextFile?.content, "copy\n")
+        XCTAssertEqual(viewModel.remoteDirectoryListing?.entries.map(\.name), ["app.env", "copy.env"])
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+    }
+
+    func testRemoteFilePermissionsChangeRefreshesListing() async throws {
+        let profile = makeProfile()
+        let client = RemoteTextFileMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadRemoteFiles(
+            path: "/var/www",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["app.env"] }
+        let entry = try XCTUnwrap(viewModel.remoteDirectoryListing?.entries.first)
+
+        viewModel.changeRemoteFilePermissions(
+            entry,
+            mode: "640",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.first?.permissions == "-rw-r-----" }
+
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Changed permissions for app.env to 640.")
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+    }
+
     func testRemoteFileUploadAndDownloadUpdateTransferStateAndMessages() async throws {
         let profile = makeProfile()
         let client = RemoteFileTransferMockSSHClient()
@@ -744,6 +810,9 @@ private final class RemoteFileActionMockSSHClient: SSHClient, @unchecked Sendabl
 private final class RemoteTextFileMockSSHClient: SSHClient, @unchecked Sendable {
     private(set) var commands: [String] = []
     private(set) var content = "hello\n"
+    private var files: [String: (content: String, permissions: String)] = [
+        "app.env": ("hello\n", "-rw-r--r--")
+    ]
 
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
         try await execute("printf hhc-ssh-ok", profile: profile)
@@ -752,25 +821,42 @@ private final class RemoteTextFileMockSSHClient: SSHClient, @unchecked Sendable 
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
         commands.append(command)
         if command.contains("find . -maxdepth 1") {
+            let stdout = files.keys.sorted().map { name in
+                let file = files[name] ?? ("", "-rw-r--r--")
+                return "\(name)\tf\t\(Data(file.content.utf8).count)\t1700000001.0\t\(file.permissions)"
+            }
+            .joined(separator: "\n")
             return CommandResult(
                 command: command,
-                stdout: "app.env\tf\t\(Data(content.utf8).count)\t1700000001.0\t-rw-r--r--\n",
+                stdout: stdout,
                 stderr: "",
                 exitCode: 0,
                 duration: 0
             )
         }
         if command.contains("base64 < '/var/www/app.env'") {
+            let current = files["app.env"]?.content ?? content
             return CommandResult(
                 command: command,
-                stdout: Data(content.utf8).base64EncodedString(),
+                stdout: Data(current.utf8).base64EncodedString(),
                 stderr: "",
                 exitCode: 0,
                 duration: 0
             )
         }
-        if command.contains("base64 -d > \"$tmp\"") {
+        if command.contains("mv -- \"$tmp\" '/var/www/app.env'") {
             content = "updated\n"
+            files["app.env"] = ("updated\n", files["app.env"]?.permissions ?? "-rw-r--r--")
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("mv -- \"$tmp\" \"$target\"") && command.contains("target='/var/www/copy.env'") {
+            files["copy.env"] = ("copy\n", "-rw-r--r--")
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.hasPrefix("chmod -- '640' '/var/www/app.env'") {
+            if let file = files["app.env"] {
+                files["app.env"] = (file.content, "-rw-r-----")
+            }
             return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
         }
         return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)

@@ -10,6 +10,8 @@ struct ServerWorkspaceView: View {
     @State private var remoteFileRenameEntry: RemoteFileEntry?
     @State private var remoteFileRenameText = ""
     @State private var remoteFileTrashEntry: RemoteFileEntry?
+    @State private var remoteFilePermissionsEntry: RemoteFileEntry?
+    @State private var remoteFilePermissionsText = ""
 
     let profile: ServerProfile
 
@@ -92,6 +94,25 @@ struct ServerWorkspaceView: View {
                 }
             )
         }
+        .sheet(item: $remoteFilePermissionsEntry) { entry in
+            RemoteFilePermissionsSheet(
+                entry: entry,
+                mode: $remoteFilePermissionsText,
+                cancel: {
+                    remoteFilePermissionsEntry = nil
+                },
+                save: {
+                    viewModel.changeRemoteFilePermissions(
+                        entry,
+                        mode: remoteFilePermissionsText,
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        remoteFileService: appState.remoteFileService
+                    )
+                    remoteFilePermissionsEntry = nil
+                }
+            )
+        }
         .sheet(item: $viewModel.remoteTextFile) { textFile in
             RemoteTextEditorSheet(
                 textFile: textFile,
@@ -106,6 +127,17 @@ struct ServerWorkspaceView: View {
                         sshClient: appState.sshClient,
                         remoteFileService: appState.remoteFileService
                     )
+                },
+                saveAs: { targetPath in
+                    viewModel.saveRemoteTextFileAs(
+                        targetPath: targetPath,
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        remoteFileService: appState.remoteFileService
+                    )
+                },
+                suggestedSaveAsPath: {
+                    suggestedRemoteSaveAsPath(for: textFile.path)
                 }
             )
         }
@@ -534,6 +566,12 @@ struct ServerWorkspaceView: View {
                     Label("Rename", systemImage: "pencil")
                 }
                 .disabled(isRemoteFileBusy)
+                Button {
+                    startChangingPermissions(entry)
+                } label: {
+                    Label("Permissions", systemImage: "lock")
+                }
+                .disabled(isRemoteFileBusy)
                 Button(role: .destructive) {
                     remoteFileTrashEntry = entry
                 } label: {
@@ -629,6 +667,20 @@ struct ServerWorkspaceView: View {
     private func startRenaming(_ entry: RemoteFileEntry) {
         remoteFileRenameText = entry.name
         remoteFileRenameEntry = entry
+    }
+
+    private func startChangingPermissions(_ entry: RemoteFileEntry) {
+        remoteFilePermissionsText = RemoteFilePermissionsSheet.octalMode(from: entry.permissions)
+        remoteFilePermissionsEntry = entry
+    }
+
+    private func suggestedRemoteSaveAsPath(for path: String) -> String {
+        let parent = RemoteFileService.parentPath(for: path)
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        if name.isEmpty {
+            return RemoteFileService.joinedPath(basePath: parent, name: "copy.txt")
+        }
+        return RemoteFileService.joinedPath(basePath: parent, name: "\(name).copy")
     }
 
     private var persistedHistorySection: some View {
@@ -960,12 +1012,73 @@ private struct RenameRemoteFileSheet: View {
     }
 }
 
+private struct RemoteFilePermissionsSheet: View {
+    let entry: RemoteFileEntry
+    @Binding var mode: String
+    let cancel: () -> Void
+    let save: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Permissions")
+                .font(.title2.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(entry.path)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                Text("Current: \(entry.permissions)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            TextField("Octal mode", text: $mode)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: cancel)
+                Button("Apply", action: save)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!Self.isValidOctalMode(mode))
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
+    }
+
+    static func octalMode(from permissions: String) -> String {
+        guard permissions.count >= 10 else { return "644" }
+        let permissionCharacters = Array(permissions.dropFirst().prefix(9))
+        guard permissionCharacters.count == 9 else { return "644" }
+        let chunks = stride(from: 0, to: 9, by: 3).map { offset in
+            permissionCharacters[offset..<offset + 3].reduce(0) { value, character in
+                value + (character == "r" ? 4 : character == "w" ? 2 : character == "x" || character == "s" || character == "t" ? 1 : 0)
+            }
+        }
+        return chunks.map(String.init).joined()
+    }
+
+    private static func isValidOctalMode(_ mode: String) -> Bool {
+        let trimmed = mode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let characters = Array(trimmed)
+        return [3, 4].contains(characters.count) && characters.allSatisfy { "01234567".contains($0) }
+    }
+}
+
 private struct RemoteTextEditorSheet: View {
     let textFile: RemoteTextFile
     @Binding var draft: String
     let isSaving: Bool
     let cancel: () -> Void
     let save: () -> Void
+    let saveAs: (String) -> Void
+    let suggestedSaveAsPath: () -> String
+    @State private var saveAsPath = ""
+    @State private var isShowingSaveAs = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -984,6 +1097,13 @@ private struct RemoteTextEditorSheet: View {
 
                 Button("Close", action: cancel)
                     .disabled(isSaving)
+                Button {
+                    saveAsPath = suggestedSaveAsPath()
+                    isShowingSaveAs = true
+                } label: {
+                    Label("Save As", systemImage: "square.and.arrow.down.on.square")
+                }
+                .disabled(isSaving)
                 Button {
                     save()
                 } label: {
@@ -1009,6 +1129,20 @@ private struct RemoteTextEditorSheet: View {
         }
         .padding(20)
         .frame(minWidth: 720, minHeight: 520)
+        .sheet(isPresented: $isShowingSaveAs) {
+            RemoteTextSaveAsSheet(
+                sourcePath: textFile.path,
+                targetPath: $saveAsPath,
+                isSaving: isSaving,
+                cancel: {
+                    isShowingSaveAs = false
+                },
+                save: {
+                    saveAs(saveAsPath)
+                    isShowingSaveAs = false
+                }
+            )
+        }
     }
 
     private static func formatBytes(_ bytes: Int) -> String {
@@ -1021,6 +1155,42 @@ private struct RemoteTextEditorSheet: View {
             return String(format: "%.1f KiB", kib)
         }
         return String(format: "%.1f MiB", kib / 1024)
+    }
+}
+
+private struct RemoteTextSaveAsSheet: View {
+    let sourcePath: String
+    @Binding var targetPath: String
+    let isSaving: Bool
+    let cancel: () -> Void
+    let save: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Save As")
+                .font(.title2.weight(.semibold))
+
+            Text(sourcePath)
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            TextField("Remote path", text: $targetPath)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: cancel)
+                    .disabled(isSaving)
+                Button("Save", action: save)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isSaving || RemoteFileService.normalizedFilePath(targetPath).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
     }
 }
 
