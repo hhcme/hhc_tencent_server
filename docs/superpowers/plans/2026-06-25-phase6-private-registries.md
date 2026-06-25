@@ -99,9 +99,9 @@ CREATE TABLE registry_backups (
 ### Task 3：Verdaccio 管理
 
 - [x] 查看运行状态和日志：已通过 systemd state、Verdaccio version、storage size 和 journal tail 生成状态快照，日志会脱敏。
-- [ ] 管理用户和权限配置。
+- [ ] 管理用户和权限配置：已支持生成 `htpasswd` auth 配置和包访问/发布策略切换；用户增删改仍待接入安全输入和远端命令流程。
 - [x] 列出私有包：已基于 Verdaccio storage 下 package metadata 生成包名、版本数量、latest version、大小和更新时间摘要。
-- [ ] 修改上游 registry 配置。
+- [x] 修改上游 registry 配置：已支持通过 `VerdaccioConfigPolicy` 生成受控 uplink URL，并复用保存前备份和重启流程。
 - [x] 保存配置前备份：已支持读取/保存 `config.yaml`，保存前创建 `.hhc-backup-*` 备份并重启服务；真实服务器写操作仍需谨慎验收。
 
 ### Task 4：反向代理
@@ -132,6 +132,7 @@ CREATE TABLE registry_backups (
 - [x] systemd service 模板测试。
 - [x] Verdaccio 安装命令和 health check 状态机测试。
 - [x] Verdaccio 状态、日志脱敏和配置保存前备份测试。
+- [x] Verdaccio 上游 registry 和权限策略配置生成/保存测试。
 - [x] 备份归档命令测试。
 - [x] 恢复状态机测试：已覆盖恢复成功、health check 失败回滚、恢复命令失败回滚和非法备份路径拒绝。
 - [x] 日志脱敏测试：当前已覆盖 Verdaccio journal status 日志脱敏和安装失败输出脱敏。

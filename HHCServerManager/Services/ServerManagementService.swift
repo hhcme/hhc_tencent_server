@@ -1154,6 +1154,24 @@ struct VerdaccioInstallDraft: Equatable, Sendable {
     }
 }
 
+enum VerdaccioPackageAccessMode: String, Equatable, Sendable {
+    case publicReadAuthenticatedPublish
+    case authenticatedReadAndPublish
+}
+
+struct VerdaccioConfigPolicy: Equatable, Sendable {
+    var upstreamRegistryURL: String
+    var accessMode: VerdaccioPackageAccessMode
+
+    init(
+        upstreamRegistryURL: String = "https://registry.npmjs.org/",
+        accessMode: VerdaccioPackageAccessMode = .publicReadAuthenticatedPublish
+    ) {
+        self.upstreamRegistryURL = upstreamRegistryURL
+        self.accessMode = accessMode
+    }
+}
+
 struct VerdaccioInstallResult: Equatable, Sendable {
     var configPath: String
     var servicePath: String
@@ -1216,6 +1234,7 @@ enum RegistryConfigurationError: LocalizedError, Equatable {
     case invalidPort
     case invalidServiceName
     case invalidVersion
+    case invalidRegistryURL
 
     var errorDescription: String? {
         switch self {
@@ -1231,6 +1250,8 @@ enum RegistryConfigurationError: LocalizedError, Equatable {
             "Service name can only contain letters, numbers, underscore, dot, at sign, and dash."
         case .invalidVersion:
             "Verdaccio version must be pinned to a stable semver version such as 5.31.1."
+        case .invalidRegistryURL:
+            "Upstream registry URL must be an http(s) URL without credentials, query, fragment, or line breaks."
         }
     }
 }
@@ -1263,26 +1284,36 @@ enum VerdaccioConfigurationBuilder {
         }
     }
 
-    static func configurationYAML(for draft: VerdaccioInstallDraft) throws -> String {
+    static func configurationYAML(
+        for draft: VerdaccioInstallDraft,
+        policy: VerdaccioConfigPolicy = VerdaccioConfigPolicy()
+    ) throws -> String {
         try validate(draft)
+        try validate(policy)
+        let packagePolicy = packagePolicyLines(for: policy.accessMode)
         return """
         storage: \(draft.dataPath.trimmed)
 
         listen:
           - \(draft.listenHost.trimmed):\(draft.listenPort)
 
+        auth:
+          htpasswd:
+            file: ./htpasswd
+            max_users: -1
+
         uplinks:
           npmjs:
-            url: https://registry.npmjs.org/
+            url: \(policy.upstreamRegistryURL.trimmed)
 
         packages:
           '@*/*':
-            access: $all
-            publish: $authenticated
+            access: \(packagePolicy.access)
+            publish: \(packagePolicy.publish)
             proxy: npmjs
           '**':
-            access: $all
-            publish: $authenticated
+            access: \(packagePolicy.access)
+            publish: \(packagePolicy.publish)
             proxy: npmjs
 
         logs:
@@ -1294,6 +1325,25 @@ enum VerdaccioConfigurationBuilder {
               sign:
                 expiresIn: 29d
         """
+    }
+
+    static func validate(_ policy: VerdaccioConfigPolicy) throws {
+        let url = policy.upstreamRegistryURL.trimmed
+        guard !url.isEmpty,
+              !url.contains("\n"),
+              !url.contains("\r"),
+              !url.contains("\0"),
+              let components = URLComponents(string: url),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              components.host?.nilIfEmpty != nil,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil
+        else {
+            throw RegistryConfigurationError.invalidRegistryURL
+        }
     }
 
     static func systemdService(for draft: VerdaccioInstallDraft) throws -> String {
@@ -1355,6 +1405,15 @@ enum VerdaccioConfigurationBuilder {
 
     private static func isStablePinnedVersion(_ version: String) -> Bool {
         version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil
+    }
+
+    private static func packagePolicyLines(for mode: VerdaccioPackageAccessMode) -> (access: String, publish: String) {
+        switch mode {
+        case .publicReadAuthenticatedPublish:
+            ("$all", "$authenticated")
+        case .authenticatedReadAndPublish:
+            ("$authenticated", "$authenticated")
+        }
     }
 }
 
@@ -1511,6 +1570,21 @@ final class VerdaccioManager: @unchecked Sendable {
             throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not save Verdaccio config."))
         }
         return VerdaccioConfigSaveResult(path: path, backupPath: backupPath)
+    }
+
+    func saveGeneratedConfig(
+        draft: VerdaccioInstallDraft,
+        policy: VerdaccioConfigPolicy,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioConfigSaveResult {
+        let content = try VerdaccioConfigurationBuilder.configurationYAML(for: draft, policy: policy)
+        return try await saveConfig(
+            draft: draft,
+            content: content,
+            profile: profile,
+            sshClient: sshClient
+        )
     }
 
     func listPackages(

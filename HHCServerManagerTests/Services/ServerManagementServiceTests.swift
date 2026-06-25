@@ -633,9 +633,27 @@ final class ServerManagementServiceTests: XCTestCase {
 
         XCTAssertTrue(yaml.contains("storage: /srv/verdaccio/storage"))
         XCTAssertTrue(yaml.contains("- 127.0.0.1:4873"))
+        XCTAssertTrue(yaml.contains("auth:\n  htpasswd:"))
+        XCTAssertTrue(yaml.contains("max_users: -1"))
+        XCTAssertTrue(yaml.contains("url: https://registry.npmjs.org/"))
         XCTAssertTrue(yaml.contains("proxy: npmjs"))
         XCTAssertTrue(service.contains("verdaccio@5.31.1"))
         XCTAssertTrue(service.contains("ReadWritePaths=/srv/verdaccio /srv/verdaccio/storage"))
+    }
+
+    func testVerdaccioConfigurationBuilderGeneratesCustomUpstreamAndAccessPolicy() throws {
+        let yaml = try VerdaccioConfigurationBuilder.configurationYAML(
+            for: VerdaccioInstallDraft(),
+            policy: VerdaccioConfigPolicy(
+                upstreamRegistryURL: "https://registry.npmmirror.com/",
+                accessMode: .authenticatedReadAndPublish
+            )
+        )
+
+        XCTAssertTrue(yaml.contains("url: https://registry.npmmirror.com/"))
+        XCTAssertTrue(yaml.contains("access: $authenticated"))
+        XCTAssertFalse(yaml.contains("access: $all"))
+        XCTAssertTrue(yaml.contains("publish: $authenticated"))
     }
 
     func testVerdaccioConfigurationBuilderRejectsUnsafeDrafts() {
@@ -668,6 +686,26 @@ final class ServerManagementServiceTests: XCTestCase {
         draft.serviceName = "verdaccio;rm"
         XCTAssertThrowsError(try VerdaccioConfigurationBuilder.configurationYAML(for: draft)) { error in
             XCTAssertEqual(error as? RegistryConfigurationError, .invalidServiceName)
+        }
+    }
+
+    func testVerdaccioConfigurationBuilderRejectsUnsafeUpstreamRegistryURL() {
+        XCTAssertThrowsError(
+            try VerdaccioConfigurationBuilder.configurationYAML(
+                for: VerdaccioInstallDraft(),
+                policy: VerdaccioConfigPolicy(upstreamRegistryURL: "https://user:pass@example.com/")
+            )
+        ) { error in
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidRegistryURL)
+        }
+
+        XCTAssertThrowsError(
+            try VerdaccioConfigurationBuilder.configurationYAML(
+                for: VerdaccioInstallDraft(),
+                policy: VerdaccioConfigPolicy(upstreamRegistryURL: "javascript:alert(1)")
+            )
+        ) { error in
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidRegistryURL)
         }
     }
 
@@ -869,6 +907,37 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(result.backupPath.hasPrefix("/srv/verdaccio/config.yaml.hhc-backup-"))
         XCTAssertTrue(client.commands[0].contains("cp -p -- \"$path\" \"$backup\""))
         XCTAssertTrue(client.commands[0].contains("base64 -d > \"$tmp\""))
+        XCTAssertTrue(client.commands[0].contains("systemctl restart \"$service\""))
+    }
+
+    func testVerdaccioManagerSavesGeneratedConfigPolicyWithBackupAndRestart() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await manager.saveGeneratedConfig(
+            draft: VerdaccioInstallDraft(),
+            policy: VerdaccioConfigPolicy(
+                upstreamRegistryURL: "https://registry.npmmirror.com/",
+                accessMode: .authenticatedReadAndPublish
+            ),
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(result.path, "/srv/verdaccio/config.yaml")
+        XCTAssertTrue(result.backupPath.hasPrefix("/srv/verdaccio/config.yaml.hhc-backup-"))
+        XCTAssertTrue(client.commands[0].contains("cp -p -- \"$path\" \"$backup\""))
+        let expectedConfig = try VerdaccioConfigurationBuilder.configurationYAML(
+            for: VerdaccioInstallDraft(),
+            policy: VerdaccioConfigPolicy(
+                upstreamRegistryURL: "https://registry.npmmirror.com/",
+                accessMode: .authenticatedReadAndPublish
+            )
+        )
+        XCTAssertTrue(client.commands[0].contains(Data(expectedConfig.utf8).base64EncodedString()))
         XCTAssertTrue(client.commands[0].contains("systemctl restart \"$service\""))
     }
 
