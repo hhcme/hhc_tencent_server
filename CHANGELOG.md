@@ -64,6 +64,7 @@ All notable changes to this project will be documented in this file.
 - Added read-only Firewall workspace foundations with backend detection for firewalld, ufw, nftables, and iptables, rules display, tests, and inactive firewalld handling.
 - Added Environment workspace foundations for common `.env`, `/etc/default`, `/etc/sysconfig`, and systemd drop-in env files with guarded discovery, UTF-8 editing, remote backups, confirmation UI, and audit coverage.
 - Added Tencent Cloud security group inspection foundations with VPC security group/rule read APIs, linked-account/region discovery, read-only SwiftUI workspace display, and tests.
+- Added explicit cloud security group permission guidance for read and rule mutation failures, including failed mutation audit logs.
 - Added a shared remote operation risk model and wired existing dangerous confirmations to show risk level, target, command preview, impact, recovery, and audit expectations.
 - Added local Tencent Cloud security group rule diff previews with before/after counts, command previews, risk warnings, and disabled write-action affordance.
 - Started Phase 5 deployment persistence with deployment project, run, and log models plus SQLite repository coverage.

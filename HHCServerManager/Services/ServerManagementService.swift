@@ -3703,11 +3703,21 @@ final class CloudSecurityGroupService: @unchecked Sendable {
 
     func loadSecurityGroups(for profile: ServerProfile) async throws -> CloudSecurityGroupList {
         let context = try linkedCloudContext(for: profile)
-        let groups = try await registry.adapter(for: context.account.providerId).fetchSecurityGroups(
-            credential: context.credential,
-            accountId: context.account.id,
-            regionId: context.link.regionId
-        )
+        let groups: [CloudSecurityGroup]
+        do {
+            groups = try await registry.adapter(for: context.account.providerId).fetchSecurityGroups(
+                credential: context.credential,
+                accountId: context.account.id,
+                regionId: context.link.regionId
+            )
+        } catch {
+            throw Self.securityGroupAccessError(
+                error,
+                providerId: context.account.providerId,
+                operation: "read security groups",
+                requiredPermission: "security group read permissions"
+            )
+        }
         return CloudSecurityGroupList(
             accountId: context.account.id,
             providerId: context.account.providerId,
@@ -3724,30 +3734,67 @@ final class CloudSecurityGroupService: @unchecked Sendable {
         guard let account = try repository.fetchCloudProviderAccounts().first(where: { $0.id == group.accountId && $0.enabled }) else {
             throw CloudProviderError.authenticationFailed("Linked cloud account is missing or disabled.")
         }
-        try registry.require(.securityGroups, providerId: account.providerId)
+        do {
+            try registry.require(.securityGroups, providerId: account.providerId)
+        } catch {
+            throw Self.securityGroupAccessError(
+                error,
+                providerId: account.providerId,
+                operation: "read security group rules",
+                requiredPermission: "security group rule read permissions"
+            )
+        }
         guard let credential = try keychain.readCloudCredential(keychainRef: account.keychainRef) else {
             throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
         }
-        return try await registry.adapter(for: account.providerId).fetchSecurityGroupPolicies(
-            credential: credential,
-            group: group,
-            capturedAt: now()
-        )
+        do {
+            return try await registry.adapter(for: account.providerId).fetchSecurityGroupPolicies(
+                credential: credential,
+                group: group,
+                capturedAt: now()
+            )
+        } catch {
+            throw Self.securityGroupAccessError(
+                error,
+                providerId: account.providerId,
+                operation: "read security group rules",
+                requiredPermission: "security group rule read permissions"
+            )
+        }
     }
 
     func applyRuleChange(_ preview: CloudSecurityGroupRuleChangePreview) async throws -> CloudSecurityGroupRuleChangeResult {
         guard let account = try repository.fetchCloudProviderAccounts().first(where: { $0.id == preview.group.accountId && $0.enabled }) else {
             throw CloudProviderError.authenticationFailed("Linked cloud account is missing or disabled.")
         }
-        try registry.require(.securityGroupActions, providerId: account.providerId)
+        do {
+            try registry.require(.securityGroupActions, providerId: account.providerId)
+        } catch {
+            throw Self.securityGroupAccessError(
+                error,
+                providerId: account.providerId,
+                operation: "\(preview.action.displayName.lowercased()) security group rule",
+                requiredPermission: "security group rule write permissions"
+            )
+        }
         guard let credential = try keychain.readCloudCredential(keychainRef: account.keychainRef) else {
             throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
         }
         let beforeSnapshot = try await loadPolicies(for: preview.group)
-        let requestId = try await registry.adapter(for: account.providerId).applySecurityGroupRuleChange(
-            credential: credential,
-            preview: preview
-        )
+        let requestId: String?
+        do {
+            requestId = try await registry.adapter(for: account.providerId).applySecurityGroupRuleChange(
+                credential: credential,
+                preview: preview
+            )
+        } catch {
+            throw Self.securityGroupAccessError(
+                error,
+                providerId: account.providerId,
+                operation: "\(preview.action.displayName.lowercased()) security group rule",
+                requiredPermission: "security group rule write permissions"
+            )
+        }
         let afterSnapshot = try await loadPolicies(for: preview.group)
         return CloudSecurityGroupRuleChangeResult(
             preview: preview,
@@ -3769,11 +3816,40 @@ final class CloudSecurityGroupService: @unchecked Sendable {
         guard let account = try repository.fetchCloudProviderAccounts().first(where: { $0.id == link.accountId && $0.enabled }) else {
             throw CloudProviderError.authenticationFailed("Linked cloud account is missing or disabled.")
         }
-        try registry.require(.securityGroups, providerId: account.providerId)
+        do {
+            try registry.require(.securityGroups, providerId: account.providerId)
+        } catch {
+            throw Self.securityGroupAccessError(
+                error,
+                providerId: account.providerId,
+                operation: "read security groups",
+                requiredPermission: "security group read permissions"
+            )
+        }
         guard let credential = try keychain.readCloudCredential(keychainRef: account.keychainRef) else {
             throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
         }
         return (link, account, credential)
+    }
+
+    private static func securityGroupAccessError(
+        _ error: Error,
+        providerId: CloudProviderID,
+        operation: String,
+        requiredPermission: String
+    ) -> Error {
+        let guidance = "\(providerId.displayName) could not \(operation). Grant \(requiredPermission) to this cloud account, then retry."
+        if let cloudError = error as? CloudProviderError {
+            switch cloudError {
+            case let .permissionDenied(message):
+                return CloudProviderError.permissionDenied("\(guidance) Provider message: \(message)")
+            case let .unsupportedCapability(_, capability):
+                return CloudProviderError.permissionDenied("\(guidance) Adapter capability \(capability.rawValue) is not available.")
+            default:
+                return cloudError
+            }
+        }
+        return CloudProviderError.permissionDenied("\(guidance) Provider message: \(error.localizedDescription)")
     }
 }
 

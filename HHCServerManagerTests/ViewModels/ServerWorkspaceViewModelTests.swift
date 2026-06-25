@@ -1383,6 +1383,67 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.cloudSecurityGroupErrorMessage)
     }
 
+    func testCloudSecurityGroupsShowPermissionGuidanceWhenProviderDeniesRead() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.security-denied.\(UUID().uuidString)")
+        let account = CloudProviderAccount(
+            id: UUID(),
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            keychainRef: "cloud_test_\(UUID().uuidString)",
+            enabled: true,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try keychain.saveCloudCredential(
+            CloudProviderCredential(secretId: "sid", secretKey: "skey"),
+            keychainRef: account.keychainRef
+        )
+        defer {
+            keychain.deleteCloudCredential(keychainRef: account.keychainRef)
+        }
+        try repository.upsertCloudProviderAccount(account)
+        try repository.upsertCloudInstanceLink(CloudInstanceLink(
+            id: UUID(),
+            serverId: profile.id,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "prod",
+            publicIp: "203.0.113.1",
+            privateIp: "10.0.0.2",
+            status: "RUNNING",
+            instanceType: "mock",
+            zoneId: "ap-guangzhou-1",
+            vpcId: "vpc-123",
+            rawJSON: nil,
+            lastSyncedAt: Date()
+        ))
+        let service = CloudSecurityGroupService(
+            repository: repository,
+            keychain: keychain,
+            registry: CloudProviderRegistry(adapters: [
+                SecurityGroupViewModelMockCloudAdapter(
+                    providerId: .tencentCloud,
+                    fetchSecurityGroupsError: .permissionDenied("UnauthorizedOperation: CAM policy denied")
+                )
+            ]),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.loadCloudSecurityGroups(profile: profile, cloudSecurityGroupService: service)
+        try await waitUntil { viewModel.isLoadingCloudSecurityGroups == false && viewModel.cloudSecurityGroupErrorMessage != nil }
+
+        let message = try XCTUnwrap(viewModel.cloudSecurityGroupErrorMessage)
+        XCTAssertTrue(message.contains("could not read security groups"))
+        XCTAssertTrue(message.contains("Grant security group read permissions"))
+        XCTAssertTrue(message.contains("UnauthorizedOperation"))
+        XCTAssertNil(viewModel.cloudSecurityGroupList)
+    }
+
     func testCloudSecurityGroupRuleChangeAppliesRefreshesAndAudits() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
@@ -1463,6 +1524,91 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(logs.first?.action, "add")
         XCTAssertEqual(logs.first?.status, "success")
         XCTAssertTrue(logs.first?.afterSnapshot?.contains("443") == true)
+    }
+
+    func testCloudSecurityGroupRuleChangePermissionFailureAuditsGuidance() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.security-action-denied.\(UUID().uuidString)")
+        let account = CloudProviderAccount(
+            id: UUID(),
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            keychainRef: "cloud_test_\(UUID().uuidString)",
+            enabled: true,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try keychain.saveCloudCredential(
+            CloudProviderCredential(secretId: "sid", secretKey: "skey"),
+            keychainRef: account.keychainRef
+        )
+        defer {
+            keychain.deleteCloudCredential(keychainRef: account.keychainRef)
+        }
+        try repository.upsertCloudProviderAccount(account)
+        try repository.upsertCloudInstanceLink(CloudInstanceLink(
+            id: UUID(),
+            serverId: profile.id,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "prod",
+            publicIp: "203.0.113.1",
+            privateIp: "10.0.0.2",
+            status: "RUNNING",
+            instanceType: "mock",
+            zoneId: "ap-guangzhou-1",
+            vpcId: "vpc-123",
+            rawJSON: nil,
+            lastSyncedAt: Date()
+        ))
+        let service = CloudSecurityGroupService(
+            repository: repository,
+            keychain: keychain,
+            registry: CloudProviderRegistry(adapters: [
+                SecurityGroupViewModelMockCloudAdapter(
+                    providerId: .tencentCloud,
+                    applySecurityGroupRuleChangeError: .permissionDenied("AuthFailure.UnauthorizedOperation")
+                )
+            ]),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.loadCloudSecurityGroups(profile: profile, cloudSecurityGroupService: service)
+        try await waitUntil { viewModel.cloudSecurityGroupPolicySnapshot != nil }
+        let snapshot = try XCTUnwrap(viewModel.cloudSecurityGroupPolicySnapshot)
+        let preview = CloudSecurityGroupRuleChangePreview.adding(
+            draft: CloudSecurityGroupRuleDraft(
+                direction: .ingress,
+                protocolName: "TCP",
+                port: "443",
+                cidrBlock: "203.0.113.0/24",
+                action: "ACCEPT",
+                description: "HTTPS"
+            ),
+            to: snapshot
+        )
+
+        viewModel.applyCloudSecurityGroupRuleChange(
+            preview,
+            profile: profile,
+            cloudSecurityGroupService: service,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isMutatingCloudSecurityGroupRule == false && viewModel.cloudSecurityGroupErrorMessage != nil }
+
+        let message = try XCTUnwrap(viewModel.cloudSecurityGroupErrorMessage)
+        XCTAssertTrue(message.contains("could not add security group rule"))
+        XCTAssertTrue(message.contains("Grant security group rule write permissions"))
+        XCTAssertTrue(message.contains("AuthFailure.UnauthorizedOperation"))
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.first?.targetType, "security_group")
+        XCTAssertEqual(logs.first?.action, "add")
+        XCTAssertEqual(logs.first?.status, "failed")
+        XCTAssertTrue(logs.first?.message?.contains("Grant security group rule write permissions") == true)
     }
 
     func testPrivateRegistriesWorkspaceLoadsVerdaccioStateAndCreatesBackupAndRestore() async throws {
@@ -2570,6 +2716,9 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
     let displayName = "Mock Cloud"
     let capabilities: Set<CloudCapability> = [.securityGroups, .securityGroupActions]
     var recorder: SecurityGroupActionRecorder? = nil
+    var fetchSecurityGroupsError: CloudProviderError?
+    var fetchSecurityGroupPoliciesError: CloudProviderError?
+    var applySecurityGroupRuleChangeError: CloudProviderError?
 
     func validateCredential(_ credential: CloudProviderCredential) async throws {}
 
@@ -2597,7 +2746,10 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
         accountId: UUID,
         regionId: String
     ) async throws -> [CloudSecurityGroup] {
-        [
+        if let fetchSecurityGroupsError {
+            throw fetchSecurityGroupsError
+        }
+        return [
             CloudSecurityGroup(
                 accountId: accountId,
                 providerId: providerId,
@@ -2618,6 +2770,9 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
         group: CloudSecurityGroup,
         capturedAt: Date
     ) async throws -> CloudSecurityGroupPolicySnapshot {
+        if let fetchSecurityGroupPoliciesError {
+            throw fetchSecurityGroupPoliciesError
+        }
         var ingress = [
             CloudSecurityGroupRule(
                 direction: .ingress,
@@ -2661,6 +2816,9 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
         credential: CloudProviderCredential,
         preview: CloudSecurityGroupRuleChangePreview
     ) async throws -> String? {
+        if let applySecurityGroupRuleChangeError {
+            throw applySecurityGroupRuleChangeError
+        }
         recorder?.previews.append(preview)
         return "request-security-group-action"
     }

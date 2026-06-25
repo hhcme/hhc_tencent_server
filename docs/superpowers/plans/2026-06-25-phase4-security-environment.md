@@ -95,7 +95,7 @@ CREATE TABLE environment_profiles (
 - [x] 腾讯云安全组规则读取：当前通过 VPC `DescribeSecurityGroups` / `DescribeSecurityGroupPolicies` 读取账号地域下的安全组和规则。
 - [x] 规则 diff 和预览：当前已支持本地生成安全组规则新增/删除 diff、before/after 计数、风险级别、命令预览和警告。
 - [x] 有限写操作：腾讯云已支持新增/删除单条 ingress/egress 规则，并在执行前确认风险。
-- [ ] 权限不足时明确提示。
+- [x] 权限不足时明确提示：安全组读取、规则读取和规则变更会把 provider 权限错误转换为包含所需读/写权限、provider 名称和原始错误信息的用户提示，并在规则变更失败时写入审计日志。
 
 ### Task 3：systemd
 
