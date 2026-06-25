@@ -455,6 +455,15 @@ struct ServerWorkspaceView: View {
                     Label("Transferring file...", systemImage: "arrow.up.arrow.down")
                         .foregroundStyle(.secondary)
                 }
+
+                if !viewModel.remoteFileTransferJobs.isEmpty {
+                    RemoteTransferJobsView(
+                        jobs: viewModel.remoteFileTransferJobs,
+                        cancel: {
+                            viewModel.cancelRemoteFileTransfer()
+                        }
+                    )
+                }
             }
             .padding(20)
 
@@ -993,6 +1002,120 @@ private struct RemoteTextEditorSheet: View {
     }
 
     private static func formatBytes(_ bytes: Int) -> String {
+        let value = Double(bytes)
+        if value < 1024 {
+            return "\(bytes) B"
+        }
+        let kib = value / 1024
+        if kib < 1024 {
+            return String(format: "%.1f KiB", kib)
+        }
+        return String(format: "%.1f MiB", kib / 1024)
+    }
+}
+
+private struct RemoteTransferJobsView: View {
+    let jobs: [RemoteFileTransferJob]
+    let cancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Transfers", systemImage: "arrow.up.arrow.down")
+                    .font(.headline)
+                Spacer()
+                if jobs.contains(where: { $0.status == .running }) {
+                    Button {
+                        cancel()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            ForEach(jobs.prefix(4)) { job in
+                HStack(spacing: 10) {
+                    Image(systemName: iconName(for: job))
+                        .foregroundStyle(color(for: job))
+                        .frame(width: 18)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(job.direction.displayName) \(fileName(for: job))")
+                            .font(.subheadline)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(metadata(for: job))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    Spacer()
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .padding(10)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func iconName(for job: RemoteFileTransferJob) -> String {
+        switch job.status {
+        case .running:
+            "clock.arrow.circlepath"
+        case .succeeded:
+            "checkmark.circle"
+        case .failed:
+            "xmark.octagon"
+        case .cancelled:
+            "minus.circle"
+        }
+    }
+
+    private func color(for job: RemoteFileTransferJob) -> Color {
+        switch job.status {
+        case .running:
+            .accentColor
+        case .succeeded:
+            .green
+        case .failed:
+            .red
+        case .cancelled:
+            .secondary
+        }
+    }
+
+    private func fileName(for job: RemoteFileTransferJob) -> String {
+        switch job.direction {
+        case .upload:
+            URL(fileURLWithPath: job.localPath).lastPathComponent
+        case .download:
+            URL(fileURLWithPath: job.remotePath).lastPathComponent
+        }
+    }
+
+    private func metadata(for job: RemoteFileTransferJob) -> String {
+        var parts = [job.status.rawValue.capitalized]
+        if let byteCount = job.byteCount {
+            parts.append(formatBytes(byteCount))
+        }
+        if let finishedAt = job.finishedAt {
+            parts.append(finishedAt.formatted(date: .omitted, time: .shortened))
+        } else {
+            parts.append(job.startedAt.formatted(date: .omitted, time: .shortened))
+        }
+        if let message = job.message {
+            parts.append(message)
+        } else {
+            parts.append(job.remotePath)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
         let value = Double(bytes)
         if value < 1024 {
             return "\(bytes) B"

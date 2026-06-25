@@ -394,6 +394,8 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["app.env", "upload.env"] }
         XCTAssertEqual(client.uploads.map(\.remotePath), ["/var/www/upload.env"])
         XCTAssertEqual(viewModel.remoteFileActionMessage, "Uploaded upload.env to /var/www/upload.env.")
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.direction, .upload)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.status, .succeeded)
 
         let entry = try XCTUnwrap(viewModel.remoteDirectoryListing?.entries.first { $0.name == "app.env" })
         viewModel.downloadRemoteFile(
@@ -405,7 +407,32 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         )
         try await waitUntil { viewModel.remoteFileActionMessage == "Downloaded app.env to /tmp/download.env." }
         XCTAssertEqual(client.downloads.map(\.remotePath), ["/var/www/app.env"])
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.direction, .download)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.status, .succeeded)
         XCTAssertFalse(viewModel.isTransferringRemoteFile)
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+    }
+
+    func testRemoteFileTransferCancellationMarksRunningJobCancelled() async throws {
+        let profile = makeProfile()
+        let client = SlowRemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.uploadRemoteFile(
+            localURL: URL(fileURLWithPath: "/tmp/large.log"),
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.isTransferringRemoteFile && viewModel.remoteFileTransferJobs.first?.status == .running }
+
+        viewModel.cancelRemoteFileTransfer()
+        try await waitUntil { viewModel.remoteFileTransferJobs.first?.status == .cancelled }
+
+        XCTAssertFalse(viewModel.isTransferringRemoteFile)
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Transfer cancelled.")
         XCTAssertNil(viewModel.remoteFileErrorMessage)
     }
 
@@ -717,6 +744,38 @@ private final class RemoteFileTransferMockSSHClient: SSHClient, RemoteFileTransf
             localPath: localURL.path,
             byteCount: 8,
             duration: 0
+        )
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class SlowRemoteFileTransferMockSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Sendable {
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        try await Task.sleep(nanoseconds: 5_000_000_000)
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: nil,
+            duration: 5
+        )
+    }
+
+    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        try await Task.sleep(nanoseconds: 5_000_000_000)
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: nil,
+            duration: 5
         )
     }
 

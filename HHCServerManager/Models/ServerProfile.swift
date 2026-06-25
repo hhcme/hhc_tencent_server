@@ -134,6 +134,39 @@ struct RemoteFileTransferResult: Equatable, Hashable, Sendable {
     var duration: TimeInterval
 }
 
+enum RemoteFileTransferDirection: String, Equatable, Hashable, Sendable {
+    case upload
+    case download
+
+    var displayName: String {
+        switch self {
+        case .upload:
+            "Upload"
+        case .download:
+            "Download"
+        }
+    }
+}
+
+enum RemoteFileTransferStatus: String, Equatable, Hashable, Sendable {
+    case running
+    case succeeded
+    case failed
+    case cancelled
+}
+
+struct RemoteFileTransferJob: Identifiable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var direction: RemoteFileTransferDirection
+    var remotePath: String
+    var localPath: String
+    var status: RemoteFileTransferStatus
+    var byteCount: Int64?
+    var message: String?
+    var startedAt: Date
+    var finishedAt: Date?
+}
+
 struct CommandHistoryEntry: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var serverId: UUID
