@@ -17,6 +17,7 @@ struct ServerWorkspaceView: View {
     @State private var cronCommandText = ""
     @State private var pendingCronAction: CronActionRequest?
     @State private var pendingNginxReload = false
+    @State private var pendingNginxSave = false
 
     let profile: ServerProfile
 
@@ -124,6 +125,19 @@ struct ServerWorkspaceView: View {
             }
         } message: {
             Text("This will run nginx -t first and reload only if the configuration test passes.")
+        }
+        .alert("Save Nginx Config?", isPresented: $pendingNginxSave) {
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                viewModel.saveNginxConfig(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    nginxConfigManager: appState.nginxConfigManager,
+                    repository: appState.repository
+                )
+            }
+        } message: {
+            Text("This will create a remote backup, write the config, run nginx -t, and restore the backup if the test fails.")
         }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
@@ -967,12 +981,38 @@ struct ServerWorkspaceView: View {
                         .controlSize(.small)
                 }
 
-                ScrollView {
-                    Text(nginxConfigText(for: file))
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Config")
+                            .font(.headline)
+                        Spacer()
+                        Button {
+                            viewModel.nginxConfigDraft = viewModel.nginxConfigContent?.content ?? ""
+                        } label: {
+                            Label("Revert", systemImage: "arrow.uturn.backward")
+                        }
+                        .disabled(isNginxBusy || !isNginxDraftDirty)
+
+                        Button {
+                            pendingNginxSave = true
+                        } label: {
+                            if viewModel.isSavingNginxConfig {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Label("Save", systemImage: "square.and.arrow.down")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isNginxBusy || !isNginxDraftDirty || viewModel.nginxConfigContent?.file.id != file.id)
+                    }
+
+                    TextEditor(text: $viewModel.nginxConfigDraft)
                         .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+                        .scrollContentBackground(.hidden)
+                        .disabled(viewModel.nginxConfigContent?.file.id != file.id || viewModel.isLoadingNginxConfigContent)
+                        .frame(minHeight: 260)
+                        .padding(8)
                 }
                 .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
 
@@ -1481,7 +1521,12 @@ struct ServerWorkspaceView: View {
         viewModel.isLoadingNginxConfigs ||
             viewModel.isLoadingNginxConfigContent ||
             viewModel.isTestingNginxConfig ||
+            viewModel.isSavingNginxConfig ||
             viewModel.isReloadingNginx
+    }
+
+    private var isNginxDraftDirty: Bool {
+        viewModel.nginxConfigDraft != (viewModel.nginxConfigContent?.content ?? "")
     }
 }
 

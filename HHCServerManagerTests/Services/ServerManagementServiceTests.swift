@@ -329,6 +329,29 @@ final class ServerManagementServiceTests: XCTestCase {
         _ = try await manager.reload(profile: profile, sshClient: client)
         XCTAssertTrue(client.commands.contains("nginx -t"))
         XCTAssertTrue(client.commands.contains("systemctl reload nginx 2>/dev/null || nginx -s reload"))
+
+        let saved = try await manager.saveConfig(
+            file: list.files[0],
+            content: "user nginx;\n",
+            profile: profile,
+            sshClient: client
+        )
+        XCTAssertFalse(saved.rolledBack)
+        XCTAssertTrue(saved.testResult.succeeded)
+        XCTAssertTrue(saved.backupPath.contains(".hhc-backup-"))
+        XCTAssertEqual(client.configs["/www/server/nginx/conf/nginx.conf"], "user nginx;\n")
+        XCTAssertTrue(client.commands.contains { $0.contains("cp -p -- \"$path\" \"$backup\"") })
+
+        client.testSucceeds = false
+        let rolledBack = try await manager.saveConfig(
+            file: list.files[0],
+            content: "broken;",
+            profile: profile,
+            sshClient: client
+        )
+        XCTAssertTrue(rolledBack.rolledBack)
+        XCTAssertFalse(rolledBack.testResult.succeeded)
+        XCTAssertEqual(client.configs["/www/server/nginx/conf/nginx.conf"], "user nginx;\n")
     }
 
     func testDashboardServiceAppendsCloudMetricsWhenLinked() async throws {
@@ -1190,6 +1213,11 @@ private final class RecordingCronSSHClient: SSHClient, @unchecked Sendable {
 
 private final class RecordingNginxSSHClient: SSHClient, @unchecked Sendable {
     private(set) var commands: [String] = []
+    var configs = [
+        "/www/server/nginx/conf/nginx.conf": "user www-data;\n",
+        "/www/server/nginx/conf/vhost/site.conf": "server { server_name example.com; }\n",
+    ]
+    var testSucceeds = true
 
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
         try await execute("printf hhc-ssh-ok", profile: profile)
@@ -1212,18 +1240,44 @@ private final class RecordingNginxSSHClient: SSHClient, @unchecked Sendable {
         if command.contains("base64 < '/www/server/nginx/conf/nginx.conf'") {
             return CommandResult(
                 command: command,
-                stdout: Data("user www-data;\n".utf8).base64EncodedString(),
+                stdout: Data((configs["/www/server/nginx/conf/nginx.conf"] ?? "").utf8).base64EncodedString(),
                 stderr: "",
                 exitCode: 0,
                 duration: 0
             )
         }
+        if command.contains("base64 -d > \"$tmp\"") {
+            let path = Self.extractShellValue(named: "path", from: command) ?? "/www/server/nginx/conf/nginx.conf"
+            let previous = configs[path]
+            let next = Self.decodeConfig(from: command)
+            if testSucceeds {
+                configs[path] = next
+                return CommandResult(
+                    command: command,
+                    stdout: "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n",
+                    stderr: "",
+                    exitCode: 0,
+                    duration: 0
+                )
+            }
+            configs[path] = previous
+            return CommandResult(
+                command: command,
+                stdout: "nginx: [emerg] invalid number of arguments in \"server\" directive\nnginx: configuration file /www/server/nginx/conf/nginx.conf test failed\n",
+                stderr: "",
+                exitCode: 4,
+                duration: 0
+            )
+        }
         if command == "nginx -t" {
+            let exitCode: Int32 = testSucceeds ? 0 : 1
             return CommandResult(
                 command: command,
                 stdout: "",
-                stderr: "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n",
-                exitCode: 0,
+                stderr: testSucceeds
+                    ? "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n"
+                    : "nginx: [emerg] invalid number of arguments in \"server\" directive\nnginx: configuration file /www/server/nginx/conf/nginx.conf test failed\n",
+                exitCode: exitCode,
                 duration: 0
             )
         }
@@ -1234,6 +1288,22 @@ private final class RecordingNginxSSHClient: SSHClient, @unchecked Sendable {
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+
+    private static func decodeConfig(from command: String) -> String {
+        guard let start = command.range(of: "__HHC_NGINX_CONFIG_EOF__'\n"),
+              let end = command[start.upperBound...].range(of: "\n__HHC_NGINX_CONFIG_EOF__")
+        else { return "" }
+        let encoded = String(command[start.upperBound..<end.lowerBound])
+        return Data(base64Encoded: encoded).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+
+    private static func extractShellValue(named name: String, from command: String) -> String? {
+        let prefix = "\(name)='"
+        guard let start = command.range(of: prefix),
+              let end = command[start.upperBound...].range(of: "'")
+        else { return nil }
+        return String(command[start.upperBound..<end.lowerBound])
+    }
 }
 
 private final class RecordingTransferClient: RemoteFileTransferClient, @unchecked Sendable {

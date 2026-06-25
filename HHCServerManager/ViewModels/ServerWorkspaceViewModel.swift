@@ -37,10 +37,12 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var nginxConfigList: NginxConfigList?
     @Published var selectedNginxConfig: NginxConfigFile?
     @Published var nginxConfigContent: NginxConfigContent?
+    @Published var nginxConfigDraft = ""
     @Published var nginxTestResult: NginxTestResult?
     @Published var isLoadingNginxConfigs = false
     @Published var isLoadingNginxConfigContent = false
     @Published var isTestingNginxConfig = false
+    @Published var isSavingNginxConfig = false
     @Published var isReloadingNginx = false
     @Published var nginxErrorMessage: String?
     @Published var nginxActionMessage: String?
@@ -879,12 +881,83 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 let content = try await nginxConfigManager.readConfig(file: file, profile: profile, sshClient: sshClient)
                 await MainActor.run {
                     self.nginxConfigContent = content
+                    self.nginxConfigDraft = content.content
                     self.isLoadingNginxConfigContent = false
                 }
             } catch {
                 await MainActor.run {
                     self.nginxErrorMessage = error.localizedDescription
                     self.isLoadingNginxConfigContent = false
+                }
+            }
+        }
+    }
+
+    func saveNginxConfig(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        nginxConfigManager: NginxConfigManager,
+        repository: ServerRepository? = nil
+    ) {
+        guard let content = nginxConfigContent else { return }
+        isSavingNginxConfig = true
+        nginxErrorMessage = nil
+        nginxActionMessage = nil
+        let beforeSnapshot = content.content
+        let draft = nginxConfigDraft
+
+        Task {
+            do {
+                let result = try await nginxConfigManager.saveConfig(
+                    file: content.file,
+                    content: draft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let refreshed = try await nginxConfigManager.readConfig(
+                    file: content.file,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let status = result.rolledBack ? "failed" : "success"
+                let message = result.rolledBack
+                    ? "Saved config failed nginx -t and was rolled back from \(result.backupPath)."
+                    : "Saved config after successful nginx -t. Backup: \(result.backupPath)."
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: content.file.path,
+                    action: "save",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: result.rolledBack ? refreshed.content : draft,
+                    status: status,
+                    message: message
+                )
+                await MainActor.run {
+                    self.nginxConfigContent = refreshed
+                    self.nginxConfigDraft = refreshed.content
+                    self.nginxTestResult = result.testResult
+                    self.nginxActionMessage = result.rolledBack
+                        ? "Nginx test failed. Restored backup: \(result.backupPath)."
+                        : "Saved Nginx config. Backup: \(result.backupPath)."
+                    self.isSavingNginxConfig = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: content.file.path,
+                    action: "save",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.nginxErrorMessage = error.localizedDescription
+                    self.isSavingNginxConfig = false
                 }
             }
         }

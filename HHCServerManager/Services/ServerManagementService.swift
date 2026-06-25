@@ -840,6 +840,60 @@ final class NginxConfigManager: @unchecked Sendable {
         )
     }
 
+    func saveConfig(
+        file: NginxConfigFile,
+        content: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> NginxConfigSaveResult {
+        let path = try Self.validatedConfigPath(file.path)
+        let data = Data(content.utf8)
+        guard data.count <= Self.maxConfigBytes else {
+            throw SSHClientError.processFailed("Nginx config is larger than the editable preview limit.")
+        }
+        let backupPath = "\(path).hhc-backup-\(Self.timestamp(for: now()))"
+        let encoded = data.base64EncodedString()
+        let command = """
+        set -e; \
+        path=\(Self.shellQuote(path)); \
+        backup=\(Self.shellQuote(backupPath)); \
+        tmp=$(mktemp "$path.hhc-tmp.XXXXXX"); \
+        cleanup() { rm -f "$tmp"; }; \
+        trap cleanup EXIT; \
+        cp -p -- "$path" "$backup"; \
+        base64 -d > "$tmp" <<'__HHC_NGINX_CONFIG_EOF__'
+        \(encoded)
+        __HHC_NGINX_CONFIG_EOF__
+        chmod --reference="$path" "$tmp" 2>/dev/null || true; \
+        chown --reference="$path" "$tmp" 2>/dev/null || true; \
+        mv -- "$tmp" "$path"; \
+        if nginx -t > /tmp/hhc-nginx-test-$$.log 2>&1; then \
+        cat /tmp/hhc-nginx-test-$$.log; rm -f /tmp/hhc-nginx-test-$$.log; exit 0; \
+        else \
+        status=$?; cat /tmp/hhc-nginx-test-$$.log; rm -f /tmp/hhc-nginx-test-$$.log; cp -p -- "$backup" "$path"; exit 4; \
+        fi
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(15) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        let testResult = NginxTestResult(
+            succeeded: result.exitCode == 0,
+            output: Self.combinedOutput(result),
+            capturedAt: now()
+        )
+        if result.exitCode == 0 || result.exitCode == 4 {
+            return NginxConfigSaveResult(
+                file: file,
+                content: content,
+                backupPath: backupPath,
+                testResult: testResult,
+                rolledBack: result.exitCode == 4,
+                capturedAt: now()
+            )
+        }
+        throw SSHClientError.processFailed(Self.combinedOutput(result).nilIfEmpty ?? "Could not save \(path).")
+    }
+
     func reload(profile: ServerProfile, sshClient: SSHClient) async throws -> NginxTestResult {
         let test = try await testConfig(profile: profile, sshClient: sshClient)
         guard test.succeeded else {
@@ -895,6 +949,13 @@ final class NginxConfigManager: @unchecked Sendable {
 
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func timestamp(for date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+            .replacingOccurrences(of: ":", with: "-")
     }
 }
 

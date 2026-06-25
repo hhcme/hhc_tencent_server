@@ -214,6 +214,15 @@ struct NginxTestResult: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+struct NginxConfigSaveResult: Equatable, Hashable, Sendable {
+    var file: NginxConfigFile
+    var content: String
+    var backupPath: String
+    var testResult: NginxTestResult
+    var rolledBack: Bool
+    var capturedAt: Date
+}
+
 enum RemoteFileKind: String, Equatable, Hashable {
     case directory
     case file

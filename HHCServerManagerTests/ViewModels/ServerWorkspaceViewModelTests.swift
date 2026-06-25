@@ -710,6 +710,21 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(logs[0].action, "reload")
         XCTAssertEqual(logs[0].status, "success")
         XCTAssertTrue(logs[0].afterSnapshot?.contains("syntax is ok") == true)
+
+        viewModel.nginxConfigDraft = "server { server_name edited.example.com; }\n"
+        viewModel.saveNginxConfig(profile: profile, sshClient: client, nginxConfigManager: manager, repository: repository)
+        try await waitUntil { viewModel.isSavingNginxConfig == false && viewModel.nginxActionMessage?.contains("Saved Nginx config") == true }
+        XCTAssertTrue(viewModel.nginxConfigContent?.content.contains("edited.example.com") == true)
+
+        client.testSucceeds = false
+        viewModel.nginxConfigDraft = "broken;"
+        viewModel.saveNginxConfig(profile: profile, sshClient: client, nginxConfigManager: manager, repository: repository)
+        try await waitUntil { viewModel.isSavingNginxConfig == false && viewModel.nginxActionMessage?.contains("Restored backup") == true }
+        XCTAssertTrue(viewModel.nginxConfigContent?.content.contains("edited.example.com") == true)
+
+        let updatedLogs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(updatedLogs.map(\.action).prefix(3), ["save", "save", "reload"])
+        XCTAssertEqual(updatedLogs.map(\.status).prefix(3), ["failed", "success", "success"])
     }
 
     private func makeProfile() -> ServerProfile {
@@ -1207,6 +1222,11 @@ private final class CronViewModelMockSSHClient: SSHClient, @unchecked Sendable {
 
 private final class NginxViewModelMockSSHClient: SSHClient, @unchecked Sendable {
     private(set) var commands: [String] = []
+    var configs = [
+        "/www/server/nginx/conf/nginx.conf": "user www-data;\n",
+        "/www/server/nginx/conf/vhost/site.conf": "server { server_name example.com; }\n",
+    ]
+    var testSucceeds = true
 
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
         try await execute("printf hhc-ssh-ok", profile: profile)
@@ -1229,7 +1249,7 @@ private final class NginxViewModelMockSSHClient: SSHClient, @unchecked Sendable 
         if command.contains("base64 < '/www/server/nginx/conf/nginx.conf'") {
             return CommandResult(
                 command: command,
-                stdout: Data("user www-data;\n".utf8).base64EncodedString(),
+                stdout: Data((configs["/www/server/nginx/conf/nginx.conf"] ?? "").utf8).base64EncodedString(),
                 stderr: "",
                 exitCode: 0,
                 duration: 0
@@ -1238,18 +1258,44 @@ private final class NginxViewModelMockSSHClient: SSHClient, @unchecked Sendable 
         if command.contains("base64 < '/www/server/nginx/conf/vhost/site.conf'") {
             return CommandResult(
                 command: command,
-                stdout: Data("server { server_name example.com; }\n".utf8).base64EncodedString(),
+                stdout: Data((configs["/www/server/nginx/conf/vhost/site.conf"] ?? "").utf8).base64EncodedString(),
                 stderr: "",
                 exitCode: 0,
                 duration: 0
             )
         }
+        if command.contains("base64 -d > \"$tmp\"") {
+            let path = Self.extractShellValue(named: "path", from: command) ?? "/www/server/nginx/conf/nginx.conf"
+            let previous = configs[path]
+            let next = Self.decodeConfig(from: command)
+            if testSucceeds {
+                configs[path] = next
+                return CommandResult(
+                    command: command,
+                    stdout: "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n",
+                    stderr: "",
+                    exitCode: 0,
+                    duration: 0
+                )
+            }
+            configs[path] = previous
+            return CommandResult(
+                command: command,
+                stdout: "nginx: [emerg] invalid number of arguments in \"server\" directive\nnginx: configuration file /www/server/nginx/conf/nginx.conf test failed\n",
+                stderr: "",
+                exitCode: 4,
+                duration: 0
+            )
+        }
         if command == "nginx -t" {
+            let exitCode: Int32 = testSucceeds ? 0 : 1
             return CommandResult(
                 command: command,
                 stdout: "",
-                stderr: "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n",
-                exitCode: 0,
+                stderr: testSucceeds
+                    ? "nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok\nnginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n"
+                    : "nginx: [emerg] invalid number of arguments in \"server\" directive\nnginx: configuration file /www/server/nginx/conf/nginx.conf test failed\n",
+                exitCode: exitCode,
                 duration: 0
             )
         }
@@ -1260,4 +1306,20 @@ private final class NginxViewModelMockSSHClient: SSHClient, @unchecked Sendable 
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+
+    private static func decodeConfig(from command: String) -> String {
+        guard let start = command.range(of: "__HHC_NGINX_CONFIG_EOF__'\n"),
+              let end = command[start.upperBound...].range(of: "\n__HHC_NGINX_CONFIG_EOF__")
+        else { return "" }
+        let encoded = String(command[start.upperBound..<end.lowerBound])
+        return Data(base64Encoded: encoded).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
+
+    private static func extractShellValue(named name: String, from command: String) -> String? {
+        let prefix = "\(name)='"
+        guard let start = command.range(of: prefix),
+              let end = command[start.upperBound...].range(of: "'")
+        else { return nil }
+        return String(command[start.upperBound..<end.lowerBound])
+    }
 }
