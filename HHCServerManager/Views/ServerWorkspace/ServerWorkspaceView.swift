@@ -395,7 +395,7 @@ struct ServerWorkspaceView: View {
                     } label: {
                         Label("Upload", systemImage: "square.and.arrow.up")
                     }
-                    .disabled(isRemoteFileBusy)
+                    .disabled(isRemoteFileSelectionBusy)
 
                     Button {
                         viewModel.loadRemoteParentDirectory(
@@ -461,6 +461,9 @@ struct ServerWorkspaceView: View {
                         jobs: viewModel.remoteFileTransferJobs,
                         cancel: {
                             viewModel.cancelRemoteFileTransfer()
+                        },
+                        clearPending: {
+                            viewModel.cancelPendingRemoteFileTransfers()
                         }
                     )
                 }
@@ -523,7 +526,7 @@ struct ServerWorkspaceView: View {
                     } label: {
                         Label("Download", systemImage: "square.and.arrow.down")
                     }
-                    .disabled(isRemoteFileBusy)
+                    .disabled(isRemoteFileSelectionBusy)
                 }
                 Button {
                     startRenaming(entry)
@@ -767,6 +770,13 @@ struct ServerWorkspaceView: View {
             viewModel.isLoadingRemoteText ||
             viewModel.isSavingRemoteText ||
             viewModel.isTransferringRemoteFile
+    }
+
+    private var isRemoteFileSelectionBusy: Bool {
+        viewModel.isLoadingRemoteFiles ||
+            viewModel.isMutatingRemoteFile ||
+            viewModel.isLoadingRemoteText ||
+            viewModel.isSavingRemoteText
     }
 }
 
@@ -1017,6 +1027,7 @@ private struct RemoteTextEditorSheet: View {
 private struct RemoteTransferJobsView: View {
     let jobs: [RemoteFileTransferJob]
     let cancel: () -> Void
+    let clearPending: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1024,6 +1035,14 @@ private struct RemoteTransferJobsView: View {
                 Label("Transfers", systemImage: "arrow.up.arrow.down")
                     .font(.headline)
                 Spacer()
+                if jobs.contains(where: { $0.status == .pending }) {
+                    Button {
+                        clearPending()
+                    } label: {
+                        Label("Clear Pending", systemImage: "minus.circle")
+                    }
+                    .buttonStyle(.bordered)
+                }
                 if jobs.contains(where: { $0.status == .running }) {
                     Button {
                         cancel()
@@ -1064,6 +1083,8 @@ private struct RemoteTransferJobsView: View {
 
     private func iconName(for job: RemoteFileTransferJob) -> String {
         switch job.status {
+        case .pending:
+            "hourglass"
         case .running:
             "clock.arrow.circlepath"
         case .succeeded:
@@ -1077,6 +1098,8 @@ private struct RemoteTransferJobsView: View {
 
     private func color(for job: RemoteFileTransferJob) -> Color {
         switch job.status {
+        case .pending:
+            .secondary
         case .running:
             .accentColor
         case .succeeded:

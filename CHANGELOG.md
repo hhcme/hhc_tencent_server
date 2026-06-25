@@ -47,7 +47,7 @@ All notable changes to this project will be documented in this file.
 - Added remote file rename and recoverable delete-to-trash actions with confirmation, validation, refresh, and tests.
 - Added lightweight remote UTF-8 text editing with a 256 KiB guard, temporary-file replacement, backup-on-save, UI sheet, and tests.
 - Added single-file upload/download bootstrap through OpenSSH/scp with file picker/save panel UI, transfer state, tests, sandbox entitlement update, and real-server smoke validation.
-- Added visible remote transfer job records with running/succeeded/failed/cancelled states and current-transfer cancellation coverage.
+- Added visible remote transfer job records with pending/running/succeeded/failed/cancelled states, serial single-file queueing, current-transfer cancellation, and pending-queue clearing coverage.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -90,4 +90,4 @@ All notable changes to this project will be documented in this file.
 - 添加远程文件重命名和可恢复移入回收目录操作，包含确认、校验、刷新和测试。
 - 添加轻量远程 UTF-8 文本编辑，包含 256 KiB 限制、临时文件替换、保存前备份、UI sheet 和测试。
 - 添加基于 OpenSSH/scp 的单文件上传/下载 bootstrap，包含文件选择/保存面板、传输状态、测试、沙盒权限更新和真实服务器 smoke 验证。
-- 添加可见的远程传输任务记录，支持 running/succeeded/failed/cancelled 状态和当前传输取消测试。
+- 添加可见的远程传输任务记录，支持 pending/running/succeeded/failed/cancelled 状态、串行单文件队列、当前传输取消和待传队列清空测试。

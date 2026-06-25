@@ -6,9 +6,9 @@ HHC Server Manager is an open-source macOS native server management client. It a
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，目标是以 SSH 为核心提供类似宝塔面板的桌面端体验，并在用户配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-> Project status: early macOS implementation. The app can already store server profiles, keep SSH and cloud credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, execute single remote commands, and persist command/cloud metadata in SQLite.
+> Project status: early macOS implementation. The app can already store server profiles, keep SSH and cloud credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, execute single remote commands, browse remote files, queue single-file transfers, and persist command/cloud metadata in SQLite.
 >
-> 项目状态：macOS 早期实现阶段。当前应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令，并在 SQLite 中持久化命令和云资源元数据。
+> 项目状态：macOS 早期实现阶段。当前应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览远程文件、排队传输单个文件，并在 SQLite 中持久化命令和云资源元数据。
 
 ## Highlights / 亮点
 
@@ -17,6 +17,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - Credentials stored in macOS Keychain.
 - Host key verification as a first-class security requirement.
 - Server browser, dedicated server workspace, real smoke test, simplified command panel, and command metadata history are underway.
+- Remote file browsing, lightweight text editing, and queued single-file upload/download are underway.
 - Cloud account metadata and cloud credential storage foundation are in place.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper are in place.
 - Tencent Cloud read-only adapter now includes TC3 request signing plus Region and CVM instance query parsing.
@@ -28,6 +29,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - SSH 密码、私钥等敏感信息存入 macOS Keychain。
 - 把主机指纹验证作为基础安全能力。
 - 服务器列表、单服务器工作台、真实 smoke test、简化命令面板和命令元数据历史已进入实现。
+- 远程文件浏览、轻量文本编辑和排队单文件上传/下载已进入实现。
 - 云账号元数据和云凭据存储基础已经落地。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装已经落地。
 - 腾讯云只读 adapter 已包含 TC3 请求签名、地域查询和 CVM 实例查询解析。

@@ -4,7 +4,7 @@ English | [中文](README.zh-CN.md)
 
 HHC Server Manager is an open-source macOS native server management client. It aims to manage multiple Linux servers through SSH and provide a desktop experience similar to Baota Panel, with optional cloud provider API enhancements for instance discovery, cloud-side metrics, security groups, and power operations.
 
-The repository is in early macOS implementation. The app can already save server profiles, store SSH and cloud credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, execute single remote commands, browse remote directories, transfer single files, and persist command/cloud metadata in SQLite.
+The repository is in early macOS implementation. The app can already save server profiles, store SSH and cloud credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, execute single remote commands, browse remote directories, queue single-file transfers, and persist command/cloud metadata in SQLite.
 
 ## Why
 
@@ -28,7 +28,7 @@ Target users include:
 - Tencent Cloud read-only adapter with TC3 request signing plus Region and CVM instance query parsing.
 - Cloud import sheet for verifying Tencent Cloud accounts, loading regions, syncing CVM instances, and importing instances as SSH profiles.
 - Dashboard foundations with SSH-based OS/capability detection plus load, memory, disk, CPU, network, and process summary metric cards.
-- Remote file browser foundations with path navigation, directory listing, file metadata display, single-file upload/download through OpenSSH/scp, visible transfer states with current-transfer cancellation, rename, recoverable move-to-trash, and lightweight UTF-8 text editing with backup-on-save.
+- Remote file browser foundations with path navigation, directory listing, file metadata display, queued single-file upload/download through OpenSSH/scp, visible transfer states, current-transfer cancellation, pending-queue clearing, rename, recoverable move-to-trash, and lightweight UTF-8 text editing with backup-on-save.
 - Optional cloud account integration through provider adapters.
 - Cloud instance discovery, resource metadata, cloud metrics, security groups, and power operations.
 - Simplified command panel and server dashboard.
@@ -56,7 +56,7 @@ Target users include:
 2. **Phase 2: Cloud provider foundation and simplified command panel**
    Cloud accounts, provider adapters, Tencent Cloud read-only instance discovery, and command history.
 3. **Phase 3: Dashboard and file manager**
-   Combine SSH metrics with cloud metrics; ship SSH-bootstrap directory browsing, lightweight editing, and single-file transfers first, then harden SFTP transfer queues.
+   Combine SSH metrics with cloud metrics; ship SSH-bootstrap directory browsing, lightweight editing, and queued single-file transfers first, then harden SFTP, progress reporting, and batch transfer workflows.
 4. **Phase 4: Security groups and environment configuration**
    Security group viewing/updating, systemd, Nginx, firewall, cron, and environment variables.
 5. **Phase 5: GitLab deployment**
@@ -81,7 +81,7 @@ Target users include:
 
 ## Development Status
 
-The macOS app is now under active implementation. Phase 1 foundations are in place, Phase 2 foundations are largely in place, and Phase 3 Dashboard/file browser foundations have started: SwiftUI app structure, local SQLite persistence, Keychain-backed SSH/cloud credentials, host-key trust, OpenSSH-based real command execution with cancellation, command metadata history with reruns, split stdout/stderr output, cloud account metadata, cloud instance links, cloud instance sync/import UI foundations, provider adapter registry, normalized cloud errors, Tencent Cloud TC3 request signing, Region/CVM instance response parsing, SSH-based Dashboard capability and metric collection including network and process summaries, Dashboard per-metric warning fallback, remote directory browsing, single-file upload/download with visible task states and current-transfer cancellation, rename, recoverable move-to-trash, lightweight UTF-8 text editing with backup-on-save, operation logs, unit tests, and GitHub Actions CI. Command output remains session-scoped and is not persisted by default. Full transfer queues, deployment, package registry, and Windows native work remain planned later phases.
+The macOS app is now under active implementation. Phase 1 foundations are in place, Phase 2 foundations are largely in place, and Phase 3 Dashboard/file browser foundations have started: SwiftUI app structure, local SQLite persistence, Keychain-backed SSH/cloud credentials, host-key trust, OpenSSH-based real command execution with cancellation, command metadata history with reruns, split stdout/stderr output, cloud account metadata, cloud instance links, cloud instance sync/import UI foundations, provider adapter registry, normalized cloud errors, Tencent Cloud TC3 request signing, Region/CVM instance response parsing, SSH-based Dashboard capability and metric collection including network and process summaries, Dashboard per-metric warning fallback, remote directory browsing, queued single-file upload/download with visible task states, current-transfer cancellation and pending-queue clearing, rename, recoverable move-to-trash, lightweight UTF-8 text editing with backup-on-save, operation logs, unit tests, and GitHub Actions CI. Command output remains session-scoped and is not persisted by default. SFTP hardening, progress percentages, batch transfers, deployment, package registry, and Windows native work remain planned later phases.
 
 ## Contributing
 

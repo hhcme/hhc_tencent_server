@@ -436,6 +436,80 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.remoteFileErrorMessage)
     }
 
+    func testRemoteFileTransfersRunSeriallyWithPendingQueueState() async throws {
+        let profile = makeProfile()
+        let client = QueuedRemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadRemoteFiles(
+            path: "/var/www",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing != nil }
+
+        viewModel.uploadRemoteFile(
+            localURL: URL(fileURLWithPath: "/tmp/first.env"),
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteFileTransferJobs.first?.status == .running }
+
+        viewModel.uploadRemoteFile(
+            localURL: URL(fileURLWithPath: "/tmp/second.env"),
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service
+        )
+
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.status), [.pending, .running])
+        try await waitUntil {
+            viewModel.remoteFileTransferJobs.count == 2 &&
+                viewModel.remoteFileTransferJobs.allSatisfy { $0.status == .succeeded }
+        }
+
+        XCTAssertEqual(client.uploads.map(\.remotePath), ["/var/www/first.env", "/var/www/second.env"])
+        XCTAssertFalse(viewModel.isTransferringRemoteFile)
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+    }
+
+    func testCancelPendingRemoteFileTransfersLeavesRunningTransferActive() async throws {
+        let profile = makeProfile()
+        let client = QueuedRemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.uploadRemoteFile(
+            localURL: URL(fileURLWithPath: "/tmp/running.env"),
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteFileTransferJobs.first?.status == .running }
+
+        viewModel.uploadRemoteFile(
+            localURL: URL(fileURLWithPath: "/tmp/pending.env"),
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service
+        )
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.status), [.pending, .running])
+
+        viewModel.cancelPendingRemoteFileTransfers()
+
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.status), [.cancelled, .running])
+        XCTAssertTrue(viewModel.isTransferringRemoteFile)
+        try await waitUntil { viewModel.remoteFileTransferJobs.last?.status == .succeeded }
+        XCTAssertEqual(client.uploads.map(\.remotePath), ["~/running.env"])
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -776,6 +850,49 @@ private final class SlowRemoteFileTransferMockSSHClient: SSHClient, RemoteFileTr
             localPath: localURL.path,
             byteCount: nil,
             duration: 5
+        )
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class QueuedRemoteFileTransferMockSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Sendable {
+    private(set) var uploads: [(localURL: URL, remotePath: String)] = []
+    private var remoteNames: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        if command.contains("find . -maxdepth 1") {
+            let stdout = remoteNames.sorted().map { name in
+                "\(name)\tf\t8\t1700000001.0\t-rw-r--r--"
+            }
+            .joined(separator: "\n")
+            return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        try await Task.sleep(nanoseconds: 50_000_000)
+        uploads.append((localURL, remotePath))
+        remoteNames.append(localURL.lastPathComponent)
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: 8,
+            duration: 0.05
+        )
+    }
+
+    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: 8,
+            duration: 0
         )
     }
 

@@ -31,6 +31,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     private var runningCommand: String?
     private var transferTask: Task<Void, Never>?
     private var runningTransferJobId: UUID?
+    private var transferQueue: [QueuedRemoteFileTransfer] = []
 
     func configure(initialState: SSHConnectionState) {
         connectionState = initialState
@@ -298,67 +299,28 @@ final class ServerWorkspaceViewModel: ObservableObject {
         transferClient: RemoteFileTransferClient,
         remoteFileService: RemoteFileService
     ) {
-        guard !isTransferringRemoteFile else { return }
         let remotePath = RemoteFileService.joinedPath(
             basePath: RemoteFileService.normalizedDirectoryPath(remoteFilePath),
             name: localURL.lastPathComponent
         )
-        let jobId = startRemoteFileTransferJob(
+        let targetDirectoryPath = remoteFilePath
+        let jobId = enqueueRemoteFileTransferJob(
             direction: .upload,
             remotePath: remotePath,
             localPath: localURL.path
         )
-        isTransferringRemoteFile = true
         remoteFileErrorMessage = nil
         remoteFileActionMessage = nil
-
-        transferTask?.cancel()
-        transferTask = Task {
-            do {
-                let didAccess = localURL.startAccessingSecurityScopedResource()
-                defer {
-                    if didAccess {
-                        localURL.stopAccessingSecurityScopedResource()
-                    }
-                }
-                let result = try await remoteFileService.uploadFile(
-                    localURL: localURL,
-                    toDirectoryPath: self.remoteFilePath,
-                    profile: profile,
-                    transferClient: transferClient
-                )
-                let listing = try await remoteFileService.listDirectory(
-                    path: self.remoteFilePath,
-                    profile: profile,
-                    sshClient: sshClient
-                )
-                await MainActor.run {
-                    self.remoteDirectoryListing = listing
-                    self.remoteFilePath = listing.path
-                    self.remoteFileActionMessage = "Uploaded \(localURL.lastPathComponent) to \(result.remotePath)."
-                    self.finishRemoteFileTransferJob(jobId, status: .succeeded, result: result, message: self.remoteFileActionMessage)
-                    self.isTransferringRemoteFile = false
-                    self.transferTask = nil
-                    self.runningTransferJobId = nil
-                }
-            } catch is CancellationError {
-                await MainActor.run {
-                    self.cancelRemoteFileTransferJob(jobId)
-                }
-            } catch SSHClientError.cancelled {
-                await MainActor.run {
-                    self.cancelRemoteFileTransferJob(jobId)
-                }
-            } catch {
-                await MainActor.run {
-                    self.remoteFileErrorMessage = error.localizedDescription
-                    self.finishRemoteFileTransferJob(jobId, status: .failed, message: error.localizedDescription)
-                    self.isTransferringRemoteFile = false
-                    self.transferTask = nil
-                    self.runningTransferJobId = nil
-                }
-            }
-        }
+        transferQueue.append(.upload(
+            jobId: jobId,
+            localURL: localURL,
+            directoryPath: targetDirectoryPath,
+            profile: profile,
+            sshClient: sshClient,
+            transferClient: transferClient,
+            remoteFileService: remoteFileService
+        ))
+        startNextRemoteFileTransferIfNeeded()
     }
 
     func downloadRemoteFile(
@@ -368,56 +330,22 @@ final class ServerWorkspaceViewModel: ObservableObject {
         transferClient: RemoteFileTransferClient,
         remoteFileService: RemoteFileService
     ) {
-        guard !isTransferringRemoteFile else { return }
-        let jobId = startRemoteFileTransferJob(
+        let jobId = enqueueRemoteFileTransferJob(
             direction: .download,
             remotePath: entry.path,
             localPath: localURL.path
         )
-        isTransferringRemoteFile = true
         remoteFileErrorMessage = nil
         remoteFileActionMessage = nil
-
-        transferTask?.cancel()
-        transferTask = Task {
-            do {
-                let didAccess = localURL.startAccessingSecurityScopedResource()
-                defer {
-                    if didAccess {
-                        localURL.stopAccessingSecurityScopedResource()
-                    }
-                }
-                let result = try await remoteFileService.downloadFile(
-                    entry: entry,
-                    to: localURL,
-                    profile: profile,
-                    transferClient: transferClient
-                )
-                await MainActor.run {
-                    self.remoteFileActionMessage = "Downloaded \(entry.name) to \(result.localPath)."
-                    self.finishRemoteFileTransferJob(jobId, status: .succeeded, result: result, message: self.remoteFileActionMessage)
-                    self.isTransferringRemoteFile = false
-                    self.transferTask = nil
-                    self.runningTransferJobId = nil
-                }
-            } catch is CancellationError {
-                await MainActor.run {
-                    self.cancelRemoteFileTransferJob(jobId)
-                }
-            } catch SSHClientError.cancelled {
-                await MainActor.run {
-                    self.cancelRemoteFileTransferJob(jobId)
-                }
-            } catch {
-                await MainActor.run {
-                    self.remoteFileErrorMessage = error.localizedDescription
-                    self.finishRemoteFileTransferJob(jobId, status: .failed, message: error.localizedDescription)
-                    self.isTransferringRemoteFile = false
-                    self.transferTask = nil
-                    self.runningTransferJobId = nil
-                }
-            }
-        }
+        transferQueue.append(.download(
+            jobId: jobId,
+            entry: entry,
+            localURL: localURL,
+            profile: profile,
+            transferClient: transferClient,
+            remoteFileService: remoteFileService
+        ))
+        startNextRemoteFileTransferIfNeeded()
     }
 
     func cancelRemoteFileTransfer() {
@@ -426,6 +354,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
         transferTask = nil
         if let runningTransferJobId {
             cancelRemoteFileTransferJob(runningTransferJobId)
+        }
+    }
+
+    func cancelPendingRemoteFileTransfers() {
+        let pendingIds = transferQueue.map(\.jobId)
+        transferQueue.removeAll()
+        for id in pendingIds {
+            finishRemoteFileTransferJob(id, status: .cancelled, message: "Transfer cancelled.")
         }
     }
 
@@ -584,25 +520,163 @@ final class ServerWorkspaceViewModel: ObservableObject {
         commandHistory.insert(result, at: 0)
     }
 
-    private func startRemoteFileTransferJob(
+    private func enqueueRemoteFileTransferJob(
         direction: RemoteFileTransferDirection,
         remotePath: String,
         localPath: String
     ) -> UUID {
         let id = UUID()
-        runningTransferJobId = id
         remoteFileTransferJobs.insert(RemoteFileTransferJob(
             id: id,
             direction: direction,
             remotePath: remotePath,
             localPath: localPath,
-            status: .running,
+            status: .pending,
             byteCount: nil,
             message: nil,
             startedAt: Date(),
             finishedAt: nil
         ), at: 0)
         return id
+    }
+
+    private func startNextRemoteFileTransferIfNeeded() {
+        guard !isTransferringRemoteFile, transferTask == nil, !transferQueue.isEmpty else { return }
+        let request = transferQueue.removeFirst()
+        runningTransferJobId = request.jobId
+        isTransferringRemoteFile = true
+        markRemoteFileTransferJobRunning(request.jobId)
+
+        transferTask = Task {
+            switch request {
+            case let .upload(jobId, localURL, directoryPath, profile, sshClient, transferClient, remoteFileService):
+                await self.runUploadTransfer(
+                    jobId: jobId,
+                    localURL: localURL,
+                    directoryPath: directoryPath,
+                    profile: profile,
+                    sshClient: sshClient,
+                    transferClient: transferClient,
+                    remoteFileService: remoteFileService
+                )
+            case let .download(jobId, entry, localURL, profile, transferClient, remoteFileService):
+                await self.runDownloadTransfer(
+                    jobId: jobId,
+                    entry: entry,
+                    localURL: localURL,
+                    profile: profile,
+                    transferClient: transferClient,
+                    remoteFileService: remoteFileService
+                )
+            }
+        }
+    }
+
+    private func runUploadTransfer(
+        jobId: UUID,
+        localURL: URL,
+        directoryPath: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService
+    ) async {
+        do {
+            let didAccess = localURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    localURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            let result = try await remoteFileService.uploadFile(
+                localURL: localURL,
+                toDirectoryPath: directoryPath,
+                profile: profile,
+                transferClient: transferClient
+            )
+            let listing = try await remoteFileService.listDirectory(
+                path: self.remoteFilePath,
+                profile: profile,
+                sshClient: sshClient
+            )
+            await MainActor.run {
+                self.remoteDirectoryListing = listing
+                self.remoteFilePath = listing.path
+                self.remoteFileActionMessage = "Uploaded \(localURL.lastPathComponent) to \(result.remotePath)."
+                self.finishRemoteFileTransferJob(jobId, status: .succeeded, result: result, message: self.remoteFileActionMessage)
+                self.finishRunningRemoteFileTransfer()
+            }
+        } catch is CancellationError {
+            await MainActor.run {
+                self.cancelRemoteFileTransferJobIfRunning(jobId)
+            }
+        } catch SSHClientError.cancelled {
+            await MainActor.run {
+                self.cancelRemoteFileTransferJobIfRunning(jobId)
+            }
+        } catch {
+            await MainActor.run {
+                self.remoteFileErrorMessage = error.localizedDescription
+                self.finishRemoteFileTransferJob(jobId, status: .failed, message: error.localizedDescription)
+                self.finishRunningRemoteFileTransfer()
+            }
+        }
+    }
+
+    private func runDownloadTransfer(
+        jobId: UUID,
+        entry: RemoteFileEntry,
+        localURL: URL,
+        profile: ServerProfile,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService
+    ) async {
+        do {
+            let didAccess = localURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    localURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            let result = try await remoteFileService.downloadFile(
+                entry: entry,
+                to: localURL,
+                profile: profile,
+                transferClient: transferClient
+            )
+            await MainActor.run {
+                self.remoteFileActionMessage = "Downloaded \(entry.name) to \(result.localPath)."
+                self.finishRemoteFileTransferJob(jobId, status: .succeeded, result: result, message: self.remoteFileActionMessage)
+                self.finishRunningRemoteFileTransfer()
+            }
+        } catch is CancellationError {
+            await MainActor.run {
+                self.cancelRemoteFileTransferJobIfRunning(jobId)
+            }
+        } catch SSHClientError.cancelled {
+            await MainActor.run {
+                self.cancelRemoteFileTransferJobIfRunning(jobId)
+            }
+        } catch {
+            await MainActor.run {
+                self.remoteFileErrorMessage = error.localizedDescription
+                self.finishRemoteFileTransferJob(jobId, status: .failed, message: error.localizedDescription)
+                self.finishRunningRemoteFileTransfer()
+            }
+        }
+    }
+
+    private func markRemoteFileTransferJobRunning(_ id: UUID) {
+        guard let index = remoteFileTransferJobs.firstIndex(where: { $0.id == id }) else { return }
+        remoteFileTransferJobs[index].status = .running
+        remoteFileTransferJobs[index].startedAt = Date()
+    }
+
+    private func finishRunningRemoteFileTransfer() {
+        isTransferringRemoteFile = false
+        transferTask = nil
+        runningTransferJobId = nil
+        startNextRemoteFileTransferIfNeeded()
     }
 
     private func finishRemoteFileTransferJob(
@@ -622,9 +696,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
         remoteFileErrorMessage = nil
         remoteFileActionMessage = "Transfer cancelled."
         finishRemoteFileTransferJob(id, status: .cancelled, message: "Transfer cancelled.")
-        isTransferringRemoteFile = false
-        transferTask = nil
-        runningTransferJobId = nil
+        finishRunningRemoteFileTransfer()
+    }
+
+    private func cancelRemoteFileTransferJobIfRunning(_ id: UUID) {
+        guard
+            let index = remoteFileTransferJobs.firstIndex(where: { $0.id == id }),
+            remoteFileTransferJobs[index].status == .running
+        else {
+            return
+        }
+        cancelRemoteFileTransferJob(id)
     }
 
     private func persistCommandResult(
@@ -714,4 +796,33 @@ private enum PendingHostKeyAction {
     case connect
     case smokeTest
     case command(String, ServerRepository?)
+}
+
+private enum QueuedRemoteFileTransfer {
+    case upload(
+        jobId: UUID,
+        localURL: URL,
+        directoryPath: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService
+    )
+    case download(
+        jobId: UUID,
+        entry: RemoteFileEntry,
+        localURL: URL,
+        profile: ServerProfile,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService
+    )
+
+    var jobId: UUID {
+        switch self {
+        case let .upload(jobId, _, _, _, _, _, _):
+            jobId
+        case let .download(jobId, _, _, _, _, _):
+            jobId
+        }
+    }
 }

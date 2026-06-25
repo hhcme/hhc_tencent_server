@@ -149,6 +149,7 @@ enum RemoteFileTransferDirection: String, Equatable, Hashable, Sendable {
 }
 
 enum RemoteFileTransferStatus: String, Equatable, Hashable, Sendable {
+    case pending
     case running
     case succeeded
     case failed
