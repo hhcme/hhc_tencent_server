@@ -458,6 +458,76 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task MainWindowViewModelDisconnectCancelsRunningHostKeyScan()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new BlockingWindowsSshClient(blockScan: true);
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.AddPasswordServerAsync("Prod", "example.internal", 22, "root", "secret");
+
+        var connectTask = viewModel.ConnectAsync();
+        await ssh.ScanStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(WindowsConnectionState.CheckingHostKey, viewModel.ConnectionState);
+        Assert.True(viewModel.CanDisconnect);
+
+        viewModel.Disconnect();
+        await connectTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.True(ssh.ScanCancellationObserved);
+        Assert.Equal(WindowsConnectionState.Disconnected, viewModel.ConnectionState);
+        Assert.Equal("Operation cancelled.", viewModel.StatusMessage);
+        Assert.Null(viewModel.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task MainWindowViewModelDisconnectCancelsRunningSmokeTestAndCanReconnect()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var hostKey = new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA");
+        var profile = await service.AddServerAsync(
+            "Prod",
+            "example.internal",
+            22,
+            "root",
+            SshAuthType.Password,
+            null,
+            new CredentialInput.Password("secret"));
+        await service.TrustHostKeyAsync(profile, hostKey);
+        var ssh = new BlockingWindowsSshClient(blockExecute: true, hostKey: hostKey);
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.LoadServersAsync();
+        await viewModel.ConnectAsync();
+
+        var smokeTask = viewModel.RunSmokeTestAsync();
+        await ssh.ExecuteStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(WindowsConnectionState.RunningSmokeTest, viewModel.ConnectionState);
+        Assert.True(viewModel.CanDisconnect);
+
+        viewModel.Disconnect();
+        await smokeTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.True(ssh.ExecuteCancellationObserved);
+        Assert.Equal(WindowsConnectionState.Disconnected, viewModel.ConnectionState);
+        Assert.Equal("Operation cancelled.", viewModel.StatusMessage);
+        Assert.Null(viewModel.ErrorMessage);
+
+        ssh.BlockExecute = false;
+        await viewModel.ConnectAsync();
+        await viewModel.RunSmokeTestAsync();
+
+        Assert.Equal(WindowsConnectionState.Connected, viewModel.ConnectionState);
+        Assert.Equal("hhc-ssh-ok", viewModel.CommandOutput);
+    }
+
+    [Fact]
     public async Task RealWindowsSshSmokeTestWhenEnvironmentIsConfigured()
     {
         if (!OperatingSystem.IsWindows())
@@ -553,6 +623,85 @@ public sealed class WindowsPhase8CoreTests
             string command,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(result with { Command = command });
+    }
+
+    private sealed class BlockingWindowsSshClient : IWindowsSshClient
+    {
+        private readonly SshHostKey _hostKey;
+        private readonly CommandResult _result;
+
+        public BlockingWindowsSshClient(
+            bool blockScan = false,
+            bool blockExecute = false,
+            SshHostKey? hostKey = null,
+            CommandResult? result = null)
+        {
+            BlockScan = blockScan;
+            BlockExecute = blockExecute;
+            _hostKey = hostKey ?? new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA");
+            _result = result ?? new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4));
+        }
+
+        public bool BlockScan { get; set; }
+
+        public bool BlockExecute { get; set; }
+
+        public bool ScanCancellationObserved { get; private set; }
+
+        public bool ExecuteCancellationObserved { get; private set; }
+
+        public TaskCompletionSource ScanStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ExecuteStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<SshHostKey> ScanHostKeyAsync(
+            ServerProfile profile,
+            CredentialInput credential,
+            CancellationToken cancellationToken = default)
+        {
+            ScanStarted.TrySetResult();
+            if (!BlockScan)
+            {
+                return _hostKey;
+            }
+
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                ScanCancellationObserved = true;
+                throw;
+            }
+
+            return _hostKey;
+        }
+
+        public async Task<CommandResult> ExecuteAsync(
+            ServerProfile profile,
+            CredentialInput credential,
+            string command,
+            CancellationToken cancellationToken = default)
+        {
+            ExecuteStarted.TrySetResult();
+            if (!BlockExecute)
+            {
+                return _result with { Command = command };
+            }
+
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                ExecuteCancellationObserved = true;
+                throw;
+            }
+
+            return _result with { Command = command };
+        }
     }
 
     private sealed record WindowsSshIntegrationConfig(

@@ -22,6 +22,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _serverSearchText = string.Empty;
     private ServerProfile? _selectedVisibleServer;
     private string? _errorMessage;
+    private CancellationTokenSource? _currentOperationCancellation;
 
     public MainWindowViewModel(
         IServerProfileRepository profiles,
@@ -164,7 +165,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool CanConfirmHostKey => PendingHostKeyTrust is not null && ConnectionState == WindowsConnectionState.AwaitingHostKeyTrust;
 
-    public bool CanDisconnect => ConnectionState != WindowsConnectionState.Disconnected && !IsBusy;
+    public bool CanDisconnect => ConnectionState != WindowsConnectionState.Disconnected;
 
     public string HostKeyTrustMessage
     {
@@ -337,12 +338,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        await RunAsync(WindowsConnectionState.CheckingHostKey, async () =>
+        await RunAsync(WindowsConnectionState.CheckingHostKey, async operationCancellationToken =>
         {
             PendingHostKeyTrust = null;
             StatusMessage = $"Checking SSH host key for {SelectedServer.Host}.";
-            var hostKey = await _serverManagement.ScanHostKeyAsync(SelectedServer, _sshClient, cancellationToken);
-            var trust = await _serverManagement.CheckHostKeyAsync(SelectedServer, hostKey, cancellationToken);
+            var hostKey = await _serverManagement.ScanHostKeyAsync(SelectedServer, _sshClient, operationCancellationToken);
+            var trust = await _serverManagement.CheckHostKeyAsync(SelectedServer, hostKey, operationCancellationToken);
             switch (trust.Decision)
             {
                 case HostKeyTrustDecision.Trusted:
@@ -401,10 +402,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        await RunAsync(WindowsConnectionState.RunningSmokeTest, async () =>
+        await RunAsync(WindowsConnectionState.RunningSmokeTest, async operationCancellationToken =>
         {
             StatusMessage = "Running SSH smoke test.";
-            var result = await _serverManagement.RunSmokeTestAsync(SelectedServer, _sshClient, cancellationToken);
+            var result = await _serverManagement.RunSmokeTestAsync(SelectedServer, _sshClient, operationCancellationToken);
             CommandOutput = string.IsNullOrEmpty(result.Stderr)
                 ? result.Stdout
                 : $"{result.Stdout}{Environment.NewLine}{result.Stderr}";
@@ -415,6 +416,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public void Disconnect()
     {
+        if (IsBusy)
+        {
+            _currentOperationCancellation?.Cancel();
+            return;
+        }
+
         PendingHostKeyTrust = null;
         ConnectionState = WindowsConnectionState.Disconnected;
         ErrorMessage = null;
@@ -468,18 +475,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private async Task RunAsync(
         WindowsConnectionState busyState,
-        Func<Task> operation,
+        Func<CancellationToken, Task> operation,
         CancellationToken cancellationToken)
     {
         ErrorMessage = null;
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _currentOperationCancellation = linkedCancellation;
         ConnectionState = busyState;
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await operation();
+            linkedCancellation.Token.ThrowIfCancellationRequested();
+            await operation(linkedCancellation.Token);
         }
         catch (OperationCanceledException)
         {
+            PendingHostKeyTrust = null;
             ConnectionState = WindowsConnectionState.Disconnected;
             StatusMessage = "Operation cancelled.";
         }
@@ -488,6 +498,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             ConnectionState = WindowsConnectionState.Failed;
             ErrorMessage = error.Message;
             StatusMessage = "Operation failed.";
+        }
+        finally
+        {
+            if (ReferenceEquals(_currentOperationCancellation, linkedCancellation))
+            {
+                _currentOperationCancellation = null;
+            }
         }
     }
 

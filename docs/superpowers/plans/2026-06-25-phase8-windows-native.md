@@ -133,6 +133,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] 实现密码认证 adapter。
 - [x] 实现私钥认证 adapter；已提供 Windows-only 真实私钥/passphrase 测试入口，真实 Windows 主机上的私钥/passphrase 组合待验收。
 - [x] 实现 `printf hhc-ssh-ok` smoke test 编排；已提供 Windows-only 真实服务器执行测试入口，真实执行待 Windows 主机验收。
+- [x] 实现连接检查和 smoke test 运行中的取消：Disconnect 会取消当前 SSH.NET 操作的 cancellation token，状态恢复为 disconnected，且取消后可重新连接。
 
 ### Task 5：Windows UI
 
@@ -156,6 +157,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] Windows 添加私钥服务器 ViewModel 测试：覆盖私钥/passphrase 进入 Credential Store、profile 记录为 `PrivateKey`、SQLite 不保存私钥材料、空私钥拒绝。
 - [x] Windows 编辑服务器测试：覆盖 profile 更新、保留/替换凭据、认证类型切换必须提供新凭据、host/port 变化清理旧 trusted host key、ViewModel 替换当前选中服务器。
 - [x] Windows 服务器列表搜索和空状态测试：`MainWindowViewModelFiltersServerListAndKeepsWorkspaceSelection` 覆盖 name/host/username/group 搜索、无结果空状态，以及搜索过滤不会清空当前工作台选择。
+- [x] Windows 连接取消测试：`MainWindowViewModelDisconnectCancelsRunningHostKeyScan` 和 `MainWindowViewModelDisconnectCancelsRunningSmokeTestAndCanReconnect` 覆盖运行中 host key scan / smoke test 取消、状态恢复和后续重连。
 - [x] GitHub Actions Windows core tests：Windows runner 运行 `scripts/ci-windows-core.ps1`，覆盖不依赖 WinUI/XAML 编译器的核心层。
 - [x] 可选真实 SSH 集成测试：`RealWindowsSshSmokeTestWhenEnvironmentIsConfigured` 默认跳过，Windows 主机设置 `HHC_WINDOWS_TEST_SSH_REAL=1` 和 SSH 环境变量后会覆盖 Credential Manager、SSH.NET host key scan、trust、`printf hhc-ssh-ok`、删除清理。
 
