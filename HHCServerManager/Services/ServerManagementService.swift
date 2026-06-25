@@ -90,6 +90,43 @@ final class ServerManagementService: @unchecked Sendable {
         try repository.upsert(updated)
         return updated
     }
+
+    func configureDeploymentWebhook(
+        project: DeploymentProject,
+        enabled: Bool,
+        secret: String?
+    ) throws -> DeploymentProject {
+        var updated = project
+        updated.webhookEnabled = enabled
+        updated.updatedAt = Date()
+
+        if enabled {
+            let trimmedSecret = secret?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if trimmedSecret.isEmpty, project.webhookSecretRef == nil {
+                throw DeploymentWebhookError.secretMissing
+            }
+            let keychainRef = project.webhookSecretRef ?? "deployment_webhook_\(project.id.uuidString)"
+            if !trimmedSecret.isEmpty {
+                try keychain.saveWebhookSecret(trimmedSecret, keychainRef: keychainRef)
+            }
+            updated.webhookSecretRef = keychainRef
+        } else {
+            if let keychainRef = project.webhookSecretRef {
+                keychain.deleteWebhookSecret(keychainRef: keychainRef)
+            }
+            updated.webhookSecretRef = nil
+        }
+
+        try repository.upsertDeploymentProject(updated)
+        return updated
+    }
+
+    func deleteDeploymentProject(_ project: DeploymentProject) throws {
+        if let keychainRef = project.webhookSecretRef {
+            keychain.deleteWebhookSecret(keychainRef: keychainRef)
+        }
+        try repository.deleteDeploymentProject(id: project.id)
+    }
 }
 
 final class CloudAccountService: @unchecked Sendable {
@@ -708,6 +745,168 @@ final class DeploymentRunner: @unchecked Sendable {
             message: DeploymentLogRedactor.redact(message),
             createdAt: now()
         ))
+    }
+}
+
+enum DeploymentWebhookError: LocalizedError, Equatable {
+    case invalidPayload
+    case unsupportedEvent
+    case missingToken
+    case invalidToken
+    case projectNotFound
+    case serverNotFound
+    case secretMissing
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidPayload:
+            "Webhook payload is not a valid GitLab push event."
+        case .unsupportedEvent:
+            "Only GitLab push events are supported."
+        case .missingToken:
+            "GitLab webhook token is missing."
+        case .invalidToken:
+            "GitLab webhook token is invalid."
+        case .projectNotFound:
+            "No enabled deployment project matches this webhook."
+        case .serverNotFound:
+            "The deployment project's server no longer exists."
+        case .secretMissing:
+            "Webhook secret is missing."
+        }
+    }
+}
+
+struct DeploymentWebhookEvent: Equatable, Sendable {
+    var branch: String
+    var repositoryCandidates: Set<String>
+    var requestedRef: String
+}
+
+final class DeploymentWebhookService: @unchecked Sendable {
+    private let repository: ServerRepository
+    private let keychain: KeychainService
+    private let runner: DeploymentRunner
+
+    init(repository: ServerRepository, keychain: KeychainService, runner: DeploymentRunner) {
+        self.repository = repository
+        self.keychain = keychain
+        self.runner = runner
+    }
+
+    func handleGitLabPush(
+        headers: [String: String],
+        body: Data,
+        sshClient: SSHClient
+    ) async throws -> DeploymentRun {
+        guard header("X-Gitlab-Event", in: headers) == nil || header("X-Gitlab-Event", in: headers) == "Push Hook" else {
+            throw DeploymentWebhookError.unsupportedEvent
+        }
+        guard let token = header("X-Gitlab-Token", in: headers), !token.isEmpty else {
+            throw DeploymentWebhookError.missingToken
+        }
+
+        let event = try Self.parseGitLabPush(body)
+        let project = try matchingProject(for: event)
+        guard let secretRef = project.webhookSecretRef,
+              let expectedToken = try keychain.readWebhookSecret(keychainRef: secretRef)
+        else {
+            throw DeploymentWebhookError.secretMissing
+        }
+        guard Self.constantTimeEquals(token, expectedToken) else {
+            throw DeploymentWebhookError.invalidToken
+        }
+
+        guard let profile = try repository.fetchServers().first(where: { $0.id == project.serverId }) else {
+            throw DeploymentWebhookError.serverNotFound
+        }
+        return try await runner.run(
+            project: project,
+            profile: profile,
+            sshClient: sshClient,
+            triggerType: .webhook,
+            requestedRef: event.requestedRef
+        )
+    }
+
+    static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
+        let left = [UInt8](lhs.utf8)
+        let right = [UInt8](rhs.utf8)
+        let maxCount = max(left.count, right.count)
+        var diff = UInt8(left.count ^ right.count)
+        for index in 0..<maxCount {
+            let leftByte = index < left.count ? left[index] : 0
+            let rightByte = index < right.count ? right[index] : 0
+            diff |= leftByte ^ rightByte
+        }
+        return diff == 0
+    }
+
+    static func parseGitLabPush(_ body: Data) throws -> DeploymentWebhookEvent {
+        guard
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+            json["object_kind"] as? String == "push",
+            let ref = json["ref"] as? String,
+            ref.hasPrefix("refs/heads/")
+        else {
+            throw DeploymentWebhookError.invalidPayload
+        }
+
+        let branch = String(ref.dropFirst("refs/heads/".count))
+        var candidates = Set<String>()
+        collectRepositoryCandidates(from: json["project"], into: &candidates)
+        collectRepositoryCandidates(from: json["repository"], into: &candidates)
+        guard !candidates.isEmpty else {
+            throw DeploymentWebhookError.invalidPayload
+        }
+
+        return DeploymentWebhookEvent(branch: branch, repositoryCandidates: candidates, requestedRef: ref)
+    }
+
+    private func matchingProject(for event: DeploymentWebhookEvent) throws -> DeploymentProject {
+        let projects = try repository.fetchDeploymentProjects().filter {
+            $0.webhookEnabled && $0.branch == event.branch
+        }
+        guard let project = projects.first(where: { project in
+            event.repositoryCandidates.contains(Self.normalizedRepositoryURL(project.repositoryURL))
+        }) else {
+            throw DeploymentWebhookError.projectNotFound
+        }
+        return project
+    }
+
+    private func header(_ name: String, in headers: [String: String]) -> String? {
+        headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
+    }
+
+    private static func collectRepositoryCandidates(from object: Any?, into candidates: inout Set<String>) {
+        guard let dictionary = object as? [String: Any] else { return }
+        for key in ["git_ssh_url", "git_http_url", "ssh_url", "http_url", "web_url", "url"] {
+            if let value = dictionary[key] as? String {
+                candidates.insert(normalizedRepositoryURL(value))
+            }
+        }
+        if let path = dictionary["path_with_namespace"] as? String {
+            candidates.insert(normalizedRepositoryURL("gitlab.com/\(path)"))
+        }
+    }
+
+    private static func normalizedRepositoryURL(_ rawURL: String) -> String {
+        var value = rawURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value.hasPrefix("git@") {
+            value.removeFirst("git@".count)
+            value = value.replacingOccurrences(of: ":", with: "/", options: [], range: value.startIndex..<value.endIndex)
+        }
+        for prefix in ["https://", "http://", "ssh://"] where value.hasPrefix(prefix) {
+            value.removeFirst(prefix.count)
+        }
+        if value.hasSuffix(".git") {
+            value.removeLast(".git".count)
+        }
+        while value.hasSuffix("/") {
+            value.removeLast()
+        }
+        return value
     }
 }
 

@@ -611,7 +611,11 @@ struct ServerWorkspaceView: View {
                     .font(.title2.weight(.semibold))
                 Spacer()
                 Button {
-                    viewModel.saveDeploymentProject(profile: profile, repository: appState.repository)
+                    viewModel.saveDeploymentProject(
+                        profile: profile,
+                        repository: appState.repository,
+                        serverManagementService: appState.serverManagementService
+                    )
                 } label: {
                     if viewModel.isSavingDeploymentProject {
                         ProgressView()
@@ -623,7 +627,11 @@ struct ServerWorkspaceView: View {
                 .disabled(viewModel.isSavingDeploymentProject)
 
                 Button(role: .destructive) {
-                    viewModel.deleteSelectedDeploymentProject(profile: profile, repository: appState.repository)
+                    viewModel.deleteSelectedDeploymentProject(
+                        profile: profile,
+                        repository: appState.repository,
+                        serverManagementService: appState.serverManagementService
+                    )
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
@@ -672,6 +680,21 @@ struct ServerWorkspaceView: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
                 }
+                GridRow {
+                    Text("Webhook").foregroundStyle(.secondary)
+                    Toggle("Enable GitLab push webhook", isOn: $viewModel.deploymentWebhookEnabled)
+                        .toggleStyle(.checkbox)
+                }
+                if viewModel.deploymentWebhookEnabled {
+                    GridRow {
+                        Text("Secret").foregroundStyle(.secondary)
+                        SecureField(
+                            viewModel.selectedDeploymentProject?.webhookSecretRef == nil ? "Required token" : "Leave blank to keep existing token",
+                            text: $viewModel.deploymentWebhookSecret
+                        )
+                        .textFieldStyle(.roundedBorder)
+                    }
+                }
             }
 
             HStack(spacing: 8) {
@@ -680,7 +703,8 @@ struct ServerWorkspaceView: View {
                         profile: profile,
                         sshClient: appState.sshClient,
                         deploymentRunner: appState.deploymentRunner,
-                        repository: appState.repository
+                        repository: appState.repository,
+                        serverManagementService: appState.serverManagementService
                     )
                 } label: {
                     if viewModel.isRunningDeployment {

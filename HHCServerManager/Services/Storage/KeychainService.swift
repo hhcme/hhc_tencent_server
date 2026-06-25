@@ -71,6 +71,19 @@ final class KeychainService: @unchecked Sendable {
         delete(account: "cloud_secret_key_\(keychainRef)")
     }
 
+    func saveWebhookSecret(_ secret: String, keychainRef: String) throws {
+        try save(Data(secret.utf8), account: "deployment_webhook_secret_\(keychainRef)")
+    }
+
+    func readWebhookSecret(keychainRef: String) throws -> String? {
+        guard let data = try readData(account: "deployment_webhook_secret_\(keychainRef)") else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func deleteWebhookSecret(keychainRef: String) {
+        delete(account: "deployment_webhook_secret_\(keychainRef)")
+    }
+
     private func save(_ data: Data, account: String) throws {
         delete(account: account)
         let query: [String: Any] = [

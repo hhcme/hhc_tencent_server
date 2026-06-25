@@ -90,7 +90,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - 手动部署按钮和部署前预览。（已完成基础 UI）
 - 部署运行详情：步骤、状态、日志、耗时、失败原因。（已完成基础 UI；实时流式刷新后续增强）
 - 回滚按钮：展示 previous commit 并触发受控 rollback。（已完成基础 UI；风险说明后续接入统一确认）
-- webhook 设置：启用开关、本地监听地址、secret、允许分支。
+- webhook 设置：启用开关、secret、允许分支。（已完成配置和核心校验；本地监听地址后续接入）
 
 ## 7. 实施任务
 
@@ -99,7 +99,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] 实现数据表和 repository：当前已落地 `deployment_projects`、`deployment_runs`、`deployment_logs`，支持项目 upsert/delete/fetch、运行记录 upsert/fetch、日志按时间读取和级联删除。
 - [x] 配置基础校验：当前 `DeploymentCommandBuilder` 已校验仓库 URL、分支和单行命令格式，并已接入 Deployments UI 表单。
 - [x] 部署目录白名单校验：当前默认仅允许 `/srv`、`/var/www`、`/opt`、`/home` 下的部署目录。
-- [ ] webhook secret 写入 Keychain。
+- [x] webhook secret 写入 Keychain，SQLite 只保存 `webhook_secret_ref`；删除/禁用 webhook 时清理 Keychain。
 
 ### Task 2：部署状态机
 
@@ -133,8 +133,8 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 ### Task 6：Webhook
 
 - [ ] 实现可选本地 HTTP listener。
-- [ ] 校验 GitLab `X-Gitlab-Token`。
-- [ ] 过滤项目、分支和事件类型。
+- [x] 校验 GitLab `X-Gitlab-Token`，使用常量时间比较。
+- [x] 过滤项目、分支和事件类型。
 - [ ] 触发部署前写入操作日志。
 - [ ] UI 明确说明桌面客户端离线时不会自动部署。
 
@@ -145,7 +145,8 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] Deployment workspace ViewModel 测试：已覆盖项目表单保存、命令预览和 UI 触发手动部署后读取运行日志。
 - [x] 命令构建和目录白名单测试：已覆盖受控 clone/fetch/checkout/build/restart/health check 命令预览、危险路径拒绝、非法 branch/URL/多行命令拒绝。
 - [x] rollback 测试：已覆盖回滚 run、previous/target commit 捕获和 `git reset --hard <commit>` 命令。
-- [ ] webhook secret 常量时间比较测试。
+- [x] webhook secret 常量时间比较测试。
+- [x] GitLab webhook 核心测试：已覆盖 secret Keychain 存储、push payload 解析、repo/branch 匹配、错误 token 拒绝和 webhook run 触发。
 - [x] 日志脱敏测试：已覆盖 token、password、Authorization/Bearer、URL credentials。
 
 ### Task 8：手动验收
@@ -155,7 +156,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [ ] 构建失败时状态正确，后续步骤不执行。
 - [ ] health check 失败时部署标记失败。
 - [x] 回滚能回到 previous commit：mock/contract 测试已覆盖，真实服务器手动回滚仍需谨慎验收。
-- [ ] webhook secret 错误时拒绝触发。
+- [x] webhook secret 错误时拒绝触发：核心 service 测试已覆盖。
 - [ ] 不在白名单目录内的部署配置被拒绝。
 
 ## 8. 完成标志

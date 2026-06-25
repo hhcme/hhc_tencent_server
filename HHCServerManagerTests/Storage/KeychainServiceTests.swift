@@ -64,4 +64,18 @@ final class KeychainServiceTests: XCTestCase {
         service.deleteCloudCredential(keychainRef: cloudRef)
         XCTAssertNil(try service.readCloudCredential(keychainRef: cloudRef))
     }
+
+    func testWebhookSecretRoundTripOverwriteAndDelete() throws {
+        let webhookRef = "deployment_webhook_\(UUID().uuidString)"
+        defer { service.deleteWebhookSecret(keychainRef: webhookRef) }
+
+        try service.saveWebhookSecret("first-token", keychainRef: webhookRef)
+        XCTAssertEqual(try service.readWebhookSecret(keychainRef: webhookRef), "first-token")
+
+        try service.saveWebhookSecret("second-token", keychainRef: webhookRef)
+        XCTAssertEqual(try service.readWebhookSecret(keychainRef: webhookRef), "second-token")
+
+        service.deleteWebhookSecret(keychainRef: webhookRef)
+        XCTAssertNil(try service.readWebhookSecret(keychainRef: webhookRef))
+    }
 }

@@ -453,6 +453,136 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'abc1234'") })
     }
 
+    func testDeploymentWebhookSecretIsStoredInKeychainReferenceOnly() throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        let project = makeDeploymentProject(serverId: profile.id)
+        try harness.repository.upsertDeploymentProject(project)
+
+        let enabled = try harness.service.configureDeploymentWebhook(
+            project: project,
+            enabled: true,
+            secret: "gitlab-token"
+        )
+
+        XCTAssertTrue(enabled.webhookEnabled)
+        XCTAssertEqual(enabled.webhookSecretRef, "deployment_webhook_\(project.id.uuidString)")
+        XCTAssertEqual(try harness.keychain.readWebhookSecret(keychainRef: try XCTUnwrap(enabled.webhookSecretRef)), "gitlab-token")
+
+        let stored = try XCTUnwrap(harness.repository.fetchDeploymentProjects(serverId: profile.id).first)
+        XCTAssertEqual(stored.webhookSecretRef, enabled.webhookSecretRef)
+        XCTAssertNotEqual(stored.webhookSecretRef, "gitlab-token")
+
+        let disabled = try harness.service.configureDeploymentWebhook(project: enabled, enabled: false, secret: nil)
+        XCTAssertFalse(disabled.webhookEnabled)
+        XCTAssertNil(disabled.webhookSecretRef)
+        XCTAssertNil(try harness.keychain.readWebhookSecret(keychainRef: "deployment_webhook_\(project.id.uuidString)"))
+    }
+
+    func testDeploymentWebhookServiceFiltersAndTriggersRun() async throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        var project = makeDeploymentProject(serverId: profile.id)
+        project.repositoryURL = "git@gitlab.com:hhc/site.git"
+        project.branch = "main"
+        try harness.repository.upsertDeploymentProject(project)
+        project = try harness.service.configureDeploymentWebhook(
+            project: project,
+            enabled: true,
+            secret: "gitlab-token"
+        )
+        let runner = DeploymentRunner(
+            repository: harness.repository,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        let webhookService = DeploymentWebhookService(
+            repository: harness.repository,
+            keychain: harness.keychain,
+            runner: runner
+        )
+        let client = DeploymentRunnerMockSSHClient()
+
+        let run = try await webhookService.handleGitLabPush(
+            headers: [
+                "X-Gitlab-Event": "Push Hook",
+                "X-Gitlab-Token": "gitlab-token",
+            ],
+            body: gitLabPushPayload(branch: "main", sshURL: "git@gitlab.com:hhc/site.git"),
+            sshClient: client
+        )
+
+        XCTAssertEqual(run.triggerType, .webhook)
+        XCTAssertEqual(run.requestedRef, "refs/heads/main")
+        XCTAssertEqual(run.status, .succeeded)
+        XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'origin/main'") })
+    }
+
+    func testDeploymentWebhookServiceRejectsInvalidTokenAndBranch() async throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        var project = makeDeploymentProject(serverId: profile.id)
+        try harness.repository.upsertDeploymentProject(project)
+        project = try harness.service.configureDeploymentWebhook(
+            project: project,
+            enabled: true,
+            secret: "gitlab-token"
+        )
+        let service = DeploymentWebhookService(
+            repository: harness.repository,
+            keychain: harness.keychain,
+            runner: DeploymentRunner(repository: harness.repository)
+        )
+
+        XCTAssertFalse(DeploymentWebhookService.constantTimeEquals("gitlab-token", "bad-token"))
+        XCTAssertTrue(DeploymentWebhookService.constantTimeEquals("gitlab-token", "gitlab-token"))
+
+        do {
+            _ = try await service.handleGitLabPush(
+                headers: ["X-Gitlab-Token": "bad-token"],
+                body: gitLabPushPayload(branch: "main", sshURL: "git@gitlab.com:hhc/site.git"),
+                sshClient: DeploymentRunnerMockSSHClient()
+            )
+            XCTFail("Expected invalid token.")
+        } catch {
+            XCTAssertEqual(error as? DeploymentWebhookError, .invalidToken)
+        }
+
+        do {
+            _ = try await service.handleGitLabPush(
+                headers: ["X-Gitlab-Token": "gitlab-token"],
+                body: gitLabPushPayload(branch: "develop", sshURL: "git@gitlab.com:hhc/site.git"),
+                sshClient: DeploymentRunnerMockSSHClient()
+            )
+            XCTFail("Expected no matching project.")
+        } catch {
+            XCTAssertEqual(error as? DeploymentWebhookError, .projectNotFound)
+        }
+    }
+
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
         let os = DashboardService.parseOSRelease("""
         NAME="Ubuntu"
@@ -1650,6 +1780,25 @@ private func makeDeploymentProject(serverId: UUID) -> DeploymentProject {
         createdAt: Date(),
         updatedAt: Date()
     )
+}
+
+private func gitLabPushPayload(branch: String, sshURL: String) -> Data {
+    Data("""
+    {
+      "object_kind": "push",
+      "ref": "refs/heads/\(branch)",
+      "project": {
+        "path_with_namespace": "hhc/site",
+        "git_ssh_url": "\(sshURL)",
+        "git_http_url": "https://gitlab.com/hhc/site.git",
+        "web_url": "https://gitlab.com/hhc/site"
+      },
+      "repository": {
+        "git_ssh_url": "\(sshURL)",
+        "homepage": "https://gitlab.com/hhc/site"
+      }
+    }
+    """.utf8)
 }
 
 private final class RecordingSSHClient: SSHClient, @unchecked Sendable {

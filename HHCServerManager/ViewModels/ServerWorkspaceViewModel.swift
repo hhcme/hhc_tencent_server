@@ -76,6 +76,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var deploymentBuildCommand = ""
     @Published var deploymentRestartCommand = ""
     @Published var deploymentHealthCheckCommand = ""
+    @Published var deploymentWebhookEnabled = false
+    @Published var deploymentWebhookSecret = ""
     @Published var deploymentCommandPlan: DeploymentCommandPlan?
     @Published var isLoadingDeployments = false
     @Published var isSavingDeploymentProject = false
@@ -1340,6 +1342,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         deploymentBuildCommand = project.buildCommand ?? ""
         deploymentRestartCommand = project.restartCommand ?? ""
         deploymentHealthCheckCommand = project.healthCheckCommand ?? ""
+        deploymentWebhookEnabled = project.webhookEnabled
+        deploymentWebhookSecret = ""
         refreshDeploymentPlan()
 
         do {
@@ -1379,7 +1383,11 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
-    func saveDeploymentProject(profile: ServerProfile, repository: ServerRepository) {
+    func saveDeploymentProject(
+        profile: ServerProfile,
+        repository: ServerRepository,
+        serverManagementService: ServerManagementService? = nil
+    ) {
         isSavingDeploymentProject = true
         deploymentErrorMessage = nil
         deploymentActionMessage = nil
@@ -1389,6 +1397,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
             project.updatedAt = Date()
             try DeploymentCommandBuilder.validate(project: project)
             try repository.upsertDeploymentProject(project)
+            if let serverManagementService {
+                project = try serverManagementService.configureDeploymentWebhook(
+                    project: project,
+                    enabled: deploymentWebhookEnabled,
+                    secret: deploymentWebhookSecret
+                )
+                deploymentWebhookSecret = ""
+            }
             deploymentProjects = try repository.fetchDeploymentProjects(serverId: profile.id)
             selectedDeploymentProject = deploymentProjects.first { $0.id == project.id } ?? project
             refreshDeploymentPlan()
@@ -1403,13 +1419,21 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
-    func deleteSelectedDeploymentProject(profile: ServerProfile, repository: ServerRepository) {
+    func deleteSelectedDeploymentProject(
+        profile: ServerProfile,
+        repository: ServerRepository,
+        serverManagementService: ServerManagementService? = nil
+    ) {
         guard let project = selectedDeploymentProject else { return }
         deploymentErrorMessage = nil
         deploymentActionMessage = nil
 
         do {
-            try repository.deleteDeploymentProject(id: project.id)
+            if let serverManagementService {
+                try serverManagementService.deleteDeploymentProject(project)
+            } else {
+                try repository.deleteDeploymentProject(id: project.id)
+            }
             deploymentProjects = try repository.fetchDeploymentProjects(serverId: profile.id)
             startNewDeploymentProject(serverId: profile.id)
             deploymentActionMessage = "Deployment project deleted."
@@ -1422,10 +1446,15 @@ final class ServerWorkspaceViewModel: ObservableObject {
         profile: ServerProfile,
         sshClient: SSHClient,
         deploymentRunner: DeploymentRunner,
-        repository: ServerRepository
+        repository: ServerRepository,
+        serverManagementService: ServerManagementService? = nil
     ) {
         guard !isRunningDeployment else { return }
-        saveDeploymentProject(profile: profile, repository: repository)
+        saveDeploymentProject(
+            profile: profile,
+            repository: repository,
+            serverManagementService: serverManagementService
+        )
         guard let project = selectedDeploymentProject, deploymentErrorMessage == nil else { return }
 
         isRunningDeployment = true
@@ -1507,6 +1536,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         deploymentBuildCommand = ""
         deploymentRestartCommand = ""
         deploymentHealthCheckCommand = ""
+        deploymentWebhookEnabled = false
+        deploymentWebhookSecret = ""
         deploymentCommandPlan = try? DeploymentCommandBuilder.buildPlan(for: draftDeploymentProject(serverId: serverId))
     }
 
@@ -1522,7 +1553,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
             buildCommand: optionalDeploymentText(deploymentBuildCommand),
             restartCommand: optionalDeploymentText(deploymentRestartCommand),
             healthCheckCommand: optionalDeploymentText(deploymentHealthCheckCommand),
-            webhookEnabled: selectedDeploymentProject?.webhookEnabled ?? false,
+            webhookEnabled: deploymentWebhookEnabled,
             webhookSecretRef: selectedDeploymentProject?.webhookSecretRef,
             createdAt: selectedDeploymentProject?.createdAt ?? now,
             updatedAt: now

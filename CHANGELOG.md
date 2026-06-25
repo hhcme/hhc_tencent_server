@@ -66,6 +66,7 @@ All notable changes to this project will be documented in this file.
 - Added a DeploymentRunner foundation with planned-step SSH execution, per-step logs, commit capture, failure stop, cancellation handling, and tests.
 - Added a macOS Deployments workspace for project CRUD, command previews, manual run triggering, run history, selectable logs, and ViewModel coverage.
 - Added deployment log redaction and a rollback flow that records independent rollback runs, resets to the captured previous commit, and reruns build/restart/health checks.
+- Added GitLab webhook core handling with Keychain-backed secrets, constant-time token checks, repo/branch filtering, webhook-triggered deployment runs, and macOS webhook settings.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -127,3 +128,4 @@ All notable changes to this project will be documented in this file.
 - 添加 DeploymentRunner 基础状态机，支持按计划 SSH 执行步骤、逐步日志、commit 捕获、失败停止、取消处理和测试覆盖。
 - 添加 macOS Deployments 工作台，支持部署项目增删改查、命令预览、手动运行触发、运行历史、可选择复制的日志和 ViewModel 测试覆盖。
 - 添加部署日志脱敏和回滚闭环，回滚会记录独立 run、reset 到捕获的 previous commit，并重新执行 build/restart/health check。
+- 添加 GitLab webhook 核心处理，支持 Keychain secret、常量时间 token 校验、repo/branch 过滤、webhook 触发部署 run，以及 macOS webhook 设置项。

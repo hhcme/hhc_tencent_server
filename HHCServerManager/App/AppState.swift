@@ -17,6 +17,7 @@ final class AppState: ObservableObject {
     let environmentFileManager: EnvironmentFileManager
     let remoteFileService: RemoteFileService
     let deploymentRunner: DeploymentRunner
+    let deploymentWebhookService: DeploymentWebhookService
     let sshClient: OpenSSHClient
 
     @Published var servers: [ServerProfile] = []
@@ -46,6 +47,11 @@ final class AppState: ObservableObject {
             environmentFileManager = EnvironmentFileManager()
             remoteFileService = RemoteFileService()
             deploymentRunner = DeploymentRunner(repository: repository)
+            deploymentWebhookService = DeploymentWebhookService(
+                repository: repository,
+                keychain: keychain,
+                runner: deploymentRunner
+            )
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,
                 keychain: keychain,
@@ -74,6 +80,11 @@ final class AppState: ObservableObject {
             environmentFileManager = EnvironmentFileManager()
             remoteFileService = RemoteFileService()
             deploymentRunner = DeploymentRunner(repository: repository)
+            deploymentWebhookService = DeploymentWebhookService(
+                repository: repository,
+                keychain: keychain,
+                runner: deploymentRunner
+            )
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,
                 keychain: keychain,
