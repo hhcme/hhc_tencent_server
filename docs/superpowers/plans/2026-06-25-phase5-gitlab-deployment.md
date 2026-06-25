@@ -97,8 +97,8 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 ### Task 1：部署项目配置
 
 - [x] 实现数据表和 repository：当前已落地 `deployment_projects`、`deployment_runs`、`deployment_logs`，支持项目 upsert/delete/fetch、运行记录 upsert/fetch、日志按时间读取和级联删除。
-- [ ] 配置表单校验：仓库 URL、分支、部署目录、命令。
-- [ ] 部署目录白名单校验。
+- [x] 配置基础校验：当前 `DeploymentCommandBuilder` 已校验仓库 URL、分支和单行命令格式；UI 表单接入待后续完成。
+- [x] 部署目录白名单校验：当前默认仅允许 `/srv`、`/var/www`、`/opt`、`/home` 下的部署目录。
 - [ ] webhook secret 写入 Keychain。
 
 ### Task 2：部署状态机
@@ -142,7 +142,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 
 - [x] DeploymentProjectStore 测试：已覆盖项目持久化、更新、按服务器过滤、删除级联运行和日志。
 - [ ] DeploymentRunner 状态机测试。
-- [ ] 命令构建和目录白名单测试。
+- [x] 命令构建和目录白名单测试：已覆盖受控 clone/fetch/checkout/build/restart/health check 命令预览、危险路径拒绝、非法 branch/URL/多行命令拒绝。
 - [ ] webhook secret 常量时间比较测试。
 - [ ] 日志脱敏测试。当前 deployment logs 仅完成持久化顺序测试，脱敏在 Runner/LogStore 阶段接入。
 

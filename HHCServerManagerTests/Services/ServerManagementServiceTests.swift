@@ -193,6 +193,84 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testDeploymentCommandBuilderBuildsControlledPlan() throws {
+        let project = DeploymentProject(
+            id: UUID(),
+            serverId: UUID(),
+            name: "Website",
+            repositoryURL: "git@gitlab.com:hhc/site.git",
+            branch: "release/2026.06",
+            deployPath: "/srv/site",
+            buildCommand: "npm ci && npm run build",
+            restartCommand: "systemctl restart site.service",
+            healthCheckCommand: "curl -fsS http://127.0.0.1:3000/health",
+            webhookEnabled: false,
+            webhookSecretRef: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+
+        let plan = try DeploymentCommandBuilder.buildPlan(for: project)
+
+        XCTAssertEqual(plan.allowedRoot, "/srv")
+        XCTAssertEqual(plan.steps.map(\.name), [
+            "prepare",
+            "git_check",
+            "current_commit",
+            "clone_or_fetch",
+            "checkout",
+            "target_commit",
+            "build",
+            "restart",
+            "health_check",
+        ])
+        XCTAssertTrue(plan.steps.first { $0.name == "checkout" }?.isDestructive == true)
+        XCTAssertTrue(plan.commandPreview.contains("git clone --branch 'release/2026.06'"))
+        XCTAssertTrue(plan.commandPreview.contains("git reset --hard origin/release/2026.06"))
+        XCTAssertTrue(plan.commandPreview.contains("cd '/srv/site' && npm ci && npm run build"))
+    }
+
+    func testDeploymentCommandBuilderRejectsUnsafeConfiguration() {
+        var project = DeploymentProject(
+            id: UUID(),
+            serverId: UUID(),
+            name: "Website",
+            repositoryURL: "git@gitlab.com:hhc/site.git",
+            branch: "main",
+            deployPath: "/srv/site",
+            buildCommand: nil,
+            restartCommand: nil,
+            healthCheckCommand: nil,
+            webhookEnabled: false,
+            webhookSecretRef: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+
+        project.deployPath = "/etc/site"
+        XCTAssertThrowsError(try DeploymentCommandBuilder.buildPlan(for: project)) { error in
+            XCTAssertEqual(error as? DeploymentCommandBuilderError, .deployPathOutsideAllowedRoots("/etc/site"))
+        }
+
+        project.deployPath = "/srv/site"
+        project.branch = "../main"
+        XCTAssertThrowsError(try DeploymentCommandBuilder.buildPlan(for: project)) { error in
+            XCTAssertEqual(error as? DeploymentCommandBuilderError, .invalidBranch)
+        }
+
+        project.branch = "main"
+        project.repositoryURL = "file:///tmp/repo"
+        XCTAssertThrowsError(try DeploymentCommandBuilder.buildPlan(for: project)) { error in
+            XCTAssertEqual(error as? DeploymentCommandBuilderError, .invalidRepositoryURL)
+        }
+
+        project.repositoryURL = "https://gitlab.com/hhc/site.git"
+        project.buildCommand = "npm ci\nrm -rf /"
+        XCTAssertThrowsError(try DeploymentCommandBuilder.buildPlan(for: project)) { error in
+            XCTAssertEqual(error as? DeploymentCommandBuilderError, .invalidCommand("Build"))
+        }
+    }
+
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
         let os = DashboardService.parseOSRelease("""
         NAME="Ubuntu"

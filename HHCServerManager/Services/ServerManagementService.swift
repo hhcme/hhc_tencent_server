@@ -261,6 +261,200 @@ final class CloudInstanceSyncService: @unchecked Sendable {
     }
 }
 
+enum DeploymentCommandBuilderError: LocalizedError, Equatable {
+    case invalidRepositoryURL
+    case invalidBranch
+    case deployPathOutsideAllowedRoots(String)
+    case invalidCommand(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidRepositoryURL:
+            "Repository URL must be an HTTPS, SSH, or git@ GitLab-style URL."
+        case .invalidBranch:
+            "Branch can only contain letters, numbers, slash, dot, underscore, and dash."
+        case let .deployPathOutsideAllowedRoots(path):
+            "Deploy path \(path) is outside the allowed deployment roots."
+        case let .invalidCommand(label):
+            "\(label) command must be a single non-empty line without null bytes."
+        }
+    }
+}
+
+struct DeploymentPathPolicy: Equatable, Sendable {
+    var allowedRoots: [String]
+
+    static let defaultPolicy = DeploymentPathPolicy(allowedRoots: [
+        "/srv",
+        "/var/www",
+        "/opt",
+        "/home",
+    ])
+
+    func allowedRoot(for path: String) -> String? {
+        let normalized = Self.normalized(path)
+        return allowedRoots
+            .map(Self.normalized)
+            .first { root in
+                normalized == root || normalized.hasPrefix("\(root)/")
+            }
+    }
+
+    private static func normalized(_ path: String) -> String {
+        var result = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        while result.hasSuffix("/") && result.count > 1 {
+            result.removeLast()
+        }
+        return result
+    }
+}
+
+enum DeploymentCommandBuilder {
+    static func buildPlan(
+        for project: DeploymentProject,
+        pathPolicy: DeploymentPathPolicy = .defaultPolicy
+    ) throws -> DeploymentCommandPlan {
+        try validate(project: project, pathPolicy: pathPolicy)
+        let deployPath = project.deployPath.trimmed
+        let branch = project.branch.trimmed
+        let repositoryURL = project.repositoryURL.trimmed
+        let quotedPath = shellQuote(deployPath)
+        let quotedParent = shellQuote(parentDirectory(for: deployPath))
+        let quotedRepository = shellQuote(repositoryURL)
+        let quotedBranch = shellQuote(branch)
+
+        var steps = [
+            DeploymentCommandStep(
+                name: "prepare",
+                command: "mkdir -p \(quotedParent)",
+                isDestructive: false,
+                description: "Ensure the parent deployment directory exists."
+            ),
+            DeploymentCommandStep(
+                name: "git_check",
+                command: "command -v git",
+                isDestructive: false,
+                description: "Verify that git is installed on the remote server."
+            ),
+            DeploymentCommandStep(
+                name: "current_commit",
+                command: "if [ -d \(quotedPath)/.git ]; then cd \(quotedPath) && git rev-parse HEAD; else printf '\\n'; fi",
+                isDestructive: false,
+                description: "Capture the currently deployed commit for rollback."
+            ),
+            DeploymentCommandStep(
+                name: "clone_or_fetch",
+                command: "if [ -d \(quotedPath)/.git ]; then cd \(quotedPath) && git fetch --prune origin \(quotedBranch); else git clone --branch \(quotedBranch) --single-branch \(quotedRepository) \(quotedPath); fi",
+                isDestructive: false,
+                description: "Clone the repository or fetch the selected branch."
+            ),
+            DeploymentCommandStep(
+                name: "checkout",
+                command: "cd \(quotedPath) && git checkout \(quotedBranch) && git reset --hard origin/\(branch)",
+                isDestructive: true,
+                description: "Reset the deployment working tree to the selected branch."
+            ),
+            DeploymentCommandStep(
+                name: "target_commit",
+                command: "cd \(quotedPath) && git rev-parse HEAD",
+                isDestructive: false,
+                description: "Record the deployed target commit."
+            ),
+        ]
+
+        if let buildCommand = project.buildCommand?.trimmed.nilIfEmpty {
+            steps.append(DeploymentCommandStep(
+                name: "build",
+                command: "cd \(quotedPath) && \(buildCommand)",
+                isDestructive: false,
+                description: "Run the configured build command."
+            ))
+        }
+        if let restartCommand = project.restartCommand?.trimmed.nilIfEmpty {
+            steps.append(DeploymentCommandStep(
+                name: "restart",
+                command: "cd \(quotedPath) && \(restartCommand)",
+                isDestructive: true,
+                description: "Run the configured restart command."
+            ))
+        }
+        if let healthCheckCommand = project.healthCheckCommand?.trimmed.nilIfEmpty {
+            steps.append(DeploymentCommandStep(
+                name: "health_check",
+                command: "cd \(quotedPath) && \(healthCheckCommand)",
+                isDestructive: false,
+                description: "Run the configured health check command."
+            ))
+        }
+
+        guard let allowedRoot = pathPolicy.allowedRoot(for: deployPath) else {
+            throw DeploymentCommandBuilderError.deployPathOutsideAllowedRoots(deployPath)
+        }
+        return DeploymentCommandPlan(
+            project: project,
+            allowedRoot: allowedRoot,
+            steps: steps
+        )
+    }
+
+    static func validate(
+        project: DeploymentProject,
+        pathPolicy: DeploymentPathPolicy = .defaultPolicy
+    ) throws {
+        guard isValidRepositoryURL(project.repositoryURL.trimmed) else {
+            throw DeploymentCommandBuilderError.invalidRepositoryURL
+        }
+        guard isValidBranch(project.branch.trimmed) else {
+            throw DeploymentCommandBuilderError.invalidBranch
+        }
+        guard pathPolicy.allowedRoot(for: project.deployPath) != nil else {
+            throw DeploymentCommandBuilderError.deployPathOutsideAllowedRoots(project.deployPath.trimmed)
+        }
+        try validateCommand(project.buildCommand, label: "Build")
+        try validateCommand(project.restartCommand, label: "Restart")
+        try validateCommand(project.healthCheckCommand, label: "Health check")
+    }
+
+    private static func isValidRepositoryURL(_ url: String) -> Bool {
+        guard !url.isEmpty, !url.contains("\n"), !url.contains("\0") else { return false }
+        return url.hasPrefix("https://") ||
+            url.hasPrefix("ssh://") ||
+            url.range(of: #"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+:.+\.git$"#, options: .regularExpression) != nil
+    }
+
+    private static func isValidBranch(_ branch: String) -> Bool {
+        guard !branch.isEmpty, branch != ".", branch != ".." else { return false }
+        guard branch.range(of: #"^[A-Za-z0-9][A-Za-z0-9._/-]*$"#, options: .regularExpression) != nil else {
+            return false
+        }
+        return !branch.contains("..") && !branch.hasSuffix("/") && !branch.contains("//")
+    }
+
+    private static func validateCommand(_ command: String?, label: String) throws {
+        guard let command else { return }
+        let trimmed = command.trimmed
+        guard !trimmed.isEmpty,
+              !trimmed.contains("\n"),
+              !trimmed.contains("\r"),
+              !trimmed.contains("\0")
+        else {
+            throw DeploymentCommandBuilderError.invalidCommand(label)
+        }
+    }
+
+    private static func parentDirectory(for path: String) -> String {
+        let trimmed = path.trimmed
+        guard let slashIndex = trimmed.lastIndex(of: "/"), slashIndex != trimmed.startIndex else {
+            return "."
+        }
+        return String(trimmed[..<slashIndex])
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+    }
+}
+
 final class DashboardService: @unchecked Sendable {
     private let now: @Sendable () -> Date
 

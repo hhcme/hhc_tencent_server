@@ -453,6 +453,26 @@ struct DeploymentLogEntry: Identifiable, Codable, Equatable, Hashable, Sendable 
     var createdAt: Date
 }
 
+struct DeploymentCommandStep: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: String { name }
+    var name: String
+    var command: String
+    var isDestructive: Bool
+    var description: String
+}
+
+struct DeploymentCommandPlan: Codable, Equatable, Hashable, Sendable {
+    var project: DeploymentProject
+    var allowedRoot: String
+    var steps: [DeploymentCommandStep]
+
+    var commandPreview: String {
+        steps.map { step in
+            "# \(step.name)\n\(step.command)"
+        }.joined(separator: "\n\n")
+    }
+}
+
 enum RemoteOperationRiskLevel: String, Codable, CaseIterable, Identifiable, Sendable {
     case low
     case medium
