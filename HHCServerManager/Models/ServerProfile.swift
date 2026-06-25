@@ -262,6 +262,80 @@ struct FirewallSnapshot: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+enum FirewallRuleDirection: String, CaseIterable, Identifiable, Sendable {
+    case ingress
+    case egress
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .ingress:
+            "Ingress"
+        case .egress:
+            "Egress"
+        }
+    }
+}
+
+enum FirewallRuleAction: String, CaseIterable, Identifiable, Sendable {
+    case allow
+    case deny
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .allow:
+            "Allow"
+        case .deny:
+            "Deny"
+        }
+    }
+}
+
+enum FirewallRuleProtocol: String, CaseIterable, Identifiable, Sendable {
+    case tcp
+    case udp
+
+    var id: String { rawValue }
+
+    var displayName: String { rawValue.uppercased() }
+}
+
+enum FirewallRuleMutationAction: String, CaseIterable, Identifiable, Sendable {
+    case add
+    case delete
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .add:
+            "Add"
+        case .delete:
+            "Delete"
+        }
+    }
+}
+
+struct FirewallRuleDraft: Equatable, Hashable, Sendable {
+    var mutation: FirewallRuleMutationAction
+    var direction: FirewallRuleDirection
+    var action: FirewallRuleAction
+    var proto: FirewallRuleProtocol
+    var port: Int
+    var cidr: String
+}
+
+struct FirewallRuleMutationResult: Equatable, Hashable, Sendable {
+    var draft: FirewallRuleDraft
+    var command: String
+    var beforeSnapshot: FirewallSnapshot
+    var afterSnapshot: FirewallSnapshot
+    var result: CommandResult
+}
+
 struct EnvironmentFile: Identifiable, Equatable, Hashable, Sendable {
     var id: String { path }
     var path: String
@@ -661,6 +735,20 @@ enum RemoteOperationRiskFactory {
             recovery: "Fix the config and reload again if nginx -t fails.",
             auditTargetType: "nginx",
             auditAction: "reload"
+        )
+    }
+
+    static func firewallRule(_ draft: FirewallRuleDraft, backend: FirewallBackend, command: String?) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "firewall-\(draft.mutation.rawValue)-\(backend.rawValue)-\(draft.direction.rawValue)-\(draft.proto.rawValue)-\(draft.port)-\(draft.cidr)",
+            level: draft.action == .allow && draft.cidr == "0.0.0.0/0" ? .high : .medium,
+            title: "\(draft.mutation.displayName) Firewall Rule",
+            target: "\(backend.displayName) \(draft.direction.displayName.lowercased()) \(draft.action.rawValue) \(draft.proto.rawValue)/\(draft.port) \(draft.cidr)",
+            commandPreview: command,
+            impact: ["Firewall rules may immediately allow or block network traffic on the remote server."],
+            recovery: draft.mutation == .add ? "Delete the same rule if access becomes too broad." : "Add the same rule again if traffic should remain permitted.",
+            auditTargetType: "firewall",
+            auditAction: draft.mutation.rawValue
         )
     }
 

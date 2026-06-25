@@ -48,7 +48,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var nginxActionMessage: String?
     @Published var firewallSnapshot: FirewallSnapshot?
     @Published var isLoadingFirewall = false
+    @Published var isMutatingFirewall = false
     @Published var firewallErrorMessage: String?
+    @Published var firewallActionMessage: String?
     @Published var environmentFileList: EnvironmentFileList?
     @Published var selectedEnvironmentFile: EnvironmentFile?
     @Published var environmentFileContent: EnvironmentFileContent?
@@ -1149,6 +1151,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     ) {
         isLoadingFirewall = true
         firewallErrorMessage = nil
+        firewallActionMessage = nil
 
         Task {
             do {
@@ -1161,6 +1164,66 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.firewallErrorMessage = error.localizedDescription
                     self.isLoadingFirewall = false
+                }
+            }
+        }
+    }
+
+    func applyFirewallRule(
+        _ draft: FirewallRuleDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        firewallManager: FirewallManager,
+        repository: ServerRepository? = nil
+    ) {
+        guard let snapshot = firewallSnapshot else {
+            firewallErrorMessage = "Refresh firewall rules before applying changes."
+            return
+        }
+        isMutatingFirewall = true
+        firewallErrorMessage = nil
+        firewallActionMessage = nil
+
+        Task {
+            do {
+                let result = try await firewallManager.applyRule(
+                    draft,
+                    snapshot: snapshot,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let message = "\(draft.mutation.displayName) firewall rule succeeded."
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "firewall",
+                    targetId: "\(snapshot.backend.rawValue):\(draft.direction.rawValue):\(draft.proto.rawValue):\(draft.port):\(draft.cidr)",
+                    action: draft.mutation.rawValue,
+                    beforeSnapshot: result.beforeSnapshot.rulesText,
+                    afterSnapshot: result.afterSnapshot.rulesText,
+                    status: "success",
+                    message: message
+                )
+                await MainActor.run {
+                    self.firewallSnapshot = result.afterSnapshot
+                    self.firewallActionMessage = message
+                    self.isMutatingFirewall = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "firewall",
+                    targetId: "\(snapshot.backend.rawValue):\(draft.direction.rawValue):\(draft.proto.rawValue):\(draft.port):\(draft.cidr)",
+                    action: draft.mutation.rawValue,
+                    beforeSnapshot: snapshot.rulesText,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.firewallErrorMessage = error.localizedDescription
+                    self.isMutatingFirewall = false
                 }
             }
         }

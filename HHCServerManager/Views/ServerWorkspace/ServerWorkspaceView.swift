@@ -19,6 +19,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingNginxReload = false
     @State private var pendingNginxSave = false
     @State private var pendingEnvironmentSave = false
+    @State private var pendingFirewallRule: FirewallRuleRequest?
     @State private var pendingDeploymentRollback: DeploymentRollbackRequest?
     @State private var pendingVerdaccioInstall = false
     @State private var pendingVerdaccioUserDelete = false
@@ -31,6 +32,12 @@ struct ServerWorkspaceView: View {
     @State private var securityGroupDraftAction = "ACCEPT"
     @State private var securityGroupDraftDescription = ""
     @State private var securityGroupRulePreview: CloudSecurityGroupRuleChangePreview?
+    @State private var firewallRuleMutation: FirewallRuleMutationAction = .add
+    @State private var firewallRuleDirection: FirewallRuleDirection = .ingress
+    @State private var firewallRuleAction: FirewallRuleAction = .allow
+    @State private var firewallRuleProtocol: FirewallRuleProtocol = .tcp
+    @State private var firewallRulePort = "22"
+    @State private var firewallRuleCIDR = "0.0.0.0/0"
 
     let profile: ServerProfile
 
@@ -174,6 +181,18 @@ struct ServerWorkspaceView: View {
             }
         } message: {
             Text(RemoteOperationRiskFactory.saveEnvironmentFile(path: viewModel.environmentFileContent?.file.path ?? "environment file").confirmationMessage)
+        }
+        .alert(item: $pendingFirewallRule) { request in
+            Alert(
+                title: Text("\(request.draft.mutation.displayName) Firewall Rule?"),
+                message: Text(request.risk.confirmationMessage),
+                primaryButton: request.draft.mutation == .delete ? .destructive(Text(request.draft.mutation.displayName)) {
+                    applyFirewallRule(request.draft)
+                } : .default(Text(request.draft.mutation.displayName)) {
+                    applyFirewallRule(request.draft)
+                },
+                secondaryButton: .cancel()
+            )
         }
         .alert(item: $pendingDeploymentRollback) { request in
             Alert(
@@ -2127,6 +2146,11 @@ struct ServerWorkspaceView: View {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                 }
+
+                if let message = viewModel.firewallActionMessage {
+                    Label(message, systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
+                }
             }
             .padding(20)
 
@@ -2138,6 +2162,8 @@ struct ServerWorkspaceView: View {
                         FirewallSummaryTile(title: "Backend", value: snapshot.backend.displayName, systemImage: "shield")
                         FirewallSummaryTile(title: "Status", value: snapshot.status, systemImage: "checkmark.shield")
                     }
+
+                    firewallRuleEditor(snapshot: snapshot)
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Rules")
@@ -2171,6 +2197,83 @@ struct ServerWorkspaceView: View {
                 )
             }
         }
+    }
+
+    private func firewallRuleEditor(snapshot: FirewallSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Limited Rule")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    prepareFirewallRule(snapshot: snapshot)
+                } label: {
+                    if viewModel.isMutatingFirewall {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label(firewallRuleMutation.displayName, systemImage: firewallRuleMutation == .add ? "plus.circle" : "minus.circle")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isFirewallBusy)
+            }
+
+            HStack(spacing: 10) {
+                Picker("Mode", selection: $firewallRuleMutation) {
+                    ForEach(FirewallRuleMutationAction.allCases) { action in
+                        Text(action.displayName).tag(action)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+
+                Picker("Direction", selection: $firewallRuleDirection) {
+                    ForEach(FirewallRuleDirection.allCases) { direction in
+                        Text(direction.displayName).tag(direction)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 190)
+
+                Picker("Action", selection: $firewallRuleAction) {
+                    ForEach(FirewallRuleAction.allCases) { action in
+                        Text(action.displayName).tag(action)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+            }
+
+            HStack(spacing: 10) {
+                Picker("Protocol", selection: $firewallRuleProtocol) {
+                    ForEach(FirewallRuleProtocol.allCases) { proto in
+                        Text(proto.displayName).tag(proto)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 120)
+
+                TextField("Port", text: $firewallRulePort)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+
+                TextField("CIDR", text: $firewallRuleCIDR)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minWidth: 160, maxWidth: 220)
+            }
+
+            if let draft = currentFirewallRuleDraft,
+               let command = try? FirewallManager.command(for: draft, backend: snapshot.backend) {
+                RiskPreviewView(risk: RemoteOperationRiskFactory.firewallRule(draft, backend: snapshot.backend, command: command))
+            } else if snapshot.backend == .nft {
+                Label("nftables limited rule editing is not available yet.", systemImage: "lock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var securityGroupsPanel: some View {
@@ -2690,6 +2793,45 @@ struct ServerWorkspaceView: View {
         )
     }
 
+    private var currentFirewallRuleDraft: FirewallRuleDraft? {
+        guard let port = Int(firewallRulePort.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return FirewallRuleDraft(
+            mutation: firewallRuleMutation,
+            direction: firewallRuleDirection,
+            action: firewallRuleAction,
+            proto: firewallRuleProtocol,
+            port: port,
+            cidr: firewallRuleCIDR.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    private func prepareFirewallRule(snapshot: FirewallSnapshot) {
+        guard let draft = currentFirewallRuleDraft else {
+            viewModel.firewallErrorMessage = "Enter a valid numeric port."
+            return
+        }
+
+        do {
+            let command = try FirewallManager.command(for: draft, backend: snapshot.backend)
+            pendingFirewallRule = FirewallRuleRequest(
+                draft: draft,
+                risk: RemoteOperationRiskFactory.firewallRule(draft, backend: snapshot.backend, command: command)
+            )
+        } catch {
+            viewModel.firewallErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func applyFirewallRule(_ draft: FirewallRuleDraft) {
+        viewModel.applyFirewallRule(
+            draft,
+            profile: profile,
+            sshClient: appState.sshClient,
+            firewallManager: appState.firewallManager,
+            repository: appState.repository
+        )
+    }
+
     private func systemdJournalText(for unit: SystemdUnit) -> String {
         guard viewModel.systemdJournalLog?.unitName == unit.name else {
             return "Select Logs to load recent journal entries."
@@ -3134,6 +3276,10 @@ struct ServerWorkspaceView: View {
         viewModel.isLoadingCron || viewModel.isMutatingCron
     }
 
+    private var isFirewallBusy: Bool {
+        viewModel.isLoadingFirewall || viewModel.isMutatingFirewall
+    }
+
     private var isNginxBusy: Bool {
         viewModel.isLoadingNginxConfigs ||
             viewModel.isLoadingNginxConfigContent ||
@@ -3283,6 +3429,15 @@ private struct CronActionRequest: Identifiable {
 
     var risk: RemoteOperationRisk {
         RemoteOperationRiskFactory.cron(action: action, entry: entry)
+    }
+}
+
+private struct FirewallRuleRequest: Identifiable {
+    var draft: FirewallRuleDraft
+    var risk: RemoteOperationRisk
+
+    var id: String {
+        risk.id
     }
 }
 

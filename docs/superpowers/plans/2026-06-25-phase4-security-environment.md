@@ -85,8 +85,8 @@ CREATE TABLE environment_profiles (
 ### Task 1：危险操作框架
 
 - [x] 定义 `RemoteOperationRisk` 和确认模型：当前已覆盖远程文件删除/权限修改、systemd、Cron、Nginx、Environment 的风险级别、目标、命令预览、影响和恢复说明。
-- [x] 所有写操作写入 `remote_change_logs`：当前 systemd、Cron、Nginx 和 Environment 写操作已记录 before/after/status/message，安全组、防火墙待接入。
-- [x] 操作失败时保存 stderr 和上下文：当前 systemd、Cron、Nginx 和 Environment 失败会记录 before snapshot 与错误 message。
+- [x] 所有写操作写入 `remote_change_logs`：当前 systemd、Cron、Nginx、Environment 和 Firewall 写操作已记录 before/after/status/message，安全组云端写操作待接入。
+- [x] 操作失败时保存 stderr 和上下文：当前 systemd、Cron、Nginx、Environment 和 Firewall 失败会记录 before snapshot 与错误 message。
 - [x] UI 展示操作预览和风险说明：当前现有危险确认弹窗已使用统一风险文案，chmod 权限修改 sheet 已展示风险预览。
 
 ### Task 2：安全组
@@ -117,8 +117,8 @@ CREATE TABLE environment_profiles (
 
 - [x] 探测 ufw/firewalld/iptables/nftables：当前只读探测 firewalld、ufw、nftables、iptables，并处理 firewalld 安装但未运行的状态。
 - [x] 展示规则：当前展示后端状态和原始规则输出。
-- [ ] 支持有限新增/删除规则。
-- [ ] 高风险规则二次确认。
+- [x] 支持有限新增/删除规则：当前支持经过校验的 IPv4 CIDR、TCP/UDP、单端口 allow/deny 规则，firewalld 支持 ingress，ufw/iptables 支持 ingress/egress，nftables 因缺少通用 table/chain 语义暂时禁用写入。
+- [x] 高风险规则二次确认：工作台会展示风险级别、目标、命令预览、影响和恢复说明，确认后才执行。
 
 ### Task 6：Cron 与环境变量
 
@@ -144,15 +144,15 @@ CREATE TABLE environment_profiles (
 - [x] 新增安全组规则前显示预览和确认基础：当前安全组详情页可生成拟新增规则预览并展示风险，写操作按钮保持禁用。
 - [ ] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，重启操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
 - [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，真实配置写入/reload 待谨慎手动验收。
-- [x] 防火墙后端只读探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作待后续谨慎验收。
+- [x] 防火墙后端只读探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作已有 mock/contract 测试覆盖，真实服务器写入仍需谨慎手动验收。
 - [ ] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，禁用/恢复写操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
-- [ ] 所有写操作可在操作日志中查到。当前 systemd、Cron、Nginx 和 Environment 写操作已写入 `remote_change_logs`，安全组、防火墙写操作待实现后接入。
+- [ ] 所有写操作可在操作日志中查到。当前 systemd、Cron、Nginx、Environment 和 Firewall 写操作已写入 `remote_change_logs`，安全组云端写操作待实现后接入。
 
 ## 8. 完成标志
 
 1. 云安全组只读基础和规则 diff/preview 已可用；云端写操作仍待后续接入。
-2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。当前 systemd、Nginx、Cron、Environment 已有工作台基础，Firewall 已有只读探测。
-3. 所有远程写操作有确认和审计。当前 systemd、Cron、Nginx、Environment 已接入审计；现有危险确认已接入统一风险模型，安全组/防火墙写操作待实现后接入。
+2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。当前 systemd、Nginx、Cron、Environment 已有工作台基础，Firewall 已支持只读探测和受限规则写操作。
+3. 所有远程写操作有确认和审计。当前 systemd、Cron、Nginx、Environment 和 Firewall 已接入审计；现有危险确认已接入统一风险模型，安全组云端写操作待实现后接入。
 4. Nginx 等配置类操作有备份和回滚。当前 Nginx 已具备读取、编辑、保存前备份、保存后测试、失败回滚和 reload 前保护。
 5. 测试和手动验收通过。
 

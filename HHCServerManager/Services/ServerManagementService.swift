@@ -4148,6 +4148,59 @@ final class FirewallManager: @unchecked Sendable {
         return try Self.parseSnapshot(result.stdout, capturedAt: now())
     }
 
+    func applyRule(
+        _ draft: FirewallRuleDraft,
+        snapshot: FirewallSnapshot,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> FirewallRuleMutationResult {
+        let command = try Self.command(for: draft, backend: snapshot.backend)
+        let result = try await CloudProviderRequestRunner.withTimeout(20) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? result.stdout.nilIfEmpty ?? "Firewall rule update failed.")
+        }
+        let refreshed = try await loadSnapshot(profile: profile, sshClient: sshClient)
+        return FirewallRuleMutationResult(
+            draft: draft,
+            command: command,
+            beforeSnapshot: snapshot,
+            afterSnapshot: refreshed,
+            result: result
+        )
+    }
+
+    static func command(for draft: FirewallRuleDraft, backend: FirewallBackend) throws -> String {
+        try validate(draft)
+        switch backend {
+        case .firewalld:
+            guard draft.direction == .ingress else {
+                throw SSHClientError.processFailed("firewalld egress rules are not supported by the limited rule editor.")
+            }
+            let verb = draft.mutation == .add ? "--add-rich-rule" : "--remove-rich-rule"
+            let ruleAction = draft.action == .allow ? "accept" : "drop"
+            let richRule = "rule family=\"ipv4\" source address=\"\(draft.cidr)\" port protocol=\"\(draft.proto.rawValue)\" port=\"\(draft.port)\" \(ruleAction)"
+            return "firewall-cmd --permanent \(verb)=\(shellQuote(richRule)) && firewall-cmd --reload"
+        case .ufw:
+            let mutation = draft.mutation == .add ? "" : "delete "
+            let direction = draft.direction == .ingress ? "in" : "out"
+            let action = draft.action == .allow ? "allow" : "deny"
+            let endpoint = draft.direction == .ingress
+                ? "from \(shellQuote(draft.cidr)) to any port \(draft.port)"
+                : "to \(shellQuote(draft.cidr)) port \(draft.port)"
+            return "ufw \(mutation)\(action) \(direction) proto \(draft.proto.rawValue) \(endpoint)"
+        case .iptables:
+            let operation = draft.mutation == .add ? "-A" : "-D"
+            let chain = draft.direction == .ingress ? "INPUT" : "OUTPUT"
+            let jump = draft.action == .allow ? "ACCEPT" : "DROP"
+            let cidrFlag = draft.direction == .ingress ? "-s" : "-d"
+            return "iptables \(operation) \(chain) -p \(draft.proto.rawValue) \(cidrFlag) \(shellQuote(draft.cidr)) --dport \(draft.port) -j \(jump)"
+        case .nft:
+            throw SSHClientError.processFailed("nftables limited rule editing requires an existing table/chain policy and is not supported yet.")
+        }
+    }
+
     static func parseSnapshot(_ text: String, capturedAt: Date) throws -> FirewallSnapshot {
         guard let backendText = section("__HHC_FIREWALL_BACKEND__", in: text).firstLine,
               let backend = FirewallBackend(rawValue: backendText.trimmed)
@@ -4175,6 +4228,35 @@ final class FirewallManager: @unchecked Sendable {
             return String(remaining[..<end.lowerBound])
         }
         return String(remaining)
+    }
+
+    private static func validate(_ draft: FirewallRuleDraft) throws {
+        guard (1...65_535).contains(draft.port) else {
+            throw SSHClientError.processFailed("Firewall port must be between 1 and 65535.")
+        }
+        guard isValidIPv4CIDR(draft.cidr) else {
+            throw SSHClientError.processFailed("Firewall CIDR must be an IPv4 CIDR such as 203.0.113.0/24.")
+        }
+    }
+
+    private static func isValidIPv4CIDR(_ value: String) -> Bool {
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              let prefix = Int(parts[1]),
+              (0...32).contains(prefix)
+        else {
+            return false
+        }
+        let octets = parts[0].split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4 else { return false }
+        return octets.allSatisfy { octet in
+            guard let number = Int(octet), (0...255).contains(number) else { return false }
+            return String(number) == String(octet)
+        }
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
 

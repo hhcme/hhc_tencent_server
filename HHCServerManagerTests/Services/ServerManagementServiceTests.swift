@@ -1889,6 +1889,47 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertThrowsError(try FirewallManager.parseSnapshot("bad", capturedAt: capturedAt))
     }
 
+    func testFirewallManagerBuildsAndAppliesLimitedRuleCommands() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingFirewallSSHClient()
+        let manager = FirewallManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let draft = FirewallRuleDraft(
+            mutation: .add,
+            direction: .ingress,
+            action: .allow,
+            proto: .tcp,
+            port: 443,
+            cidr: "203.0.113.0/24"
+        )
+
+        XCTAssertEqual(
+            try FirewallManager.command(for: draft, backend: .ufw),
+            "ufw allow in proto tcp from '203.0.113.0/24' to any port 443"
+        )
+        XCTAssertEqual(
+            try FirewallManager.command(for: draft, backend: .iptables),
+            "iptables -A INPUT -p tcp -s '203.0.113.0/24' --dport 443 -j ACCEPT"
+        )
+        XCTAssertTrue(try FirewallManager.command(for: draft, backend: .firewalld).contains("--add-rich-rule='rule family=\"ipv4\""))
+        XCTAssertThrowsError(try FirewallManager.command(for: draft, backend: .nft))
+        XCTAssertThrowsError(try FirewallManager.command(for: FirewallRuleDraft(
+            mutation: .add,
+            direction: .ingress,
+            action: .allow,
+            proto: .tcp,
+            port: 70_000,
+            cidr: "203.0.113.0/24"
+        ), backend: .ufw))
+
+        let snapshot = try await manager.loadSnapshot(profile: profile, sshClient: client)
+        let result = try await manager.applyRule(draft, snapshot: snapshot, profile: profile, sshClient: client)
+
+        XCTAssertEqual(result.command, try FirewallManager.command(for: draft, backend: .firewalld))
+        XCTAssertEqual(result.beforeSnapshot.backend, .firewalld)
+        XCTAssertEqual(result.afterSnapshot.backend, .firewalld)
+        XCTAssertTrue(client.commands.contains(where: { $0.contains("firewall-cmd --permanent --add-rich-rule") }))
+    }
+
     func testEnvironmentFileManagerListsReadsAndSavesWithBackup() async throws {
         let profile = makeServiceTestProfile()
         let client = RecordingEnvironmentSSHClient()

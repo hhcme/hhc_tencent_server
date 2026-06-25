@@ -1181,6 +1181,43 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.firewallErrorMessage)
     }
 
+    func testFirewallRuleMutationRefreshesAndAudits() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = FirewallViewModelMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let manager = FirewallManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadFirewallSnapshot(profile: profile, sshClient: client, firewallManager: manager)
+        try await waitUntil { viewModel.firewallSnapshot != nil }
+        viewModel.applyFirewallRule(
+            FirewallRuleDraft(
+                mutation: .add,
+                direction: .ingress,
+                action: .allow,
+                proto: .tcp,
+                port: 443,
+                cidr: "203.0.113.0/24"
+            ),
+            profile: profile,
+            sshClient: client,
+            firewallManager: manager,
+            repository: repository
+        )
+
+        try await waitUntil { viewModel.isMutatingFirewall == false && viewModel.firewallActionMessage != nil }
+
+        XCTAssertTrue(client.commands.contains(where: { $0.contains("iptables -A INPUT") && $0.contains("--dport 443") }))
+        XCTAssertEqual(viewModel.firewallActionMessage, "Add firewall rule succeeded.")
+        XCTAssertNil(viewModel.firewallErrorMessage)
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.first?.targetType, "firewall")
+        XCTAssertEqual(logs.first?.action, "add")
+        XCTAssertEqual(logs.first?.status, "success")
+        XCTAssertTrue(logs.first?.beforeSnapshot?.contains("--dport 22") == true)
+        XCTAssertTrue(logs.first?.afterSnapshot?.contains("--dport 22") == true)
+    }
+
     func testEnvironmentFilesLoadSelectAndSaveWithAudit() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
@@ -2146,12 +2183,15 @@ private final class NginxViewModelMockSSHClient: SSHClient, @unchecked Sendable 
 }
 
 private final class FirewallViewModelMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
         try await execute("printf hhc-ssh-ok", profile: profile)
     }
 
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
-        CommandResult(
+        commands.append(command)
+        return CommandResult(
             command: command,
             stdout: """
             __HHC_FIREWALL_BACKEND__
