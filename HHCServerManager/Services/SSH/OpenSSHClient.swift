@@ -29,11 +29,18 @@ enum SSHClientError: LocalizedError {
 final class OpenSSHClient: SSHClient, @unchecked Sendable {
     private let repository: ServerRepository
     private let keychain: KeychainService
+    private let hostKeyTrustStore: HostKeyTrustStore
     private let fileManager: FileManager
 
-    init(repository: ServerRepository, keychain: KeychainService, fileManager: FileManager = .default) {
+    init(
+        repository: ServerRepository,
+        keychain: KeychainService,
+        hostKeyTrustStore: HostKeyTrustStore? = nil,
+        fileManager: FileManager = .default
+    ) {
         self.repository = repository
         self.keychain = keychain
+        self.hostKeyTrustStore = hostKeyTrustStore ?? HostKeyTrustStore(repository: repository)
         self.fileManager = fileManager
     }
 
@@ -106,30 +113,20 @@ final class OpenSSHClient: SSHClient, @unchecked Sendable {
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {
-        let trusted = TrustedHostKey(
-            id: UUID(),
-            serverId: profile.id,
-            host: hostKeyInfo.host,
-            port: hostKeyInfo.port,
-            algorithm: hostKeyInfo.algorithm,
-            fingerprintSHA256: hostKeyInfo.fingerprintSHA256,
-            rawPublicKey: hostKeyInfo.rawPublicKey,
-            trustedAt: Date()
-        )
-        try repository.saveTrustedHostKey(trusted)
+        try hostKeyTrustStore.trust(hostKeyInfo, for: profile)
         try rebuildKnownHostsFile()
     }
 
     private func ensureHostKeyTrusted(profile: ServerProfile) async throws {
         let current = try await scanHostKey(profile: profile)
-        let trustedKeys = try repository.fetchTrustedHostKeys(serverId: profile.id)
-        if trustedKeys.contains(where: { $0.fingerprintSHA256 == current.fingerprintSHA256 }) {
+        switch try hostKeyTrustStore.evaluate(current, for: profile) {
+        case .trusted:
             return
+        case .unknown(let hostKeyInfo):
+            throw SSHClientError.unknownHostKey(hostKeyInfo)
+        case let .changed(current, trusted):
+            throw SSHClientError.hostKeyChanged(current: current, trusted: trusted)
         }
-        if let sameAlgorithm = trustedKeys.first(where: { $0.algorithm == current.algorithm }) {
-            throw SSHClientError.hostKeyChanged(current: current, trusted: sameAlgorithm)
-        }
-        throw SSHClientError.unknownHostKey(current)
     }
 
     private func scanHostKey(profile: ServerProfile) async throws -> HostKeyInfo {

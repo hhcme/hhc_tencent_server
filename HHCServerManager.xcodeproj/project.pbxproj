@@ -23,12 +23,14 @@
 		100000000000000000000114 /* AddServerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* AddServerSheet.swift */; };
 		100000000000000000000115 /* ServerWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000015 /* ServerWorkspaceView.swift */; };
 		100000000000000000000116 /* SSHClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000019 /* SSHClient.swift */; };
+		100000000000000000000117 /* HostKeyTrustStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000020 /* HostKeyTrustStore.swift */; };
 		900000000000000000000101 /* ServerRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000001 /* ServerRepositoryTests.swift */; };
 		900000000000000000000102 /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000002 /* KeychainServiceTests.swift */; };
 		900000000000000000000103 /* ServerManagementServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000003 /* ServerManagementServiceTests.swift */; };
 		900000000000000000000104 /* AddServerViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000004 /* AddServerViewModelTests.swift */; };
 		900000000000000000000105 /* SSHIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000005 /* SSHIntegrationTests.swift */; };
 		900000000000000000000106 /* ServerWorkspaceViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000007 /* ServerWorkspaceViewModelTests.swift */; };
+		900000000000000000000107 /* HostKeyTrustStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000008 /* HostKeyTrustStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,6 +63,7 @@
 		100000000000000000000017 /* HHCServerManager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HHCServerManager.entitlements; sourceTree = "<group>"; };
 		100000000000000000000018 /* HHCServerManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HHCServerManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000019 /* SSHClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHClient.swift; sourceTree = "<group>"; };
+		100000000000000000000020 /* HostKeyTrustStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyTrustStore.swift; sourceTree = "<group>"; };
 		900000000000000000000001 /* ServerRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRepositoryTests.swift; sourceTree = "<group>"; };
 		900000000000000000000002 /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
 		900000000000000000000003 /* ServerManagementServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementServiceTests.swift; sourceTree = "<group>"; };
@@ -68,6 +71,7 @@
 		900000000000000000000005 /* SSHIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHIntegrationTests.swift; sourceTree = "<group>"; };
 		900000000000000000000006 /* HHCServerManagerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HHCServerManagerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		900000000000000000000007 /* ServerWorkspaceViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerWorkspaceViewModelTests.swift; sourceTree = "<group>"; };
+		900000000000000000000008 /* HostKeyTrustStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyTrustStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -190,6 +194,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000019 /* SSHClient.swift */,
+				100000000000000000000020 /* HostKeyTrustStore.swift */,
 				100000000000000000000008 /* OpenSSHClient.swift */,
 			);
 			path = SSH;
@@ -243,6 +248,7 @@
 			isa = PBXGroup;
 			children = (
 				900000000000000000000003 /* ServerManagementServiceTests.swift */,
+				900000000000000000000008 /* HostKeyTrustStoreTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -371,6 +377,7 @@
 				100000000000000000000107 /* ServerManagementService.swift in Sources */,
 				100000000000000000000108 /* OpenSSHClient.swift in Sources */,
 				100000000000000000000116 /* SSHClient.swift in Sources */,
+				100000000000000000000117 /* HostKeyTrustStore.swift in Sources */,
 				100000000000000000000109 /* AddServerViewModel.swift in Sources */,
 				100000000000000000000110 /* ServerBrowserViewModel.swift in Sources */,
 				100000000000000000000111 /* ServerWorkspaceViewModel.swift in Sources */,
@@ -388,6 +395,7 @@
 				900000000000000000000101 /* ServerRepositoryTests.swift in Sources */,
 				900000000000000000000102 /* KeychainServiceTests.swift in Sources */,
 				900000000000000000000103 /* ServerManagementServiceTests.swift in Sources */,
+				900000000000000000000107 /* HostKeyTrustStoreTests.swift in Sources */,
 				900000000000000000000104 /* AddServerViewModelTests.swift in Sources */,
 				900000000000000000000106 /* ServerWorkspaceViewModelTests.swift in Sources */,
 				900000000000000000000105 /* SSHIntegrationTests.swift in Sources */,
