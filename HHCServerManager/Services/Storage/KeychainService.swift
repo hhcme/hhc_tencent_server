@@ -49,6 +49,28 @@ final class KeychainService: @unchecked Sendable {
         delete(account: "ssh_private_key_passphrase_\(keychainRef)")
     }
 
+    func saveCloudCredential(_ credential: CloudProviderCredential, keychainRef: String) throws {
+        try save(Data(credential.secretId.utf8), account: "cloud_secret_id_\(keychainRef)")
+        try save(Data(credential.secretKey.utf8), account: "cloud_secret_key_\(keychainRef)")
+    }
+
+    func readCloudCredential(keychainRef: String) throws -> CloudProviderCredential? {
+        guard
+            let secretIdData = try readData(account: "cloud_secret_id_\(keychainRef)"),
+            let secretKeyData = try readData(account: "cloud_secret_key_\(keychainRef)"),
+            let secretId = String(data: secretIdData, encoding: .utf8),
+            let secretKey = String(data: secretKeyData, encoding: .utf8)
+        else {
+            return nil
+        }
+        return CloudProviderCredential(secretId: secretId, secretKey: secretKey)
+    }
+
+    func deleteCloudCredential(keychainRef: String) {
+        delete(account: "cloud_secret_id_\(keychainRef)")
+        delete(account: "cloud_secret_key_\(keychainRef)")
+    }
+
     private func save(_ data: Data, account: String) throws {
         delete(account: account)
         let query: [String: Any] = [

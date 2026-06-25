@@ -111,21 +111,22 @@ CREATE TABLE operation_logs (
 ### Task 1：数据迁移
 
 - [x] 添加 `command_history` 和 `operation_logs` 表，先支撑简化命令面板历史和审计基础。
-- [ ] 添加云账号和云实例关联表。
-- [ ] 为 provider/account/region/instance 建唯一约束。
+- [x] 添加云账号和云实例关联表。
+- [x] 为 provider/account/region/instance 建唯一约束。
 - [x] 添加命令历史和操作日志 repository 单元测试。
-- [ ] 添加云账号和云实例关联 repository 单元测试。
+- [x] 添加云账号和云实例关联 repository 单元测试。
 
 ### Task 2：云凭据存储
 
-- [ ] 扩展 KeychainService 支持云凭据命名空间。
-- [ ] 保存、读取、覆盖、删除 SecretId/SecretKey。
-- [ ] 云账号删除时清理 Keychain。
-- [ ] 测试 DB/Keychain 补偿逻辑。
+- [x] 扩展 KeychainService 支持云凭据命名空间。
+- [x] 保存、读取、覆盖、删除 SecretId/SecretKey。
+- [x] 云账号删除时清理 Keychain。
+- [x] 测试 DB/Keychain 补偿逻辑。
 
 ### Task 3：Provider 基础设施
 
-- [ ] 定义 `CloudProviderID`、`CloudCapability`、`CloudProviderAdapter`。
+- [x] 定义 `CloudProviderID` 和 `CloudCapability`。
+- [ ] 定义 `CloudProviderAdapter`。
 - [ ] 实现 registry 和 adapter capability 查询。
 - [ ] 统一错误类型：认证失败、权限不足、限流、网络错误、provider 返回异常。
 - [ ] 添加请求超时和取消。
@@ -159,8 +160,8 @@ CREATE TABLE operation_logs (
 
 ### Task 7：测试
 
-- [ ] 云账号 repository 测试。
-- [ ] 云凭据 Keychain 测试。
+- [x] 云账号 repository 测试。
+- [x] 云凭据 Keychain 测试。
 - [ ] Tencent Cloud response parser 测试。
 - [ ] 实例同步 upsert 测试。
 - [ ] 命令历史测试。

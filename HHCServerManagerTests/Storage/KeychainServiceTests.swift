@@ -38,4 +38,30 @@ final class KeychainServiceTests: XCTestCase {
         service.deleteCredentials(keychainRef: keychainRef)
         XCTAssertNil(try service.readPrivateKey(keychainRef: keychainRef))
     }
+
+    func testCloudCredentialRoundTripOverwriteAndDelete() throws {
+        let cloudRef = "cloud_\(UUID().uuidString)"
+        defer { service.deleteCloudCredential(keychainRef: cloudRef) }
+
+        try service.saveCloudCredential(
+            CloudProviderCredential(secretId: "secret-id-1", secretKey: "secret-key-1"),
+            keychainRef: cloudRef
+        )
+        XCTAssertEqual(
+            try service.readCloudCredential(keychainRef: cloudRef),
+            CloudProviderCredential(secretId: "secret-id-1", secretKey: "secret-key-1")
+        )
+
+        try service.saveCloudCredential(
+            CloudProviderCredential(secretId: "secret-id-2", secretKey: "secret-key-2"),
+            keychainRef: cloudRef
+        )
+        XCTAssertEqual(
+            try service.readCloudCredential(keychainRef: cloudRef),
+            CloudProviderCredential(secretId: "secret-id-2", secretKey: "secret-key-2")
+        )
+
+        service.deleteCloudCredential(keychainRef: cloudRef)
+        XCTAssertNil(try service.readCloudCredential(keychainRef: cloudRef))
+    }
 }

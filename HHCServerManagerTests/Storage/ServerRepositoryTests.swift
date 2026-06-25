@@ -127,6 +127,101 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertEqual(logs[1].message, "exit_code=0")
     }
 
+    func testCloudProviderAccountsPersistUpdateAndDelete() throws {
+        let repository = try makeRepository()
+        let account = CloudProviderAccount(
+            id: UUID(),
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            keychainRef: "cloud_test",
+            enabled: true,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try repository.upsertCloudProviderAccount(account)
+
+        var accounts = try repository.fetchCloudProviderAccounts()
+        XCTAssertEqual(accounts.count, 1)
+        XCTAssertEqual(accounts[0].displayName, "Tencent")
+        XCTAssertTrue(accounts[0].enabled)
+
+        var updated = account
+        updated.displayName = "Tencent Read Only"
+        updated.enabled = false
+        updated.updatedAt = Date(timeIntervalSince1970: 1_700_000_050)
+        try repository.upsertCloudProviderAccount(updated)
+
+        accounts = try repository.fetchCloudProviderAccounts()
+        XCTAssertEqual(accounts.count, 1)
+        XCTAssertEqual(accounts[0].displayName, "Tencent Read Only")
+        XCTAssertFalse(accounts[0].enabled)
+
+        try repository.deleteCloudProviderAccount(id: account.id)
+        XCTAssertTrue(try repository.fetchCloudProviderAccounts().isEmpty)
+    }
+
+    func testCloudInstanceLinksUpsertUnlinkAndCascadeWithAccount() throws {
+        let repository = try makeRepository()
+        let server = makeServer()
+        try repository.upsert(server)
+        let account = CloudProviderAccount(
+            id: UUID(),
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            keychainRef: "cloud_test",
+            enabled: true,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try repository.upsertCloudProviderAccount(account)
+
+        let link = CloudInstanceLink(
+            id: UUID(),
+            serverId: server.id,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "prod-1",
+            publicIp: "203.0.113.1",
+            privateIp: "10.0.0.2",
+            status: "RUNNING",
+            instanceType: "S5.SMALL1",
+            zoneId: "ap-guangzhou-1",
+            vpcId: "vpc-123",
+            rawJSON: #"{"InstanceId":"ins-123"}"#,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try repository.upsertCloudInstanceLink(link)
+
+        var links = try repository.fetchCloudInstanceLinks(accountId: account.id)
+        XCTAssertEqual(links.count, 1)
+        XCTAssertEqual(links[0].serverId, server.id)
+        XCTAssertEqual(links[0].publicIp, "203.0.113.1")
+
+        var updated = link
+        updated.id = UUID()
+        updated.serverId = nil
+        updated.displayName = "prod-renamed"
+        updated.status = "STOPPED"
+        updated.lastSyncedAt = Date(timeIntervalSince1970: 1_700_000_030)
+        try repository.upsertCloudInstanceLink(updated)
+
+        links = try repository.fetchCloudInstanceLinks(accountId: account.id)
+        XCTAssertEqual(links.count, 1)
+        XCTAssertEqual(links[0].displayName, "prod-renamed")
+        XCTAssertNil(links[0].serverId)
+        XCTAssertEqual(links[0].status, "STOPPED")
+
+        updated.serverId = server.id
+        try repository.upsertCloudInstanceLink(updated)
+        try repository.unlinkCloudInstanceFromServer(serverId: server.id)
+        XCTAssertNil(try repository.fetchCloudInstanceLinks(accountId: account.id)[0].serverId)
+
+        try repository.deleteCloudProviderAccount(id: account.id)
+        XCTAssertTrue(try repository.fetchCloudInstanceLinks().isEmpty)
+    }
+
     private func makeRepository() throws -> ServerRepository {
         ServerRepository(database: try AppDatabase.inMemory())
     }

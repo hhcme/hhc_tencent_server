@@ -4,6 +4,7 @@ import Foundation
 final class AppState: ObservableObject {
     let repository: ServerRepository
     let serverManagementService: ServerManagementService
+    let cloudAccountService: CloudAccountService
     let sshClient: OpenSSHClient
 
     @Published var servers: [ServerProfile] = []
@@ -18,6 +19,7 @@ final class AppState: ObservableObject {
             let keychain = KeychainService()
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
+            cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
             sshClient = OpenSSHClient(repository: repository, keychain: keychain)
             reloadServers()
         } catch {
@@ -27,6 +29,7 @@ final class AppState: ObservableObject {
             let keychain = KeychainService(serviceName: "me.hhc.HHCServerManager.fallback")
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
+            cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
             sshClient = OpenSSHClient(repository: repository, keychain: keychain)
         }
     }

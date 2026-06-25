@@ -150,6 +150,109 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func fetchCloudProviderAccounts() throws -> [CloudProviderAccount] {
+        try database.query("""
+            SELECT id, provider_id, display_name, keychain_ref, enabled, created_at, updated_at
+            FROM cloud_provider_accounts
+            ORDER BY updated_at DESC
+        """) { statement in
+            try Self.mapCloudProviderAccount(statement)
+        }
+    }
+
+    func upsertCloudProviderAccount(_ account: CloudProviderAccount) throws {
+        try database.execute("""
+            INSERT INTO cloud_provider_accounts (
+                id, provider_id, display_name, keychain_ref, enabled, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                provider_id = excluded.provider_id,
+                display_name = excluded.display_name,
+                keychain_ref = excluded.keychain_ref,
+                enabled = excluded.enabled,
+                updated_at = excluded.updated_at
+        """, bindings: [
+            .text(account.id.uuidString),
+            .text(account.providerId.rawValue),
+            .text(account.displayName),
+            .text(account.keychainRef),
+            .int(account.enabled ? 1 : 0),
+            .text(AppDatabase.string(from: account.createdAt)),
+            .text(AppDatabase.string(from: account.updatedAt)),
+        ])
+    }
+
+    func deleteCloudProviderAccount(id: UUID) throws {
+        try database.execute("DELETE FROM cloud_provider_accounts WHERE id = ?", bindings: [.text(id.uuidString)])
+    }
+
+    func fetchCloudInstanceLinks(accountId: UUID? = nil) throws -> [CloudInstanceLink] {
+        if let accountId {
+            return try database.query("""
+                SELECT id, server_id, account_id, provider_id, region_id, instance_id, display_name,
+                       public_ip, private_ip, status, instance_type, zone_id, vpc_id, raw_json, last_synced_at
+                FROM cloud_instance_links
+                WHERE account_id = ?
+                ORDER BY last_synced_at DESC, display_name ASC
+            """, bindings: [.text(accountId.uuidString)]) { statement in
+                try Self.mapCloudInstanceLink(statement)
+            }
+        }
+
+        return try database.query("""
+            SELECT id, server_id, account_id, provider_id, region_id, instance_id, display_name,
+                   public_ip, private_ip, status, instance_type, zone_id, vpc_id, raw_json, last_synced_at
+            FROM cloud_instance_links
+            ORDER BY last_synced_at DESC, display_name ASC
+        """) { statement in
+            try Self.mapCloudInstanceLink(statement)
+        }
+    }
+
+    func upsertCloudInstanceLink(_ link: CloudInstanceLink) throws {
+        try database.execute("""
+            INSERT INTO cloud_instance_links (
+                id, server_id, account_id, provider_id, region_id, instance_id, display_name,
+                public_ip, private_ip, status, instance_type, zone_id, vpc_id, raw_json, last_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, region_id, instance_id) DO UPDATE SET
+                server_id = excluded.server_id,
+                provider_id = excluded.provider_id,
+                display_name = excluded.display_name,
+                public_ip = excluded.public_ip,
+                private_ip = excluded.private_ip,
+                status = excluded.status,
+                instance_type = excluded.instance_type,
+                zone_id = excluded.zone_id,
+                vpc_id = excluded.vpc_id,
+                raw_json = excluded.raw_json,
+                last_synced_at = excluded.last_synced_at
+        """, bindings: [
+            .text(link.id.uuidString),
+            link.serverId.map { .text($0.uuidString) } ?? .null,
+            .text(link.accountId.uuidString),
+            .text(link.providerId.rawValue),
+            .text(link.regionId),
+            .text(link.instanceId),
+            link.displayName.map(SQLiteValue.text) ?? .null,
+            link.publicIp.map(SQLiteValue.text) ?? .null,
+            link.privateIp.map(SQLiteValue.text) ?? .null,
+            link.status.map(SQLiteValue.text) ?? .null,
+            link.instanceType.map(SQLiteValue.text) ?? .null,
+            link.zoneId.map(SQLiteValue.text) ?? .null,
+            link.vpcId.map(SQLiteValue.text) ?? .null,
+            link.rawJSON.map(SQLiteValue.text) ?? .null,
+            link.lastSyncedAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+        ])
+    }
+
+    func unlinkCloudInstanceFromServer(serverId: UUID) throws {
+        try database.execute(
+            "UPDATE cloud_instance_links SET server_id = NULL WHERE server_id = ?",
+            bindings: [.text(serverId.uuidString)]
+        )
+    }
+
     private static func mapServer(_ statement: OpaquePointer) throws -> ServerProfile {
         let id = UUID(uuidString: string(statement, 0)) ?? UUID()
         let authType = SSHAuthType(rawValue: string(statement, 5)) ?? .privateKey
@@ -203,6 +306,38 @@ final class ServerRepository: @unchecked Sendable {
         )
     }
 
+    private static func mapCloudProviderAccount(_ statement: OpaquePointer) throws -> CloudProviderAccount {
+        CloudProviderAccount(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            providerId: CloudProviderID(rawValue: string(statement, 1)) ?? .tencentCloud,
+            displayName: string(statement, 2),
+            keychainRef: string(statement, 3),
+            enabled: sqlite3_column_int(statement, 4) != 0,
+            createdAt: date(statement, 5),
+            updatedAt: date(statement, 6)
+        )
+    }
+
+    private static func mapCloudInstanceLink(_ statement: OpaquePointer) throws -> CloudInstanceLink {
+        CloudInstanceLink(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            serverId: optionalUUID(statement, 1),
+            accountId: UUID(uuidString: string(statement, 2)) ?? UUID(),
+            providerId: CloudProviderID(rawValue: string(statement, 3)) ?? .tencentCloud,
+            regionId: string(statement, 4),
+            instanceId: string(statement, 5),
+            displayName: optionalString(statement, 6),
+            publicIp: optionalString(statement, 7),
+            privateIp: optionalString(statement, 8),
+            status: optionalString(statement, 9),
+            instanceType: optionalString(statement, 10),
+            zoneId: optionalString(statement, 11),
+            vpcId: optionalString(statement, 12),
+            rawJSON: optionalString(statement, 13),
+            lastSyncedAt: optionalDate(statement, 14)
+        )
+    }
+
     private static func string(_ statement: OpaquePointer, _ index: Int32) -> String {
         guard let cString = sqlite3_column_text(statement, index) else { return "" }
         return String(cString: cString)
@@ -216,6 +351,16 @@ final class ServerRepository: @unchecked Sendable {
 
     private static func date(_ statement: OpaquePointer, _ index: Int32) -> Date {
         AppDatabase.date(from: string(statement, index)) ?? Date()
+    }
+
+    private static func optionalDate(_ statement: OpaquePointer, _ index: Int32) -> Date? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return AppDatabase.date(from: string(statement, index))
+    }
+
+    private static func optionalUUID(_ statement: OpaquePointer, _ index: Int32) -> UUID? {
+        guard let value = optionalString(statement, index) else { return nil }
+        return UUID(uuidString: value)
     }
 
     private static func optionalInt32(_ statement: OpaquePointer, _ index: Int32) -> Int32? {

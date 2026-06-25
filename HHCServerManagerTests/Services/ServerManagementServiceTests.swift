@@ -105,15 +105,53 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(try harness.keychain.readPassword(keychainRef: profile.keychainRef), "new")
     }
 
+    func testCloudAccountServiceCreatesUpdatesAndDeletesAccountWithCredential() throws {
+        let harness = try Harness()
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: " Tencent Read Only ",
+            credential: CloudProviderCredential(secretId: "sid-1", secretKey: "skey-1")
+        )
+
+        XCTAssertEqual(account.displayName, "Tencent Read Only")
+        XCTAssertEqual(try harness.repository.fetchCloudProviderAccounts().map(\.id), [account.id])
+        XCTAssertEqual(
+            try harness.keychain.readCloudCredential(keychainRef: account.keychainRef),
+            CloudProviderCredential(secretId: "sid-1", secretKey: "skey-1")
+        )
+
+        let updated = try harness.cloudAccountService.updateAccount(
+            account,
+            displayName: "Tencent Disabled",
+            enabled: false,
+            credential: CloudProviderCredential(secretId: "sid-2", secretKey: "skey-2")
+        )
+
+        XCTAssertEqual(updated.keychainRef, account.keychainRef)
+        XCTAssertFalse(updated.enabled)
+        XCTAssertEqual(try harness.repository.fetchCloudProviderAccounts()[0].displayName, "Tencent Disabled")
+        XCTAssertEqual(
+            try harness.keychain.readCloudCredential(keychainRef: account.keychainRef),
+            CloudProviderCredential(secretId: "sid-2", secretKey: "skey-2")
+        )
+
+        try harness.cloudAccountService.deleteAccount(updated)
+
+        XCTAssertTrue(try harness.repository.fetchCloudProviderAccounts().isEmpty)
+        XCTAssertNil(try harness.keychain.readCloudCredential(keychainRef: account.keychainRef))
+    }
+
     private final class Harness {
         let repository: ServerRepository
         let keychain: KeychainService
         let service: ServerManagementService
+        let cloudAccountService: CloudAccountService
 
         init() throws {
             repository = ServerRepository(database: try AppDatabase.inMemory())
             keychain = KeychainService(serviceName: "me.hhc.HHCServerManager.tests.\(UUID().uuidString)")
             service = ServerManagementService(repository: repository, keychain: keychain)
+            cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
         }
     }
 }

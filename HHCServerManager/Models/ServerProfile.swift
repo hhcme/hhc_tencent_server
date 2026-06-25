@@ -79,6 +79,63 @@ struct OperationLogEntry: Identifiable, Codable, Equatable, Hashable {
     var createdAt: Date
 }
 
+enum CloudProviderID: String, Codable, CaseIterable, Identifiable {
+    case tencentCloud = "tencent_cloud"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .tencentCloud:
+            "Tencent Cloud"
+        }
+    }
+}
+
+enum CloudCapability: String, Codable, CaseIterable, Identifiable {
+    case regions
+    case instanceDiscovery
+    case instanceMetadata
+    case cloudMetrics
+    case securityGroups
+    case powerActions
+
+    var id: String { rawValue }
+}
+
+struct CloudProviderAccount: Identifiable, Codable, Equatable, Hashable {
+    var id: UUID
+    var providerId: CloudProviderID
+    var displayName: String
+    var keychainRef: String
+    var enabled: Bool
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+struct CloudProviderCredential: Equatable, Hashable {
+    var secretId: String
+    var secretKey: String
+}
+
+struct CloudInstanceLink: Identifiable, Codable, Equatable, Hashable {
+    var id: UUID
+    var serverId: UUID?
+    var accountId: UUID
+    var providerId: CloudProviderID
+    var regionId: String
+    var instanceId: String
+    var displayName: String?
+    var publicIp: String?
+    var privateIp: String?
+    var status: String?
+    var instanceType: String?
+    var zoneId: String?
+    var vpcId: String?
+    var rawJSON: String?
+    var lastSyncedAt: Date?
+}
+
 enum SSHConnectionState: Equatable, Hashable {
     case disconnected
     case connecting

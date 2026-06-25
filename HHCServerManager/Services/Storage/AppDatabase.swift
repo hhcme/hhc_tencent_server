@@ -176,6 +176,41 @@ final class AppDatabase: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_operation_logs_created_at
             ON operation_logs(created_at DESC)
         """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS cloud_provider_accounts (
+                id TEXT PRIMARY KEY NOT NULL,
+                provider_id TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                keychain_ref TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS cloud_instance_links (
+                id TEXT PRIMARY KEY NOT NULL,
+                server_id TEXT REFERENCES server_profiles(id) ON DELETE SET NULL,
+                account_id TEXT NOT NULL REFERENCES cloud_provider_accounts(id) ON DELETE CASCADE,
+                provider_id TEXT NOT NULL,
+                region_id TEXT NOT NULL,
+                instance_id TEXT NOT NULL,
+                display_name TEXT,
+                public_ip TEXT,
+                private_ip TEXT,
+                status TEXT,
+                instance_type TEXT,
+                zone_id TEXT,
+                vpc_id TEXT,
+                raw_json TEXT,
+                last_synced_at TEXT,
+                UNIQUE(account_id, region_id, instance_id)
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_cloud_instance_links_server
+            ON cloud_instance_links(server_id)
+        """)
     }
 
     private var lastErrorMessage: String {

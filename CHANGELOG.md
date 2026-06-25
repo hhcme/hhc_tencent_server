@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - Added a simplified workspace command panel that executes single SSH commands and keeps per-session command history.
 - Updated the README status to reflect the active macOS implementation.
 - Added SQLite-backed command metadata history and operation logs without persisting command output.
+- Added cloud provider account metadata, cloud instance link storage, and Keychain-backed cloud credential handling.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -61,3 +62,4 @@ All notable changes to this project will be documented in this file.
 - 添加工作台简化命令面板，支持执行单条 SSH 命令并保留本次会话命令历史。
 - 更新 README 项目状态，使其反映当前 macOS 已进入实现阶段。
 - 添加基于 SQLite 的命令元数据历史和操作日志，不持久化命令输出。
+- 添加云账号元数据、云实例关联存储，以及基于 Keychain 的云凭据处理。
