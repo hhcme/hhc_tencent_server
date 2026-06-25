@@ -625,6 +625,68 @@ struct RegistryBackupRecord: Identifiable, Codable, Equatable, Hashable, Sendabl
     var message: String?
 }
 
+struct PubHostedRepositoryDraft: Codable, Equatable, Hashable, Sendable {
+    var hostedURL: String
+    var packageName: String
+    var tokenEnvironmentVariable: String
+    var includeFlutterCommand: Bool
+
+    init(
+        hostedURL: String = "https://pub.example.com",
+        packageName: String = "my_private_package",
+        tokenEnvironmentVariable: String = "PUB_TOKEN",
+        includeFlutterCommand: Bool = true
+    ) {
+        self.hostedURL = hostedURL
+        self.packageName = packageName
+        self.tokenEnvironmentVariable = tokenEnvironmentVariable
+        self.includeFlutterCommand = includeFlutterCommand
+    }
+}
+
+enum PubHostedRepositoryCheckStatus: String, Codable, CaseIterable, Identifiable, Sendable {
+    case passed
+    case warning
+
+    var id: String { rawValue }
+}
+
+struct PubHostedRepositoryCheck: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: String
+    var title: String
+    var status: PubHostedRepositoryCheckStatus
+    var detail: String
+}
+
+struct PubHostedRepositoryPlan: Codable, Equatable, Hashable, Sendable {
+    var hostedURL: String
+    var packageName: String
+    var tokenEnvironmentVariable: String
+    var pubspecSnippet: String
+    var publishToSnippet: String
+    var tokenCommand: String
+    var publishCommand: String
+    var getCommand: String
+    var flutterGetCommand: String?
+    var checks: [PubHostedRepositoryCheck]
+    var warnings: [String]
+    var generatedAt: Date
+
+    var combinedInstructions: String {
+        var sections = [
+            "# pubspec.yaml dependency\n\(pubspecSnippet)",
+            "# package pubspec.yaml publish target\n\(publishToSnippet)",
+            "# token setup\n\(tokenCommand)",
+            "# publish\n\(publishCommand)",
+            "# get\n\(getCommand)",
+        ]
+        if let flutterGetCommand {
+            sections.append("# Flutter get\n\(flutterGetCommand)")
+        }
+        return sections.joined(separator: "\n\n")
+    }
+}
+
 struct DeploymentCommandStep: Identifiable, Codable, Equatable, Hashable, Sendable {
     var id: String { name }
     var name: String

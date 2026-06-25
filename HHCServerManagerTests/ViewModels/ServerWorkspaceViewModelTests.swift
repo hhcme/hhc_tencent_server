@@ -2243,6 +2243,31 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(logs.filter { $0.action.contains("verdaccio-proxy") }.map(\.status), ["success", "success"])
     }
 
+    func testPrivateRegistriesWorkspaceBuildsPubHostedRepositoryPlan() {
+        let viewModel = ServerWorkspaceViewModel()
+        viewModel.pubHostedRepositoryDraft = PubHostedRepositoryDraft(
+            hostedURL: "https://pub.example.com/team",
+            packageName: "team_package",
+            tokenEnvironmentVariable: "HHC_PUB_TOKEN",
+            includeFlutterCommand: true
+        )
+
+        viewModel.buildPubHostedRepositoryPlan(generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+
+        XCTAssertEqual(viewModel.pubHostedRepositoryPlan?.hostedURL, "https://pub.example.com/team")
+        XCTAssertTrue(viewModel.pubHostedRepositoryPlan?.pubspecSnippet.contains("team_package:") == true)
+        XCTAssertEqual(viewModel.pubHostedRepositoryPlan?.flutterGetCommand, "flutter pub get")
+        XCTAssertEqual(viewModel.registryActionMessage, "Generated Dart/Flutter hosted pub configuration.")
+        XCTAssertNil(viewModel.registryErrorMessage)
+
+        viewModel.pubHostedRepositoryDraft.hostedURL = "https://pub.example.com?token=secret"
+        viewModel.buildPubHostedRepositoryPlan()
+
+        XCTAssertNil(viewModel.pubHostedRepositoryPlan)
+        XCTAssertNil(viewModel.registryActionMessage)
+        XCTAssertTrue(viewModel.registryErrorMessage?.contains("hosted repository URL") == true)
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),

@@ -108,6 +108,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var verdaccioPasswordDraft = ""
     @Published var verdaccioEmailDraft = "smoke@example.com"
     @Published var verdaccioRestorePathDraft = ""
+    @Published var pubHostedRepositoryDraft = PubHostedRepositoryDraft()
+    @Published var pubHostedRepositoryPlan: PubHostedRepositoryPlan?
     @Published var isRunningRegistryPreflight = false
     @Published var isInstallingVerdaccio = false
     @Published var isLoadingVerdaccioStatus = false
@@ -273,6 +275,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         verdaccioNpmSmokeTestResult = nil
         verdaccioServiceActionResult = nil
         verdaccioUpgradeResult = nil
+        pubHostedRepositoryPlan = nil
         registryErrorMessage = nil
         registryActionMessage = nil
         commandResult = nil
@@ -2194,6 +2197,21 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.isRunningRegistryPreflight = false
                 }
             }
+        }
+    }
+
+    func buildPubHostedRepositoryPlan(generatedAt: Date = Date()) {
+        do {
+            pubHostedRepositoryPlan = try PubHostedRepositoryAssistant.buildPlan(
+                draft: pubHostedRepositoryDraft,
+                generatedAt: generatedAt
+            )
+            registryErrorMessage = nil
+            registryActionMessage = "Generated Dart/Flutter hosted pub configuration."
+        } catch {
+            pubHostedRepositoryPlan = nil
+            registryActionMessage = nil
+            registryErrorMessage = error.localizedDescription
         }
     }
 

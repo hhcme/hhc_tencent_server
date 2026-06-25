@@ -841,16 +841,7 @@ struct ServerWorkspaceView: View {
                 verdaccioBackupSection
                 verdaccioProxySection
                 verdaccioPackagesSection
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Dart / Flutter")
-                        .font(.headline)
-                    Label(
-                        PubRegistryResearchHarness.currentReport().supportedProductPath,
-                        systemImage: "info.circle"
-                    )
-                    .foregroundStyle(.secondary)
-                }
+                pubHostedRepositorySection
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1048,6 +1039,81 @@ struct ServerWorkspaceView: View {
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+        }
+        .padding(12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var pubHostedRepositorySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dart / Flutter")
+                .font(.headline)
+
+            Label(
+                PubRegistryResearchHarness.currentReport().supportedProductPath,
+                systemImage: "info.circle"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Hosted URL")
+                        .foregroundStyle(.secondary)
+                    TextField("https://pub.example.com", text: $viewModel.pubHostedRepositoryDraft.hostedURL)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 420)
+                }
+                GridRow {
+                    Text("Package")
+                        .foregroundStyle(.secondary)
+                    TextField("my_private_package", text: $viewModel.pubHostedRepositoryDraft.packageName)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 260)
+                }
+                GridRow {
+                    Text("Token Env")
+                        .foregroundStyle(.secondary)
+                    TextField("PUB_TOKEN", text: $viewModel.pubHostedRepositoryDraft.tokenEnvironmentVariable)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 180)
+                }
+            }
+
+            Toggle("Flutter command", isOn: $viewModel.pubHostedRepositoryDraft.includeFlutterCommand)
+                .toggleStyle(.checkbox)
+
+            Button {
+                viewModel.buildPubHostedRepositoryPlan()
+            } label: {
+                Label("Generate Config", systemImage: "doc.badge.gearshape")
+            }
+
+            if let plan = viewModel.pubHostedRepositoryPlan {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
+                    ForEach(plan.checks) { check in
+                        PubHostedRepositoryCheckTile(check: check)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    PubHostedRepositorySnippetView(title: "pubspec.yaml", text: plan.pubspecSnippet)
+                    PubHostedRepositorySnippetView(title: "publish_to", text: plan.publishToSnippet)
+                    PubHostedRepositorySnippetView(title: "Token", text: plan.tokenCommand)
+                    PubHostedRepositorySnippetView(title: "Commands", text: pubHostedRepositoryCommands(plan))
+                }
+
+                ForEach(plan.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -3430,6 +3496,14 @@ struct ServerWorkspaceView: View {
         !viewModel.verdaccioRestorePathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private func pubHostedRepositoryCommands(_ plan: PubHostedRepositoryPlan) -> String {
+        [
+            plan.publishCommand,
+            plan.getCommand,
+            plan.flutterGetCommand,
+        ].compactMap { $0 }.joined(separator: "\n")
+    }
+
     private var verdaccioInstallConfirmationMessage: String {
         """
         This will create or reuse the \(viewModel.registryDraft.serviceName) system user, write \(viewModel.registryDraft.installPath)/config.yaml, write /etc/systemd/system/\(viewModel.registryDraft.serviceName).service, enable and restart the service, then run a health check.
@@ -3803,6 +3877,67 @@ private struct RegistryStatusTile: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct PubHostedRepositoryCheckTile: View {
+    let check: PubHostedRepositoryCheck
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: iconName)
+                .foregroundStyle(color)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(check.title)
+                    .font(.headline)
+                Text(check.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var iconName: String {
+        switch check.status {
+        case .passed:
+            "checkmark.circle"
+        case .warning:
+            "exclamationmark.triangle"
+        }
+    }
+
+    private var color: Color {
+        switch check.status {
+        case .passed:
+            .green
+        case .warning:
+            .orange
+        }
+    }
+}
+
+private struct PubHostedRepositorySnippetView: View {
+    let title: String
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+        }
     }
 }
 

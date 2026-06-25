@@ -1116,6 +1116,78 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(git?.verdict, .notARegistry)
     }
 
+    func testPubHostedRepositoryAssistantBuildsDartAndFlutterConfiguration() throws {
+        let plan = try PubHostedRepositoryAssistant.buildPlan(
+            draft: PubHostedRepositoryDraft(
+                hostedURL: "https://pub.example.com/",
+                packageName: "team_package",
+                tokenEnvironmentVariable: "HHC_PUB_TOKEN",
+                includeFlutterCommand: true
+            ),
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        XCTAssertEqual(plan.hostedURL, "https://pub.example.com")
+        XCTAssertEqual(plan.packageName, "team_package")
+        XCTAssertEqual(plan.tokenEnvironmentVariable, "HHC_PUB_TOKEN")
+        XCTAssertTrue(plan.pubspecSnippet.contains("hosted: https://pub.example.com"))
+        XCTAssertTrue(plan.pubspecSnippet.contains("team_package:"))
+        XCTAssertEqual(plan.publishToSnippet, "publish_to: https://pub.example.com")
+        XCTAssertEqual(plan.tokenCommand, "dart pub token add https://pub.example.com --env-var HHC_PUB_TOKEN")
+        XCTAssertEqual(plan.publishCommand, "dart pub publish")
+        XCTAssertEqual(plan.getCommand, "dart pub get")
+        XCTAssertEqual(plan.flutterGetCommand, "flutter pub get")
+        XCTAssertTrue(plan.checks.allSatisfy { $0.status == .passed })
+        XCTAssertTrue(plan.warnings.contains { $0.contains("source control") })
+        XCTAssertEqual(plan.generatedAt, Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    func testPubHostedRepositoryAssistantWarnsForHttpInternalRepository() throws {
+        let plan = try PubHostedRepositoryAssistant.buildPlan(
+            draft: PubHostedRepositoryDraft(
+                hostedURL: "http://pub.internal:8080/team",
+                packageName: "team_package",
+                tokenEnvironmentVariable: "PUB_TOKEN",
+                includeFlutterCommand: false
+            )
+        )
+
+        XCTAssertEqual(plan.hostedURL, "http://pub.internal:8080/team")
+        XCTAssertNil(plan.flutterGetCommand)
+        XCTAssertTrue(plan.checks.contains { $0.status == .warning })
+        XCTAssertTrue(plan.warnings.contains { $0.contains("HTTP") })
+    }
+
+    func testPubHostedRepositoryAssistantRejectsUnsafeInputs() {
+        XCTAssertThrowsError(try PubHostedRepositoryAssistant.buildPlan(
+            draft: PubHostedRepositoryDraft(hostedURL: "https://user:secret@pub.example.com", packageName: "team_package")
+        )) { error in
+            XCTAssertEqual(error as? PubHostedRepositoryAssistantError, .invalidHostedURL)
+        }
+
+        XCTAssertThrowsError(try PubHostedRepositoryAssistant.buildPlan(
+            draft: PubHostedRepositoryDraft(hostedURL: "https://pub.example.com?token=secret", packageName: "team_package")
+        )) { error in
+            XCTAssertEqual(error as? PubHostedRepositoryAssistantError, .invalidHostedURL)
+        }
+
+        XCTAssertThrowsError(try PubHostedRepositoryAssistant.buildPlan(
+            draft: PubHostedRepositoryDraft(hostedURL: "https://pub.example.com", packageName: "TeamPackage")
+        )) { error in
+            XCTAssertEqual(error as? PubHostedRepositoryAssistantError, .invalidPackageName)
+        }
+
+        XCTAssertThrowsError(try PubHostedRepositoryAssistant.buildPlan(
+            draft: PubHostedRepositoryDraft(
+                hostedURL: "https://pub.example.com",
+                packageName: "team_package",
+                tokenEnvironmentVariable: "pub-token"
+            )
+        )) { error in
+            XCTAssertEqual(error as? PubHostedRepositoryAssistantError, .invalidTokenEnvironmentVariable)
+        }
+    }
+
     func testVerdaccioUserCommandsUseHtpasswdWithoutPlaintextPassword() {
         let draft = VerdaccioInstallDraft()
         let command = VerdaccioManager.upsertUserCommand(

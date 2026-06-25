@@ -1757,6 +1757,144 @@ enum PubRegistryResearchHarness {
     }
 }
 
+enum PubHostedRepositoryAssistantError: LocalizedError, Equatable {
+    case invalidHostedURL
+    case invalidPackageName
+    case invalidTokenEnvironmentVariable
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidHostedURL:
+            "Enter an http or https hosted repository URL without credentials, query, or fragment."
+        case .invalidPackageName:
+            "Enter a Dart package name using lowercase letters, numbers, and underscores, starting with a letter."
+        case .invalidTokenEnvironmentVariable:
+            "Enter an environment variable name using uppercase letters, numbers, and underscores."
+        }
+    }
+}
+
+enum PubHostedRepositoryAssistant {
+    static func buildPlan(
+        draft: PubHostedRepositoryDraft,
+        generatedAt: Date = Date()
+    ) throws -> PubHostedRepositoryPlan {
+        let hostedURL = try normalizedHostedURL(draft.hostedURL)
+        let packageName = try normalizedPackageName(draft.packageName)
+        let tokenEnvironmentVariable = try normalizedTokenEnvironmentVariable(draft.tokenEnvironmentVariable)
+        var checks = [
+            PubHostedRepositoryCheck(
+                id: "hosted-url",
+                title: "Hosted URL",
+                status: hostedURL.hasPrefix("https://") ? .passed : .warning,
+                detail: hostedURL.hasPrefix("https://")
+                    ? "Uses HTTPS and can be referenced by dart pub."
+                    : "HTTP is allowed for trusted internal networks only."
+            ),
+            PubHostedRepositoryCheck(
+                id: "package-name",
+                title: "Package Name",
+                status: .passed,
+                detail: "\(packageName) is a valid Dart package name."
+            ),
+            PubHostedRepositoryCheck(
+                id: "token-env",
+                title: "Token Storage",
+                status: .passed,
+                detail: "The generated command reads the token from \(tokenEnvironmentVariable)."
+            ),
+        ]
+        let warnings = warnings(for: hostedURL)
+        if warnings.contains(where: { $0.contains("HTTP") }) {
+            checks.append(PubHostedRepositoryCheck(
+                id: "transport",
+                title: "Transport",
+                status: .warning,
+                detail: "Use HTTPS before exposing the repository outside a private network."
+            ))
+        }
+
+        return PubHostedRepositoryPlan(
+            hostedURL: hostedURL,
+            packageName: packageName,
+            tokenEnvironmentVariable: tokenEnvironmentVariable,
+            pubspecSnippet: """
+            dependencies:
+              \(packageName):
+                hosted: \(hostedURL)
+                version: ^1.0.0
+            """,
+            publishToSnippet: "publish_to: \(hostedURL)",
+            tokenCommand: "dart pub token add \(hostedURL) --env-var \(tokenEnvironmentVariable)",
+            publishCommand: "dart pub publish",
+            getCommand: "dart pub get",
+            flutterGetCommand: draft.includeFlutterCommand ? "flutter pub get" : nil,
+            checks: checks,
+            warnings: warnings,
+            generatedAt: generatedAt
+        )
+    }
+
+    private static func normalizedHostedURL(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.rangeOfCharacter(from: .newlines) == nil,
+              trimmed.range(of: "\0") == nil,
+              let components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = components.host,
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil
+        else {
+            throw PubHostedRepositoryAssistantError.invalidHostedURL
+        }
+
+        var normalized = components
+        normalized.scheme = scheme
+        guard let url = normalized.url?.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) else {
+            throw PubHostedRepositoryAssistantError.invalidHostedURL
+        }
+        return url
+    }
+
+    private static func normalizedPackageName(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.range(
+            of: #"^[a-z][a-z0-9_]{0,63}$"#,
+            options: .regularExpression
+        ) != nil else {
+            throw PubHostedRepositoryAssistantError.invalidPackageName
+        }
+        return trimmed
+    }
+
+    private static func normalizedTokenEnvironmentVariable(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.range(
+            of: #"^[A-Z_][A-Z0-9_]{0,127}$"#,
+            options: .regularExpression
+        ) != nil else {
+            throw PubHostedRepositoryAssistantError.invalidTokenEnvironmentVariable
+        }
+        return trimmed
+    }
+
+    private static func warnings(for hostedURL: String) -> [String] {
+        var warnings = [
+            "Do not store repository tokens in pubspec.yaml or source control.",
+            "This assumes the server implements the Dart Hosted Pub Repository protocol.",
+        ]
+        if hostedURL.hasPrefix("http://") {
+            warnings.append("HTTP hosted repositories should stay on trusted internal networks.")
+        }
+        return warnings
+    }
+}
+
 enum RegistryPreflightStatus: String, Equatable, Sendable {
     case passed
     case warning

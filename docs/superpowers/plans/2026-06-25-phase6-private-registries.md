@@ -76,7 +76,7 @@ CREATE TABLE registry_backups (
 - 用户和权限配置入口：已接入 htpasswd 用户创建、改密、确认删除和 npm publish/install smoke test；包权限策略仍由配置生成层控制，后续再开放高级 UI。
 - 包列表和搜索：当前已接入基于 Verdaccio storage metadata 的包摘要列表。
 - 备份、恢复、升级按钮：已接入备份创建、带危险确认的恢复入口，以及固定版本 systemd unit 升级入口。
-- Dart/Flutter pub 区域先展示技术验证状态，验证完成后再开放安装：当前已展示外部 Hosted Pub Repository 配置辅助方向。
+- Dart/Flutter pub 区域先展示技术验证状态，验证完成后再开放安装：当前已提供外部 Hosted Pub Repository 配置助手，可生成 `pubspec.yaml` dependency、`publish_to`、token 命令和 publish/get 命令。
 
 ## 7. 实施任务
 
@@ -127,6 +127,7 @@ CREATE TABLE registry_backups (
 - [x] 重新调研候选方案：已覆盖官方 Hosted Pub Repository v2 / custom package repositories、unpub、dart-lang/pub_server 参考实现和私有 Git 依赖。
 - [x] 验证 Dart SDK 和 Flutter 工作流兼容性：当前可安全接入的是官方 `hosted-url` / `publish_to` / token 凭据工作流；私有 Git 依赖只适合作为项目依赖方案，不等价于 registry。
 - [x] 输出技术结论：Phase 6 不实现 Dart/Flutter 自托管 pub registry installer，先做外部 Hosted Pub Repository 配置辅助。
+- [x] 提供外部 Hosted Pub Repository 配置助手：已支持 URL/package/env var 校验，生成 `pubspec.yaml` dependency、`publish_to`、`dart pub token add --env-var`、`dart pub publish`、`dart pub get` 和可选 `flutter pub get`。
 - [x] 只有通过验证才进入实现：自托管 unpub / pub_server 安装能力未通过产品化验证，不进入实现；后续如要恢复，必须先补真实 Dart/Flutter 项目 publish/get 验收。
 
 ### Task 7：测试
@@ -143,6 +144,7 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 真实 SSH lifecycle 集成测试入口：默认跳过，设置 `HHC_TEST_VERDACCIO_REAL=1` 后会在真实服务器创建临时 Verdaccio service/path，覆盖 install、user、npm smoke、restart、config backup、backup、restore 和远端清理。
 - [x] macOS Registries 工作台 ViewModel 测试，覆盖 preflight、安装、状态、用户管理、npm smoke test、包列表、备份/恢复入口和 Nginx proxy 写入/reload。
 - [x] Verdaccio Nginx proxy 生成、写入、`nginx -t` 和 reload contract 测试。
+- [x] Dart/Flutter Hosted Pub Repository 配置助手测试，覆盖配置生成、HTTP warning、危险 URL 拒绝、非法 package/env var 拒绝和 ViewModel 状态更新。
 - [x] 备份归档命令测试。
 - [x] 恢复状态机测试：已覆盖恢复成功、health check 失败回滚、恢复命令失败回滚和非法备份路径拒绝。
 - [x] 日志脱敏测试：当前已覆盖 Verdaccio journal status 日志脱敏和安装失败输出脱敏。
@@ -155,7 +157,7 @@ CREATE TABLE registry_backups (
 - [x] 修改配置前有备份：已验证 `config.yaml.hhc-backup-*` 创建。
 - [x] Nginx proxy 配置测试通过后 reload：proxy 写入会先执行 `nginx -t`，reload 需单独危险确认并再次测试通过后执行。真实服务器写入/reload 仍需谨慎手动验收。
 - [x] 备份和恢复可用：底层已覆盖成功、失败回滚和非法路径拒绝；macOS 工作台已接入备份创建、恢复路径回填、危险确认和恢复后状态刷新。真实测试服务器已完成 tar.gz 备份、停止服务、恢复归档、重启和健康检查验收。
-- [x] Dart/Flutter pub 方案有明确验证结论：暂不做自托管 installer，保留外部 Hosted Pub Repository 配置辅助方向。
+- [x] Dart/Flutter pub 方案有明确验证结论：暂不做自托管 installer，保留外部 Hosted Pub Repository 配置辅助，并已在 macOS 工作台提供生成入口。
 
 ## 8. 完成标志
 
