@@ -5,10 +5,16 @@ import Network
 final class ServerManagementService: @unchecked Sendable {
     private let repository: ServerRepository
     private let keychain: KeychainService
+    private let makeUUID: @Sendable () -> UUID
 
-    init(repository: ServerRepository, keychain: KeychainService) {
+    init(
+        repository: ServerRepository,
+        keychain: KeychainService,
+        makeUUID: @escaping @Sendable () -> UUID = UUID.init
+    ) {
         self.repository = repository
         self.keychain = keychain
+        self.makeUUID = makeUUID
     }
 
     func createServer(
@@ -21,7 +27,7 @@ final class ServerManagementService: @unchecked Sendable {
         credential: CredentialInput
     ) throws -> ServerProfile {
         let now = Date()
-        let id = UUID()
+        let id = makeUUID()
         let keychainRef = "server_\(id.uuidString)"
 
         do {

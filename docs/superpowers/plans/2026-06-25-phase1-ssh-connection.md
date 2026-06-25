@@ -444,14 +444,14 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 
 - [ ] 定义 `CredentialInput`。
 - [ ] 实现 add/update/delete server 的编排。
-- [ ] DB 写入失败时清理 Keychain。
+- [x] DB 写入失败时清理 Keychain：`ServerManagementServiceTests.testCreateServerRemovesNewCredentialWhenDatabaseWriteFails` 用固定 server UUID 和真实 SQLite 失败路径验证新写入凭据会被删除。
 - [ ] Keychain 写入失败时不落库。
-- [ ] 写单元测试覆盖失败补偿。
+- [ ] 写单元测试覆盖失败补偿。当前已覆盖 SQLite 写入失败后的 Keychain 清理，Keychain 写入失败路径还需补直接测试。
 
 验收：
 
 - [ ] 不会出现“有 DB 记录但没有凭据”的新建成功状态。
-- [ ] 不会因为 DB 失败留下孤儿 Keychain 凭据。
+- [x] 不会因为 DB 失败留下孤儿 Keychain 凭据：固定 keychainRef 的回归测试验证失败后 `readPassword` 返回 nil。
 
 ### Task 5: HostKeyTrustStore
 

@@ -19,6 +19,33 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(try harness.keychain.readPassword(keychainRef: profile.keychainRef), "secret")
     }
 
+    func testCreateServerRemovesNewCredentialWhenDatabaseWriteFails() throws {
+        let database = try AppDatabase.inMemory()
+        let repository = ServerRepository(database: database)
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManager.tests.db-failure.\(UUID().uuidString)")
+        let fixedID = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
+        let service = ServerManagementService(
+            repository: repository,
+            keychain: keychain,
+            makeUUID: { fixedID }
+        )
+        let keychainRef = "server_\(fixedID.uuidString)"
+        defer { keychain.deleteCredentials(keychainRef: keychainRef) }
+
+        try database.execute("DROP TABLE server_profiles")
+
+        XCTAssertThrowsError(try service.createServer(
+            name: "Broken DB",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        ))
+        XCTAssertNil(try keychain.readPassword(keychainRef: keychainRef))
+    }
+
     func testDeleteServerRemovesProfileTrustedKeysAndCredentials() throws {
         let harness = try Harness()
         let profile = try harness.service.createServer(
