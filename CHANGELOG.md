@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Aligned the Phase 1 implementation plan and architecture documents with the local macOS v0.2 design flow.
 - Added Chinese implementation plans for all roadmap phases from Phase 1 to Phase 8.
 - Removed the internal English documentation mirror to avoid duplicated implementation planning drift.
+- Started the macOS native app with a SwiftUI server browser, server workspace, SQLite persistence, Keychain credential storage, host-key trust flow, and real OpenSSH smoke-test adapter.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -41,3 +42,4 @@ All notable changes to this project will be documented in this file.
 - 将 Phase 1 实施计划和架构文档校准到 macOS v0.2 本地设计流程。
 - 补齐 Phase 1 到 Phase 8 的中文实施计划。
 - 移除内部英文文档镜像，避免实施计划重复维护后漂移。
+- 启动 macOS 原生应用实现，加入 SwiftUI 服务器列表、单服务器工作台、SQLite 持久化、Keychain 凭据存储、主机指纹信任流程和真实 OpenSSH smoke test 适配层。
