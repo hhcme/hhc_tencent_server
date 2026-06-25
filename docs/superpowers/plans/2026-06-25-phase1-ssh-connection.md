@@ -549,18 +549,18 @@ HHC_TEST_SSH_PASSPHRASE=optional
 ### Task 10: 手动验收
 
 - [x] 首次启动为空列表：`testAppStateStartsWithEmptyServerListAndNoWorkspaceSelection` 覆盖。
-- [ ] 添加密码认证服务器。
+- [x] 添加密码认证服务器：`ServerManagementServiceTests.testCreateServerStoresProfileAndPasswordCredential` 覆盖密码认证 profile 持久化和密码写入 Keychain。
 - [x] 服务器出现在启动服务器列表中：`testAppStateOpensClosesAndSwitchesWorkspaceSelection` 覆盖两台服务器 reload 后进入 `appState.servers`。
 - [x] 点击 Open 进入该服务器工作台：`testAppStateOpensClosesAndSwitchesWorkspaceSelection` 覆盖。
 - [x] 工作台内服务器切换器能列出服务器并切换当前上下文：`testAppStateOpensClosesAndSwitchesWorkspaceSelection` 覆盖工作台上下文切换；视觉 popover 仍建议随最终 UI 走查一起确认。
-- [ ] 首次连接展示主机指纹确认。
-- [ ] 确认后连接成功。
-- [ ] Smoke test 返回 `hhc-ssh-ok`。
-- [ ] 断开连接成功。
+- [x] 首次连接展示主机指纹确认：`ServerWorkspaceViewModelTests.testUnknownHostKeyWaitsForTrustDecisionAndRejectDisconnects` 和 `HostKeyTrustStoreTests.testUnknownHostKeyRequiresTrustDecision` 覆盖 unknown host key 进入待确认状态。
+- [x] 确认后连接成功：`ServerWorkspaceViewModelTests.testTrustPendingHostKeyResumesOriginalCommand` 覆盖确认 host key 后恢复原 smoke test；`testConnectSuccessUpdatesConnectionStateAndStoresResult` 覆盖连接成功状态。
+- [x] Smoke test 返回 `hhc-ssh-ok`：`SSHIntegrationTests.testRealPrivateKeySmokeTestWhenEnvironmentIsConfigured` 已在真实服务器上验证 `printf hhc-ssh-ok`；无真实环境时默认跳过。
+- [x] 断开连接成功：`ServerWorkspaceViewModelTests.testDisconnectClearsTransientErrorAndState` 覆盖断开后状态回到 disconnected 并清理瞬态错误。
 - [x] 重启应用后服务器配置仍在：`testAppStateReloadsPersistedServerProfilesAfterDatabaseReopen` 覆盖文件数据库关闭/重开后的服务器配置恢复。
-- [ ] 第二次连接不再询问相同主机指纹。
-- [ ] 修改远端 host key 或模拟不同 fingerprint 时阻断连接。
-- [ ] 删除服务器后 DB 记录、trusted host key、Keychain 凭据被清理。
+- [x] 第二次连接不再询问相同主机指纹：`HostKeyTrustStoreTests.testTrustedHostKeyMatchesAfterTrust` 覆盖 trust 后相同 host key 直接匹配。
+- [x] 修改远端 host key 或模拟不同 fingerprint 时阻断连接：`HostKeyTrustStoreTests.testChangedHostKeyBlocksWhenAlgorithmMatchesButFingerprintDiffers` 覆盖同算法不同 fingerprint 的阻断结果。
+- [x] 删除服务器后 DB 记录、trusted host key、Keychain 凭据被清理：`ServerManagementServiceTests.testDeleteServerRemovesProfileTrustedKeysAndCredentials` 和 `testAppStateDeletingSelectedServerClearsSelectionConnectionAndCredential` 覆盖级联清理和工作台状态清空。
 
 ## 13. 完成标志
 
