@@ -2538,6 +2538,72 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(detachLog.status, "success")
     }
 
+    func testCloudDiskAttachmentActionsAllowAlibabaStatuses() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .alibabaCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudDisks, .diskAttachmentActions]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_450)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .alibabaCloud,
+            displayName: "Alibaba",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        try harness.repository.upsertCloudDisk(CloudDisk(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .alibabaCloud,
+            regionId: "ap-southeast-1",
+            diskId: "d-attach",
+            instanceId: nil,
+            name: "data",
+            diskType: "cloud_essd",
+            sizeGB: 100,
+            status: "Available",
+            billingType: "PostPaid",
+            expiredTime: nil,
+            rawJSON: nil,
+            lastSyncedAt: nil
+        ))
+
+        try await harness.cloudInstanceSyncService.attachDisk(
+            account: account,
+            regionId: "ap-southeast-1",
+            diskId: "d-attach",
+            instanceId: "i-target",
+            currentStatus: "Available"
+        )
+
+        var disk = try XCTUnwrap(harness.repository.fetchCloudDisks(accountId: account.id).first { $0.diskId == "d-attach" })
+        XCTAssertEqual(disk.instanceId, "i-target")
+        XCTAssertEqual(disk.status, "ATTACHING")
+        var logs = try harness.repository.fetchRemoteChangeLogs()
+        let attachLog = try XCTUnwrap(logs.first { $0.action == "attach_disk" })
+        XCTAssertEqual(attachLog.providerId, .alibabaCloud)
+        XCTAssertEqual(attachLog.targetId, "d-attach")
+        XCTAssertEqual(attachLog.status, "success")
+
+        disk.status = "In_use"
+        try harness.repository.upsertCloudDisk(disk)
+        try await harness.cloudInstanceSyncService.detachDisk(
+            account: account,
+            regionId: "ap-southeast-1",
+            diskId: "d-attach",
+            currentInstanceId: "i-target",
+            currentStatus: "In_use"
+        )
+
+        let detachingDisk = try XCTUnwrap(harness.repository.fetchCloudDisks(accountId: account.id).first { $0.diskId == "d-attach" })
+        XCTAssertEqual(detachingDisk.instanceId, "i-target")
+        XCTAssertEqual(detachingDisk.status, "DETACHING")
+        logs = try harness.repository.fetchRemoteChangeLogs()
+        let detachLog = try XCTUnwrap(logs.first { $0.action == "detach_disk" })
+        XCTAssertEqual(detachLog.providerId, .alibabaCloud)
+        XCTAssertEqual(detachLog.targetId, "d-attach")
+        XCTAssertEqual(detachLog.status, "success")
+    }
+
     func testCloudInstancePowerActionsPersistCacheAndAuditLogs() async throws {
         let adapter = MockCloudProviderAdapter(
             providerId: .tencentCloud,
@@ -3713,6 +3779,57 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "x-acs-action"), "DeleteSnapshot")
         XCTAssertEqual(transport.requests[1].queryValue("SnapshotId"), "s-created")
         XCTAssertNil(transport.requests[1].queryValue("Force"))
+    }
+
+    func testAlibabaCloudAdapterAttachesAndDetachesDisksUsesSignedECSAPI() async throws {
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockAlibabaCloudTransport(responses: [
+            """
+            {
+              "RequestId": "aliyun-attach-disk"
+            }
+            """,
+            """
+            {
+              "RequestId": "aliyun-detach-disk"
+            }
+            """,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            nonce: { "nonce-disk-action" },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK")
+
+        try await adapter.attachDisk(
+            credential: credential,
+            regionId: "ap-southeast-1",
+            diskId: "d-1",
+            instanceId: "i-1"
+        )
+        try await adapter.detachDisk(
+            credential: credential,
+            regionId: "ap-southeast-1",
+            diskId: "d-1"
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.diskAttachmentActions))
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-action"), "AttachDisk")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-version"), "2014-05-26")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-signature-nonce"), "nonce-disk-action")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("ACS3-HMAC-SHA256 Credential=ALIYUNAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("RegionId"), "ap-southeast-1")
+        XCTAssertEqual(transport.requests[0].queryValue("DiskId"), "d-1")
+        XCTAssertEqual(transport.requests[0].queryValue("InstanceId"), "i-1")
+        XCTAssertEqual(transport.requests[1].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "x-acs-action"), "DetachDisk")
+        XCTAssertEqual(transport.requests[1].queryValue("RegionId"), "ap-southeast-1")
+        XCTAssertEqual(transport.requests[1].queryValue("DiskId"), "d-1")
+        XCTAssertNil(transport.requests[1].queryValue("InstanceId"))
     }
 
     func testAlibabaCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedECSAPI() async throws {

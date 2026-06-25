@@ -414,11 +414,8 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         guard !trimmedInstanceId.isEmpty else {
             throw CloudProviderError.providerFailure("Target instance id is required.")
         }
-        if let currentStatus {
-            let normalizedStatus = currentStatus.uppercased()
-            guard normalizedStatus == "UNATTACHED" || normalizedStatus == "DETACHED" else {
-                throw CloudProviderError.providerFailure("Only UNATTACHED disks can be attached safely. Current status: \(currentStatus).")
-            }
+        if let currentStatus, !Self.canAttachDisk(providerId: account.providerId, status: currentStatus) {
+            throw CloudProviderError.providerFailure("Only detached or available disks can be attached safely. Current status: \(currentStatus).")
         }
         try registry.require(.diskAttachmentActions, providerId: account.providerId)
         let capturedAt = now()
@@ -475,8 +472,8 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         guard account.enabled else {
             throw CloudProviderError.providerFailure("Cloud account is disabled.")
         }
-        if let currentStatus, currentStatus.uppercased() != "ATTACHED" {
-            throw CloudProviderError.providerFailure("Only ATTACHED disks can be detached safely. Current status: \(currentStatus).")
+        if let currentStatus, !Self.canDetachDisk(providerId: account.providerId, status: currentStatus) {
+            throw CloudProviderError.providerFailure("Only attached or in-use disks can be detached safely. Current status: \(currentStatus).")
         }
         try registry.require(.diskAttachmentActions, providerId: account.providerId)
         let capturedAt = now()
@@ -803,6 +800,30 @@ final class CloudInstanceSyncService: @unchecked Sendable {
             return normalized == "ACCOMPLISHED"
         case .huaweiCloud:
             return normalized == "AVAILABLE"
+        }
+    }
+
+    private static func canAttachDisk(providerId: CloudProviderID, status: String) -> Bool {
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch providerId {
+        case .tencentCloud:
+            return normalized == "UNATTACHED" || normalized == "DETACHED"
+        case .alibabaCloud:
+            return normalized == "AVAILABLE"
+        case .huaweiCloud:
+            return normalized == "AVAILABLE"
+        }
+    }
+
+    private static func canDetachDisk(providerId: CloudProviderID, status: String) -> Bool {
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch providerId {
+        case .tencentCloud:
+            return normalized == "ATTACHED"
+        case .alibabaCloud:
+            return normalized == "IN_USE"
+        case .huaweiCloud:
+            return normalized == "IN-USE" || normalized == "IN_USE"
         }
     }
 }
@@ -5943,6 +5964,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudBilling,
         .securityGroups,
         .snapshotActions,
+        .diskAttachmentActions,
     ]
 
     private let transport: AlibabaCloudHTTPTransport
@@ -6277,7 +6299,16 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         diskId: String,
         instanceId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+        let _: AlibabaDiskActionResponse = try await request(
+            credential: credential,
+            host: "ecs.\(regionId).aliyuncs.com",
+            action: "AttachDisk",
+            queryItems: [
+                URLQueryItem(name: "RegionId", value: regionId),
+                URLQueryItem(name: "DiskId", value: diskId),
+                URLQueryItem(name: "InstanceId", value: instanceId),
+            ]
+        )
     }
 
     func detachDisk(
@@ -6285,7 +6316,15 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         diskId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+        let _: AlibabaDiskActionResponse = try await request(
+            credential: credential,
+            host: "ecs.\(regionId).aliyuncs.com",
+            action: "DetachDisk",
+            queryItems: [
+                URLQueryItem(name: "RegionId", value: regionId),
+                URLQueryItem(name: "DiskId", value: diskId),
+            ]
+        )
     }
 
     func startInstance(
@@ -7186,6 +7225,14 @@ private struct AlibabaCreateSnapshotResponse: Decodable {
 }
 
 private struct AlibabaDeleteSnapshotResponse: Decodable {
+    var requestId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case requestId = "RequestId"
+    }
+}
+
+private struct AlibabaDiskActionResponse: Decodable {
     var requestId: String?
 
     enum CodingKeys: String, CodingKey {
