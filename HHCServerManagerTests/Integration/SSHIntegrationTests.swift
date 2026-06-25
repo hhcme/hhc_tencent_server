@@ -69,6 +69,87 @@ final class SSHIntegrationTests: XCTestCase {
         _ = try? await harness.sshClient.execute("rm -rf -- \(Self.shellQuote(remoteBasePath))", profile: harness.profile)
     }
 
+    func testRealSFTPResumePartialTransfersWhenEnvironmentIsConfigured() async throws {
+        let harness = try makeRealSSHHarness(disableRsync: true, disableSCPFallback: true)
+        defer { try? harness.service.deleteServer(harness.profile) }
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+
+        let token = "hhc-sftp-resume-\(UUID().uuidString)"
+        let remoteBasePath = "/tmp/\(token)"
+        let uploadRemotePath = "\(remoteBasePath)/resume-upload.txt"
+        let downloadRemotePath = "\(remoteBasePath)/resume-download.txt"
+        let cleanup = "rm -rf -- \(Self.shellQuote(remoteBasePath))"
+
+        do {
+            let mkdir = try await harness.sshClient.execute("mkdir -p -- \(Self.shellQuote(remoteBasePath))", profile: harness.profile)
+            XCTAssertEqual(mkdir.exitCode, 0, mkdir.stderr)
+            guard mkdir.exitCode == 0 else {
+                return
+            }
+
+            let localDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(token, isDirectory: true)
+            try FileManager.default.createDirectory(at: localDirectory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: localDirectory) }
+
+            let uploadPrefix = "hhc-upload-prefix-\(UUID().uuidString)"
+            let uploadContent = "\(uploadPrefix)-suffix-\(UUID().uuidString)\n"
+            let uploadURL = localDirectory.appendingPathComponent("resume-upload.txt")
+            try uploadContent.write(to: uploadURL, atomically: true, encoding: .utf8)
+
+            let seedUpload = try await harness.sshClient.execute(
+                "printf %s \(Self.shellQuote(uploadPrefix)) > \(Self.shellQuote(uploadRemotePath))",
+                profile: harness.profile
+            )
+            XCTAssertEqual(seedUpload.exitCode, 0, seedUpload.stderr)
+
+            let uploadProgress = ProgressRecorder()
+            let upload = try await harness.sshClient.uploadFile(
+                localURL: uploadURL,
+                remotePath: uploadRemotePath,
+                profile: harness.profile
+            ) { progress in
+                uploadProgress.append(progress)
+            }
+            XCTAssertEqual(upload.remotePath, uploadRemotePath)
+            XCTAssertEqual(upload.byteCount, Int64(Data(uploadContent.utf8).count))
+            XCTAssertEqual(uploadProgress.last?.fraction, 1)
+
+            let verifyUpload = try await harness.sshClient.execute("cat -- \(Self.shellQuote(uploadRemotePath))", profile: harness.profile)
+            XCTAssertEqual(verifyUpload.exitCode, 0, verifyUpload.stderr)
+            XCTAssertEqual(verifyUpload.stdout, uploadContent)
+
+            let downloadPrefix = "hhc-download-prefix-\(UUID().uuidString)"
+            let downloadContent = "\(downloadPrefix)-suffix-\(UUID().uuidString)\n"
+            let downloadURL = localDirectory.appendingPathComponent("resume-download.txt")
+            try downloadPrefix.write(to: downloadURL, atomically: true, encoding: .utf8)
+
+            let seedDownload = try await harness.sshClient.execute(
+                "printf %s \(Self.shellQuote(downloadContent)) > \(Self.shellQuote(downloadRemotePath))",
+                profile: harness.profile
+            )
+            XCTAssertEqual(seedDownload.exitCode, 0, seedDownload.stderr)
+
+            let downloadProgress = ProgressRecorder()
+            let download = try await harness.sshClient.downloadFile(
+                remotePath: downloadRemotePath,
+                localURL: downloadURL,
+                profile: harness.profile
+            ) { progress in
+                downloadProgress.append(progress)
+            }
+            XCTAssertEqual(download.localPath, downloadURL.path)
+            XCTAssertEqual(download.byteCount, Int64(Data(downloadContent.utf8).count))
+            XCTAssertEqual(downloadProgress.last?.fraction, 1)
+            XCTAssertEqual(try String(contentsOf: downloadURL, encoding: .utf8), downloadContent)
+
+            _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+        } catch {
+            _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+            throw error
+        }
+    }
+
     func testRealDeploymentRunnerDeploysTemporaryRepositoryWhenEnvironmentIsConfigured() async throws {
         guard Self.testEnvironment()["HHC_TEST_DEPLOYMENT_REAL"] == "1" else {
             throw XCTSkip("Set HHC_TEST_DEPLOYMENT_REAL=1 with the real SSH environment to run the deployment integration test.")
