@@ -373,6 +373,53 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task MainWindowViewModelFiltersServerListAndKeepsWorkspaceSelection()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+
+        await viewModel.AddPasswordServerAsync("Production API", "api.prod.example.internal", 22, "deploy", "secret", "prod");
+        var selected = viewModel.SelectedServer;
+        await viewModel.AddPasswordServerAsync("Staging Worker", "worker.stage.example.internal", 2222, "ubuntu", "secret", "stage");
+
+        Assert.Equal(2, viewModel.Servers.Count);
+        Assert.Equal(2, viewModel.VisibleServers.Count);
+        Assert.False(viewModel.IsServerListEmpty);
+
+        viewModel.ServerSearchText = "api";
+        Assert.Equal(["Production API"], viewModel.VisibleServers.Select(server => server.Name).ToArray());
+
+        viewModel.ServerSearchText = "ubuntu";
+        Assert.Equal(["Staging Worker"], viewModel.VisibleServers.Select(server => server.Name).ToArray());
+
+        viewModel.ServerSearchText = "prod";
+        Assert.Equal(["Production API"], viewModel.VisibleServers.Select(server => server.Name).ToArray());
+
+        viewModel.SelectedServer = selected;
+        viewModel.ServerSearchText = "missing";
+
+        Assert.Empty(viewModel.VisibleServers);
+        Assert.True(viewModel.IsServerListEmpty);
+        Assert.Equal("No matching servers", viewModel.ServerListEmptyTitle);
+        Assert.Equal("Adjust the search text or clear the filter.", viewModel.ServerListEmptyMessage);
+        Assert.Same(selected, viewModel.SelectedServer);
+        Assert.Null(viewModel.SelectedVisibleServer);
+
+        viewModel.SelectedVisibleServer = null;
+        Assert.Same(selected, viewModel.SelectedServer);
+
+        viewModel.ServerSearchText = "";
+        Assert.Equal(2, viewModel.VisibleServers.Count);
+        Assert.Same(selected, viewModel.SelectedVisibleServer);
+    }
+
+    [Fact]
     public async Task MainWindowViewModelBlocksMismatchedHostKeyUntilUserReviewsIt()
     {
         await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");

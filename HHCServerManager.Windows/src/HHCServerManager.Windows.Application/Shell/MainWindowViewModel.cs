@@ -19,6 +19,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private PendingHostKeyTrust? _pendingHostKeyTrust;
     private string _statusMessage = "Select a server to connect.";
     private string _commandOutput = "Command output will appear here after connection.";
+    private string _serverSearchText = string.Empty;
+    private ServerProfile? _selectedVisibleServer;
     private string? _errorMessage;
 
     public MainWindowViewModel(
@@ -35,6 +37,32 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public ObservableCollection<ServerProfile> Servers { get; } = [];
 
+    public ObservableCollection<ServerProfile> VisibleServers { get; } = [];
+
+    public string ServerSearchText
+    {
+        get => _serverSearchText;
+        set
+        {
+            if (SetProperty(ref _serverSearchText, value))
+            {
+                RefreshVisibleServers();
+            }
+        }
+    }
+
+    public ServerProfile? SelectedVisibleServer
+    {
+        get => _selectedVisibleServer;
+        set
+        {
+            if (SetProperty(ref _selectedVisibleServer, value) && value is not null)
+            {
+                SelectedServer = value;
+            }
+        }
+    }
+
     public ServerProfile? SelectedServer
     {
         get => _selectedServer;
@@ -42,6 +70,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             if (SetProperty(ref _selectedServer, value))
             {
+                SyncSelectedVisibleServer();
                 Disconnect();
                 StatusMessage = value is null ? "Select a server to connect." : $"Ready: {value.Username}@{value.Host}:{value.Port}";
                 CommandOutput = "Command output will appear here after connection.";
@@ -116,6 +145,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool HasError => ErrorMessage is not null;
 
+    public bool HasVisibleServers => VisibleServers.Count > 0;
+
+    public bool IsServerListEmpty => !HasVisibleServers;
+
+    public string ServerListEmptyTitle => Servers.Count == 0 ? "No servers" : "No matching servers";
+
+    public string ServerListEmptyMessage =>
+        Servers.Count == 0
+            ? "Add a Windows SSH server to start."
+            : "Adjust the search text or clear the filter.";
+
     public bool IsBusy => ConnectionState is WindowsConnectionState.CheckingHostKey or WindowsConnectionState.RunningSmokeTest;
 
     public bool CanConnect => SelectedServer is not null && !IsBusy && ConnectionState != WindowsConnectionState.Connected;
@@ -151,6 +191,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             Servers.Add(profile);
         }
 
+        RefreshVisibleServers();
         SelectedServer ??= Servers.FirstOrDefault();
     }
 
@@ -176,6 +217,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 new CredentialInput.Password(password),
                 cancellationToken);
             Servers.Add(profile);
+            RefreshVisibleServers();
             SelectedServer = profile;
             StatusMessage = $"Added {profile.Name}.";
         }
@@ -209,6 +251,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 new CredentialInput.PrivateKey(System.Text.Encoding.UTF8.GetBytes(privateKey.Trim()), passphrase),
                 cancellationToken);
             Servers.Add(profile);
+            RefreshVisibleServers();
             SelectedServer = profile;
             StatusMessage = $"Added {profile.Name}.";
         }
@@ -231,6 +274,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             await _serverManagement.DeleteServerAsync(deleted.Id, cancellationToken);
             Servers.Remove(deleted);
+            RefreshVisibleServers();
             SelectedServer = Servers.FirstOrDefault();
             StatusMessage = $"Deleted {deleted.Name}.";
         }
@@ -383,7 +427,43 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             Servers[index] = updated;
         }
+        RefreshVisibleServers();
         SelectedServer = updated;
+    }
+
+    private void RefreshVisibleServers()
+    {
+        var query = ServerSearchText.Trim();
+        var visible = Servers.Where(profile =>
+            query.Length == 0 ||
+            profile.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            profile.Host.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            profile.Username.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            (profile.GroupName?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
+
+        VisibleServers.Clear();
+        foreach (var profile in visible)
+        {
+            VisibleServers.Add(profile);
+        }
+
+        OnPropertyChanged(nameof(HasVisibleServers));
+        OnPropertyChanged(nameof(IsServerListEmpty));
+        OnPropertyChanged(nameof(ServerListEmptyTitle));
+        OnPropertyChanged(nameof(ServerListEmptyMessage));
+        SyncSelectedVisibleServer();
+    }
+
+    private void SyncSelectedVisibleServer()
+    {
+        var visibleSelection = _selectedServer is not null && VisibleServers.Contains(_selectedServer)
+            ? _selectedServer
+            : null;
+        if (!EqualityComparer<ServerProfile?>.Default.Equals(_selectedVisibleServer, visibleSelection))
+        {
+            _selectedVisibleServer = visibleSelection;
+            OnPropertyChanged(nameof(SelectedVisibleServer));
+        }
     }
 
     private async Task RunAsync(

@@ -137,6 +137,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 ### Task 5：Windows UI
 
 - [x] 服务器列表骨架。
+- [x] 服务器列表搜索和空状态：`MainWindowViewModel` 维护全量 `Servers` 和可见 `VisibleServers`，支持按 name/host/username/group 搜索；WinUI 搜索框绑定 `ServerSearchText`，列表为空时展示 Fluent `InfoBar` 空状态。
 - [x] 添加服务器 dialog：支持密码和私钥认证服务器配置写入 repository 和 Credential Manager 边界；私钥/passphrase 不进入 SQLite。
 - [x] 编辑服务器 dialog：支持保留现有凭据或替换密码/私钥，并复用同一套配置校验和 Credential Manager 边界。
 - [x] 单服务器工作台骨架。
@@ -154,6 +155,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] SSH 状态机测试：覆盖首次 host key trust、确认后 smoke test、mismatch 阻断和 reject。
 - [x] Windows 添加私钥服务器 ViewModel 测试：覆盖私钥/passphrase 进入 Credential Store、profile 记录为 `PrivateKey`、SQLite 不保存私钥材料、空私钥拒绝。
 - [x] Windows 编辑服务器测试：覆盖 profile 更新、保留/替换凭据、认证类型切换必须提供新凭据、host/port 变化清理旧 trusted host key、ViewModel 替换当前选中服务器。
+- [x] Windows 服务器列表搜索和空状态测试：`MainWindowViewModelFiltersServerListAndKeepsWorkspaceSelection` 覆盖 name/host/username/group 搜索、无结果空状态，以及搜索过滤不会清空当前工作台选择。
 - [x] GitHub Actions Windows core tests：Windows runner 运行 `scripts/ci-windows-core.ps1`，覆盖不依赖 WinUI/XAML 编译器的核心层。
 - [x] 可选真实 SSH 集成测试：`RealWindowsSshSmokeTestWhenEnvironmentIsConfigured` 默认跳过，Windows 主机设置 `HHC_WINDOWS_TEST_SSH_REAL=1` 和 SSH 环境变量后会覆盖 Credential Manager、SSH.NET host key scan、trust、`printf hhc-ssh-ok`、删除清理。
 

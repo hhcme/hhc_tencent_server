@@ -44,14 +44,26 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <TextBlock Text="Servers" Style="{StaticResource TitleTextBlockStyle}" />
-                    <AutoSuggestBox Grid.Row="1" Margin="0,12,0,12" PlaceholderText="Search servers" />
-                    <ListView
+                    <AutoSuggestBox
+                        Grid.Row="1"
+                        Margin="0,12,0,12"
+                        PlaceholderText="Search servers"
+                        Text="{x:Bind ViewModel.ServerSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <InfoBar
                         Grid.Row="2"
-                        ItemsSource="{x:Bind ViewModel.Servers, Mode=OneWay}"
-                        SelectedItem="{x:Bind ViewModel.SelectedServer, Mode=TwoWay}"
+                        Margin="0,0,0,12"
+                        IsOpen="{x:Bind ViewModel.IsServerListEmpty, Mode=OneWay}"
+                        Severity="Informational"
+                        Title="{x:Bind ViewModel.ServerListEmptyTitle, Mode=OneWay}"
+                        Message="{x:Bind ViewModel.ServerListEmptyMessage, Mode=OneWay}" />
+                    <ListView
+                        Grid.Row="3"
+                        ItemsSource="{x:Bind ViewModel.VisibleServers, Mode=OneWay}"
+                        SelectedItem="{x:Bind ViewModel.SelectedVisibleServer, Mode=TwoWay}"
                         SelectionMode="Single">
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="servers:ServerProfile">
