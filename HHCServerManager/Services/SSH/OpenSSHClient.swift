@@ -149,6 +149,19 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             return result
         }
 
+        if let result = try await transferFileWithSFTPIfAvailable(
+            direction: direction,
+            remotePath: remotePath,
+            localURL: localURL,
+            profile: profile,
+            knownHostsURL: knownHostsURL,
+            progressHandler: progressHandler,
+            start: start,
+            initialByteCount: initialByteCount
+        ) {
+            return result
+        }
+
         let scpSource: String
         let scpDestination: String
         switch direction {
@@ -165,6 +178,59 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         guard processResult.exitCode == 0 else {
             let message = processResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             throw SSHClientError.processFailed(message.isEmpty ? "File transfer failed." : message)
+        }
+
+        let byteCount = (try? fileManager.attributesOfItem(atPath: localURL.path)[.size]) as? Int64
+        progressHandler?(RemoteFileTransferProgress(completedBytes: byteCount, totalBytes: byteCount ?? initialByteCount, fraction: 1))
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: byteCount,
+            duration: Date().timeIntervalSince(start)
+        )
+    }
+
+    private func transferFileWithSFTPIfAvailable(
+        direction: RemoteFileTransferDirection,
+        remotePath: String,
+        localURL: URL,
+        profile: ServerProfile,
+        knownHostsURL: URL,
+        progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?,
+        start: Date,
+        initialByteCount: Int64?
+    ) async throws -> RemoteFileTransferResult? {
+        guard fileManager.isExecutableFile(atPath: "/usr/bin/sftp") else {
+            return nil
+        }
+        let authContext = try makeAuthContext(profile: profile, knownHostsURL: knownHostsURL, portFlag: "-P")
+        let batchURL = fileManager.temporaryDirectory
+            .appendingPathComponent("hhc-sftp-\(profile.id.uuidString)-\(UUID().uuidString).batch")
+        var cleanupURLs = authContext.temporaryURLs
+        cleanupURLs.append(batchURL)
+        defer {
+            SSHProcessAuthContext(
+                arguments: authContext.arguments,
+                environment: authContext.environment,
+                temporaryURLs: cleanupURLs,
+                fileManager: fileManager
+            )
+            .cleanup()
+        }
+
+        let batchCommand = Self.sftpResumeBatchCommand(
+            direction: direction,
+            localPath: localURL.path,
+            remotePath: remotePath
+        )
+        try batchCommand.write(to: batchURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: batchURL.path)
+
+        var arguments = authContext.arguments
+        arguments.append(contentsOf: ["-b", batchURL.path, "\(profile.username)@\(profile.host)"])
+        let processResult = try await runProcess("/usr/bin/sftp", arguments: arguments, environment: authContext.environment)
+        guard processResult.exitCode == 0 else {
+            return nil
         }
 
         let byteCount = (try? fileManager.attributesOfItem(atPath: localURL.path)[.size]) as? Int64
@@ -373,6 +439,23 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
 
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    static func sftpResumeBatchCommand(
+        direction: RemoteFileTransferDirection,
+        localPath: String,
+        remotePath: String
+    ) -> String {
+        switch direction {
+        case .upload:
+            "reput \(sftpBatchQuote(localPath)) \(sftpBatchQuote(remotePath))\n"
+        case .download:
+            "reget \(sftpBatchQuote(remotePath)) \(sftpBatchQuote(localPath))\n"
+        }
+    }
+
+    private static func sftpBatchQuote(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
     }
 
     static func rsyncProgressUpdates(from output: String) -> [RemoteFileTransferProgress] {

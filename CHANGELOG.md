@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased / 未发布
 
+- Added an OpenSSH `sftp reget/reput` fallback between rsync and scp so remote file transfers can attempt resumable upload/download when rsync is unavailable or fails.
 - Added MIT license.
 - Added bilingual README files.
 - Added contributing, security, and code of conduct documents.

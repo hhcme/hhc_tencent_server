@@ -23,4 +23,20 @@ final class OpenSSHClientTests: XCTestCase {
         XCTAssertNil(OpenSSHClient.rsyncProgressUpdate(fromLine: "sending incremental file list"))
         XCTAssertNil(OpenSSHClient.rsyncProgressUpdate(fromLine: "large.log"))
     }
+
+    func testSFTPResumeBatchCommandsQuoteLocalAndRemotePaths() {
+        let upload = OpenSSHClient.sftpResumeBatchCommand(
+            direction: .upload,
+            localPath: "/Users/hhc/Downloads/app config \"prod\".json",
+            remotePath: "/srv/app/app config \"prod\".json"
+        )
+        let download = OpenSSHClient.sftpResumeBatchCommand(
+            direction: .download,
+            localPath: "/Users/hhc/Downloads/app config.json",
+            remotePath: "/srv/app/app config.json"
+        )
+
+        XCTAssertEqual(upload, "reput \"/Users/hhc/Downloads/app config \\\"prod\\\".json\" \"/srv/app/app config \\\"prod\\\".json\"\n")
+        XCTAssertEqual(download, "reget \"/srv/app/app config.json\" \"/Users/hhc/Downloads/app config.json\"\n")
+    }
 }
