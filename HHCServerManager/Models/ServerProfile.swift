@@ -389,6 +389,70 @@ struct RemoteChangeLogEntry: Identifiable, Codable, Equatable, Hashable, Sendabl
     var createdAt: Date
 }
 
+struct DeploymentProject: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var serverId: UUID
+    var name: String
+    var repositoryURL: String
+    var branch: String
+    var deployPath: String
+    var buildCommand: String?
+    var restartCommand: String?
+    var healthCheckCommand: String?
+    var webhookEnabled: Bool
+    var webhookSecretRef: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+enum DeploymentTriggerType: String, Codable, CaseIterable, Identifiable, Sendable {
+    case manual
+    case rollback
+    case webhook
+
+    var id: String { rawValue }
+}
+
+enum DeploymentRunStatus: String, Codable, CaseIterable, Identifiable, Sendable {
+    case pending
+    case running
+    case succeeded
+    case failed
+    case cancelled
+
+    var id: String { rawValue }
+}
+
+struct DeploymentRun: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var projectId: UUID
+    var triggerType: DeploymentTriggerType
+    var requestedRef: String?
+    var previousCommit: String?
+    var targetCommit: String?
+    var status: DeploymentRunStatus
+    var startedAt: Date
+    var finishedAt: Date?
+    var summary: String?
+}
+
+enum DeploymentLogStream: String, Codable, CaseIterable, Identifiable, Sendable {
+    case stdout
+    case stderr
+    case system
+
+    var id: String { rawValue }
+}
+
+struct DeploymentLogEntry: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var runId: UUID
+    var stepName: String
+    var stream: DeploymentLogStream
+    var message: String
+    var createdAt: Date
+}
+
 enum RemoteOperationRiskLevel: String, Codable, CaseIterable, Identifiable, Sendable {
     case low
     case medium

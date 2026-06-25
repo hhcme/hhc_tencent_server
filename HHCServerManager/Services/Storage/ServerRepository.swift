@@ -338,6 +338,143 @@ final class ServerRepository: @unchecked Sendable {
         )
     }
 
+    func fetchDeploymentProjects(serverId: UUID? = nil) throws -> [DeploymentProject] {
+        if let serverId {
+            return try database.query("""
+                SELECT id, server_id, name, repository_url, branch, deploy_path,
+                       build_command, restart_command, health_check_command,
+                       webhook_enabled, webhook_secret_ref, created_at, updated_at
+                FROM deployment_projects
+                WHERE server_id = ?
+                ORDER BY updated_at DESC
+            """, bindings: [.text(serverId.uuidString)]) { statement in
+                try Self.mapDeploymentProject(statement)
+            }
+        }
+
+        return try database.query("""
+            SELECT id, server_id, name, repository_url, branch, deploy_path,
+                   build_command, restart_command, health_check_command,
+                   webhook_enabled, webhook_secret_ref, created_at, updated_at
+            FROM deployment_projects
+            ORDER BY updated_at DESC
+        """) { statement in
+            try Self.mapDeploymentProject(statement)
+        }
+    }
+
+    func upsertDeploymentProject(_ project: DeploymentProject) throws {
+        try database.execute("""
+            INSERT INTO deployment_projects (
+                id, server_id, name, repository_url, branch, deploy_path,
+                build_command, restart_command, health_check_command,
+                webhook_enabled, webhook_secret_ref, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                server_id = excluded.server_id,
+                name = excluded.name,
+                repository_url = excluded.repository_url,
+                branch = excluded.branch,
+                deploy_path = excluded.deploy_path,
+                build_command = excluded.build_command,
+                restart_command = excluded.restart_command,
+                health_check_command = excluded.health_check_command,
+                webhook_enabled = excluded.webhook_enabled,
+                webhook_secret_ref = excluded.webhook_secret_ref,
+                updated_at = excluded.updated_at
+        """, bindings: [
+            .text(project.id.uuidString),
+            .text(project.serverId.uuidString),
+            .text(project.name),
+            .text(project.repositoryURL),
+            .text(project.branch),
+            .text(project.deployPath),
+            project.buildCommand.map(SQLiteValue.text) ?? .null,
+            project.restartCommand.map(SQLiteValue.text) ?? .null,
+            project.healthCheckCommand.map(SQLiteValue.text) ?? .null,
+            .int(project.webhookEnabled ? 1 : 0),
+            project.webhookSecretRef.map(SQLiteValue.text) ?? .null,
+            .text(AppDatabase.string(from: project.createdAt)),
+            .text(AppDatabase.string(from: project.updatedAt)),
+        ])
+    }
+
+    func deleteDeploymentProject(id: UUID) throws {
+        try database.execute("DELETE FROM deployment_projects WHERE id = ?", bindings: [.text(id.uuidString)])
+    }
+
+    func saveDeploymentRun(_ run: DeploymentRun) throws {
+        try database.execute("""
+            INSERT INTO deployment_runs (
+                id, project_id, trigger_type, requested_ref, previous_commit,
+                target_commit, status, started_at, finished_at, summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                project_id = excluded.project_id,
+                trigger_type = excluded.trigger_type,
+                requested_ref = excluded.requested_ref,
+                previous_commit = excluded.previous_commit,
+                target_commit = excluded.target_commit,
+                status = excluded.status,
+                started_at = excluded.started_at,
+                finished_at = excluded.finished_at,
+                summary = excluded.summary
+        """, bindings: [
+            .text(run.id.uuidString),
+            .text(run.projectId.uuidString),
+            .text(run.triggerType.rawValue),
+            run.requestedRef.map(SQLiteValue.text) ?? .null,
+            run.previousCommit.map(SQLiteValue.text) ?? .null,
+            run.targetCommit.map(SQLiteValue.text) ?? .null,
+            .text(run.status.rawValue),
+            .text(AppDatabase.string(from: run.startedAt)),
+            run.finishedAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+            run.summary.map(SQLiteValue.text) ?? .null,
+        ])
+    }
+
+    func fetchDeploymentRuns(projectId: UUID, limit: Int = 50) throws -> [DeploymentRun] {
+        try database.query("""
+            SELECT id, project_id, trigger_type, requested_ref, previous_commit,
+                   target_commit, status, started_at, finished_at, summary
+            FROM deployment_runs
+            WHERE project_id = ?
+            ORDER BY started_at DESC
+            LIMIT ?
+        """, bindings: [
+            .text(projectId.uuidString),
+            .int(max(1, limit)),
+        ]) { statement in
+            try Self.mapDeploymentRun(statement)
+        }
+    }
+
+    func saveDeploymentLog(_ entry: DeploymentLogEntry) throws {
+        try database.execute("""
+            INSERT INTO deployment_logs (
+                id, run_id, step_name, stream, message, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        """, bindings: [
+            .text(entry.id.uuidString),
+            .text(entry.runId.uuidString),
+            .text(entry.stepName),
+            .text(entry.stream.rawValue),
+            .text(entry.message),
+            .text(AppDatabase.string(from: entry.createdAt)),
+        ])
+    }
+
+    func fetchDeploymentLogs(runId: UUID) throws -> [DeploymentLogEntry] {
+        try database.query("""
+            SELECT id, run_id, step_name, stream, message, created_at
+            FROM deployment_logs
+            WHERE run_id = ?
+            ORDER BY created_at ASC
+        """, bindings: [.text(runId.uuidString)]) { statement in
+            try Self.mapDeploymentLogEntry(statement)
+        }
+    }
+
     private static func mapServer(_ statement: OpaquePointer) throws -> ServerProfile {
         let id = UUID(uuidString: string(statement, 0)) ?? UUID()
         let authType = SSHAuthType(rawValue: string(statement, 5)) ?? .privateKey
@@ -436,6 +573,50 @@ final class ServerRepository: @unchecked Sendable {
             vpcId: optionalString(statement, 12),
             rawJSON: optionalString(statement, 13),
             lastSyncedAt: optionalDate(statement, 14)
+        )
+    }
+
+    private static func mapDeploymentProject(_ statement: OpaquePointer) throws -> DeploymentProject {
+        DeploymentProject(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            serverId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            name: string(statement, 2),
+            repositoryURL: string(statement, 3),
+            branch: string(statement, 4),
+            deployPath: string(statement, 5),
+            buildCommand: optionalString(statement, 6),
+            restartCommand: optionalString(statement, 7),
+            healthCheckCommand: optionalString(statement, 8),
+            webhookEnabled: sqlite3_column_int(statement, 9) != 0,
+            webhookSecretRef: optionalString(statement, 10),
+            createdAt: date(statement, 11),
+            updatedAt: date(statement, 12)
+        )
+    }
+
+    private static func mapDeploymentRun(_ statement: OpaquePointer) throws -> DeploymentRun {
+        DeploymentRun(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            projectId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            triggerType: DeploymentTriggerType(rawValue: string(statement, 2)) ?? .manual,
+            requestedRef: optionalString(statement, 3),
+            previousCommit: optionalString(statement, 4),
+            targetCommit: optionalString(statement, 5),
+            status: DeploymentRunStatus(rawValue: string(statement, 6)) ?? .pending,
+            startedAt: date(statement, 7),
+            finishedAt: optionalDate(statement, 8),
+            summary: optionalString(statement, 9)
+        )
+    }
+
+    private static func mapDeploymentLogEntry(_ statement: OpaquePointer) throws -> DeploymentLogEntry {
+        DeploymentLogEntry(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            runId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            stepName: string(statement, 2),
+            stream: DeploymentLogStream(rawValue: string(statement, 3)) ?? .system,
+            message: string(statement, 4),
+            createdAt: date(statement, 5)
         )
     }
 

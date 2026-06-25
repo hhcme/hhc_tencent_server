@@ -234,6 +234,59 @@ final class AppDatabase: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_cloud_instance_links_server
             ON cloud_instance_links(server_id)
         """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS deployment_projects (
+                id TEXT PRIMARY KEY NOT NULL,
+                server_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                repository_url TEXT NOT NULL,
+                branch TEXT NOT NULL,
+                deploy_path TEXT NOT NULL,
+                build_command TEXT,
+                restart_command TEXT,
+                health_check_command TEXT,
+                webhook_enabled INTEGER NOT NULL DEFAULT 0,
+                webhook_secret_ref TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_deployment_projects_server_updated_at
+            ON deployment_projects(server_id, updated_at DESC)
+        """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS deployment_runs (
+                id TEXT PRIMARY KEY NOT NULL,
+                project_id TEXT NOT NULL REFERENCES deployment_projects(id) ON DELETE CASCADE,
+                trigger_type TEXT NOT NULL,
+                requested_ref TEXT,
+                previous_commit TEXT,
+                target_commit TEXT,
+                status TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                summary TEXT
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_deployment_runs_project_started_at
+            ON deployment_runs(project_id, started_at DESC)
+        """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS deployment_logs (
+                id TEXT PRIMARY KEY NOT NULL,
+                run_id TEXT NOT NULL REFERENCES deployment_runs(id) ON DELETE CASCADE,
+                step_name TEXT NOT NULL,
+                stream TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_deployment_logs_run_created_at
+            ON deployment_logs(run_id, created_at ASC)
+        """)
     }
 
     private var lastErrorMessage: String {

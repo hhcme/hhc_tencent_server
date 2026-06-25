@@ -41,6 +41,7 @@ xcodebuild \
 当前覆盖：
 
 - SQLite repository：服务器 CRUD、trusted host key 级联删除、命令历史、操作日志、远程变更审计日志、云账号元数据、云实例关联。
+- Deployment persistence：部署项目、部署运行记录和部署日志的 SQLite 持久化、更新、按服务器/项目/run 查询和级联删除。
 - KeychainService：SSH password、private key、云 SecretId/SecretKey 写入、读取、覆盖、删除。
 - ServerManagementService / CloudAccountService：服务器与云账号创建、更新、删除、凭据清理。
 - Cloud provider foundation：adapter 协议、provider registry、capability 查询、统一错误、超时包装。
@@ -118,6 +119,7 @@ export HHC_TEST_SSH_PASSPHRASE=""
 - Security Groups 当前为 Phase 4 bootstrap：仅对已关联云实例的账号和地域启用，使用腾讯云 VPC `DescribeSecurityGroups` / `DescribeSecurityGroupPolicies` 只读查询并展示安全组规则；当前支持本地生成安全组规则新增/删除 diff、before/after 计数、风险级别、命令预览和警告，但不执行云端写入。当前尚未持久化实例与安全组的精确关联，因此先展示该账号地域下的安全组列表，后续补实例过滤、云端写操作确认和审计。
 - Environment 当前为 Phase 4 bootstrap：只发现受限范围内的常见 env 文件，包括用户/应用目录 `.env` 和 `*.env`、`/etc/default`、`/etc/sysconfig`、`/etc/systemd/system/*.service.d/*.conf`；单文件限制 256 KiB，要求 UTF-8，保存前创建 `.hhc-backup-*` 远端备份并写入 `remote_change_logs`。暂不自动解析 shell profile，不扫描私钥/凭据目录，不做跨文件变量合并。
 - 云账号当前已实现本地元数据、云实例关联表、Keychain 云凭据命名空间、Tencent Cloud adapter、云实例同步服务、基础导入 UI、已关联 CVM 的 CPU 云监控查询和账号地域级安全组只读查询；真实腾讯云账号手动验收仍在后续任务中。
+- Deployment 当前为 Phase 5 bootstrap：已建立 `deployment_projects`、`deployment_runs`、`deployment_logs` 三张表和 repository 读写基础，用于后续手动部署、日志和回滚；尚未执行远程 git/build/restart 命令，部署目录白名单、命令构建、日志脱敏、回滚和 webhook 仍待实现。
 - TencentCloudAdapter 已接入腾讯云 API 3.0 TC3-HMAC-SHA256 签名流程，并实现 Region、CVM instance、Cloud Monitor `GetMonitorData` CPU 指标、VPC `DescribeSecurityGroups` 和 `DescribeSecurityGroupPolicies` 只读查询；默认测试使用 mock transport，不提交真实 SecretId/SecretKey。
 - `SSHClient` 协议已经隔离 UI/ViewModel 与具体 SSH 实现，后续可以替换为 SwiftNIO SSH。
 - OpenSSH adapter 当前支持私钥认证，也支持通过临时 `SSH_ASKPASS` 脚本进行 password 认证。密码从 Keychain 读出后只注入当前 SSH 子进程环境，脚本执行后立即删除。

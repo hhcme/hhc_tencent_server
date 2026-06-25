@@ -269,6 +269,100 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertTrue(try repository.fetchCloudInstanceLinks().isEmpty)
     }
 
+    func testDeploymentProjectsRunsAndLogsPersistAndCascade() throws {
+        let repository = try makeRepository()
+        let server = makeServer()
+        try repository.upsert(server)
+
+        let project = DeploymentProject(
+            id: UUID(),
+            serverId: server.id,
+            name: "Website",
+            repositoryURL: "git@gitlab.com:hhc/site.git",
+            branch: "main",
+            deployPath: "/srv/site",
+            buildCommand: "npm ci && npm run build",
+            restartCommand: "systemctl restart site.service",
+            healthCheckCommand: "curl -fsS http://127.0.0.1:3000/health",
+            webhookEnabled: true,
+            webhookSecretRef: "deploy_secret",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try repository.upsertDeploymentProject(project)
+
+        var projects = try repository.fetchDeploymentProjects(serverId: server.id)
+        XCTAssertEqual(projects.count, 1)
+        XCTAssertEqual(projects[0].name, "Website")
+        XCTAssertEqual(projects[0].buildCommand, "npm ci && npm run build")
+        XCTAssertTrue(projects[0].webhookEnabled)
+
+        var updatedProject = project
+        updatedProject.branch = "release"
+        updatedProject.webhookEnabled = false
+        updatedProject.webhookSecretRef = nil
+        updatedProject.updatedAt = Date(timeIntervalSince1970: 1_700_000_010)
+        try repository.upsertDeploymentProject(updatedProject)
+        projects = try repository.fetchDeploymentProjects()
+        XCTAssertEqual(projects.map(\.branch), ["release"])
+        XCTAssertFalse(projects[0].webhookEnabled)
+        XCTAssertNil(projects[0].webhookSecretRef)
+
+        var run = DeploymentRun(
+            id: UUID(),
+            projectId: project.id,
+            triggerType: .manual,
+            requestedRef: "main",
+            previousCommit: "abc123",
+            targetCommit: nil,
+            status: .running,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_020),
+            finishedAt: nil,
+            summary: nil
+        )
+        try repository.saveDeploymentRun(run)
+        run.status = .succeeded
+        run.targetCommit = "def456"
+        run.finishedAt = Date(timeIntervalSince1970: 1_700_000_030)
+        run.summary = "deployed"
+        try repository.saveDeploymentRun(run)
+
+        let runs = try repository.fetchDeploymentRuns(projectId: project.id)
+        XCTAssertEqual(runs.count, 1)
+        XCTAssertEqual(runs[0].status, .succeeded)
+        XCTAssertEqual(runs[0].previousCommit, "abc123")
+        XCTAssertEqual(runs[0].targetCommit, "def456")
+        XCTAssertEqual(runs[0].summary, "deployed")
+
+        let olderLog = DeploymentLogEntry(
+            id: UUID(),
+            runId: run.id,
+            stepName: "fetch",
+            stream: .stdout,
+            message: "Fetching origin",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_021)
+        )
+        let newerLog = DeploymentLogEntry(
+            id: UUID(),
+            runId: run.id,
+            stepName: "build",
+            stream: .stderr,
+            message: "warning",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_022)
+        )
+        try repository.saveDeploymentLog(newerLog)
+        try repository.saveDeploymentLog(olderLog)
+
+        let logs = try repository.fetchDeploymentLogs(runId: run.id)
+        XCTAssertEqual(logs.map(\.stepName), ["fetch", "build"])
+        XCTAssertEqual(logs.map(\.stream), [.stdout, .stderr])
+
+        try repository.deleteDeploymentProject(id: project.id)
+        XCTAssertTrue(try repository.fetchDeploymentProjects(serverId: server.id).isEmpty)
+        XCTAssertTrue(try repository.fetchDeploymentRuns(projectId: project.id).isEmpty)
+        XCTAssertTrue(try repository.fetchDeploymentLogs(runId: run.id).isEmpty)
+    }
+
     private func makeRepository() throws -> ServerRepository {
         ServerRepository(database: try AppDatabase.inMemory())
     }
