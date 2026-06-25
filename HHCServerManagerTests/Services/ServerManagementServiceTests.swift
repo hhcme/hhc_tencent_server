@@ -141,6 +141,58 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertNil(try harness.keychain.readCloudCredential(keychainRef: account.keychainRef))
     }
 
+    func testCloudProviderRegistryResolvesCapabilitiesAndAdapter() throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .tencentCloud,
+            capabilities: [.regions, .instanceDiscovery]
+        )
+        let registry = CloudProviderRegistry(adapters: [adapter])
+
+        XCTAssertEqual(registry.registeredProviderIds, [.tencentCloud])
+        XCTAssertTrue(registry.supports(.regions, providerId: .tencentCloud))
+        XCTAssertTrue(registry.supports(.instanceDiscovery, providerId: .tencentCloud))
+        XCTAssertFalse(registry.supports(.powerActions, providerId: .tencentCloud))
+        XCTAssertNoThrow(try registry.require(.regions, providerId: .tencentCloud))
+        XCTAssertThrowsError(try registry.require(.powerActions, providerId: .tencentCloud)) { error in
+            XCTAssertEqual(
+                error as? CloudProviderError,
+                .unsupportedCapability(providerId: .tencentCloud, capability: .powerActions)
+            )
+        }
+
+        let resolved = try registry.adapter(for: .tencentCloud)
+        XCTAssertEqual(resolved.providerId, .tencentCloud)
+    }
+
+    func testCloudProviderRegistryThrowsForMissingAdapter() {
+        let registry = CloudProviderRegistry()
+
+        XCTAssertThrowsError(try registry.adapter(for: .tencentCloud)) { error in
+            XCTAssertEqual(error as? CloudProviderError, .adapterNotRegistered(.tencentCloud))
+        }
+    }
+
+    func testCloudProviderRequestRunnerReturnsBeforeTimeout() async throws {
+        let value = try await CloudProviderRequestRunner.withTimeout(0.2) {
+            try await Task.sleep(nanoseconds: 1_000_000)
+            return "ok"
+        }
+
+        XCTAssertEqual(value, "ok")
+    }
+
+    func testCloudProviderRequestRunnerTimesOut() async {
+        do {
+            _ = try await CloudProviderRequestRunner.withTimeout(0.001) {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                return "late"
+            }
+            XCTFail("Expected timeout.")
+        } catch {
+            XCTAssertEqual(error as? CloudProviderError, .timeout(0.001))
+        }
+    }
+
     private final class Harness {
         let repository: ServerRepository
         let keychain: KeychainService
@@ -153,5 +205,37 @@ final class ServerManagementServiceTests: XCTestCase {
             service = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
         }
+    }
+}
+
+private struct MockCloudProviderAdapter: CloudProviderAdapter {
+    let providerId: CloudProviderID
+    let displayName = "Mock Cloud"
+    let capabilities: Set<CloudCapability>
+
+    func validateCredential(_ credential: CloudProviderCredential) async throws {}
+
+    func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion] {
+        [
+            CloudRegion(id: "ap-guangzhou", displayName: "Guangzhou", available: true),
+        ]
+    }
+
+    func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance] {
+        [
+            CloudProviderInstance(
+                id: "ins-123",
+                providerId: providerId,
+                regionId: regionId,
+                displayName: "mock-instance",
+                publicIp: "203.0.113.1",
+                privateIp: "10.0.0.2",
+                status: "RUNNING",
+                instanceType: "mock",
+                zoneId: "\(regionId)-1",
+                vpcId: "vpc-123",
+                rawJSON: nil
+            ),
+        ]
     }
 }

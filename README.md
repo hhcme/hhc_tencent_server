@@ -18,6 +18,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - Host key verification as a first-class security requirement.
 - Server browser, dedicated server workspace, real smoke test, simplified command panel, and command metadata history are underway.
 - Cloud account metadata and cloud credential storage foundation are in place.
+- Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper are in place.
 - Bilingual README for the project introduction; detailed design and implementation documents are maintained in Chinese.
 - MIT licensed.
 
@@ -27,6 +28,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - 把主机指纹验证作为基础安全能力。
 - 服务器列表、单服务器工作台、真实 smoke test、简化命令面板和命令元数据历史已进入实现。
 - 云账号元数据和云凭据存储基础已经落地。
+- 云厂商 adapter 协议、能力 registry、统一错误和超时包装已经落地。
 - README 作为项目介绍保留中英文；详细设计和实施计划默认使用中文维护。
 - 使用 MIT 开源协议。
 

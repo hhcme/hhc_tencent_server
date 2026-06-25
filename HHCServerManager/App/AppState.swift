@@ -5,6 +5,7 @@ final class AppState: ObservableObject {
     let repository: ServerRepository
     let serverManagementService: ServerManagementService
     let cloudAccountService: CloudAccountService
+    let cloudProviderRegistry: CloudProviderRegistry
     let sshClient: OpenSSHClient
 
     @Published var servers: [ServerProfile] = []
@@ -20,6 +21,7 @@ final class AppState: ObservableObject {
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
+            cloudProviderRegistry = CloudProviderRegistry()
             sshClient = OpenSSHClient(repository: repository, keychain: keychain)
             reloadServers()
         } catch {
@@ -30,6 +32,7 @@ final class AppState: ObservableObject {
             self.repository = repository
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
+            cloudProviderRegistry = CloudProviderRegistry()
             sshClient = OpenSSHClient(repository: repository, keychain: keychain)
         }
     }

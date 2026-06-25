@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - Updated the README status to reflect the active macOS implementation.
 - Added SQLite-backed command metadata history and operation logs without persisting command output.
 - Added cloud provider account metadata, cloud instance link storage, and Keychain-backed cloud credential handling.
+- Added the cloud provider adapter protocol, provider registry, normalized cloud errors, and timeout wrapper.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -63,3 +64,4 @@ All notable changes to this project will be documented in this file.
 - 更新 README 项目状态，使其反映当前 macOS 已进入实现阶段。
 - 添加基于 SQLite 的命令元数据历史和操作日志，不持久化命令输出。
 - 添加云账号元数据、云实例关联存储，以及基于 Keychain 的云凭据处理。
+- 添加云厂商 adapter 协议、provider registry、统一云错误和超时包装。

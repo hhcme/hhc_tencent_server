@@ -126,10 +126,10 @@ CREATE TABLE operation_logs (
 ### Task 3：Provider 基础设施
 
 - [x] 定义 `CloudProviderID` 和 `CloudCapability`。
-- [ ] 定义 `CloudProviderAdapter`。
-- [ ] 实现 registry 和 adapter capability 查询。
-- [ ] 统一错误类型：认证失败、权限不足、限流、网络错误、provider 返回异常。
-- [ ] 添加请求超时和取消。
+- [x] 定义 `CloudProviderAdapter`。
+- [x] 实现 registry 和 adapter capability 查询。
+- [x] 统一错误类型：认证失败、权限不足、限流、网络错误、provider 返回异常。
+- [x] 添加请求超时和取消。
 
 ### Task 4：Tencent Cloud 只读 adapter
 

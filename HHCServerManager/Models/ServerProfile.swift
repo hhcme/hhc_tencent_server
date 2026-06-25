@@ -136,6 +136,26 @@ struct CloudInstanceLink: Identifiable, Codable, Equatable, Hashable {
     var lastSyncedAt: Date?
 }
 
+struct CloudRegion: Identifiable, Codable, Equatable, Hashable {
+    var id: String
+    var displayName: String
+    var available: Bool
+}
+
+struct CloudProviderInstance: Identifiable, Codable, Equatable, Hashable {
+    var id: String
+    var providerId: CloudProviderID
+    var regionId: String
+    var displayName: String?
+    var publicIp: String?
+    var privateIp: String?
+    var status: String?
+    var instanceType: String?
+    var zoneId: String?
+    var vpcId: String?
+    var rawJSON: String?
+}
+
 enum SSHConnectionState: Equatable, Hashable {
     case disconnected
     case connecting
