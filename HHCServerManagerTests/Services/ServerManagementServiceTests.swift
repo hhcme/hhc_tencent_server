@@ -949,8 +949,111 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(result.backupPath.hasSuffix(".tar.gz"))
         XCTAssertEqual(result.sizeBytes, 8192)
         XCTAssertTrue(client.commands[0].contains("install -d -m 0750 \"$backup_dir\""))
-        XCTAssertTrue(client.commands[0].contains("tar -czf \"$backup_path\" -C \"$install_path\" config.yaml -C \"$data_path\" ."))
+        XCTAssertTrue(client.commands[0].contains("data_parent=$(dirname -- \"$data_path\"); data_name=$(basename -- \"$data_path\")"))
+        XCTAssertTrue(client.commands[0].contains("tar -czf \"$backup_path\" -C \"$install_path\" config.yaml -C \"$data_parent\" \"$data_name\""))
         XCTAssertTrue(client.commands[0].contains("stat -c %s \"$backup_path\""))
+    }
+
+    func testVerdaccioManagerRestoresBackupAndChecksHealth() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: #"{"ok":"verdaccio"}"#, stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await manager.restoreBackup(
+            draft: VerdaccioInstallDraft(),
+            backupPath: "/srv/verdaccio/backups/verdaccio-2026-06-25T12-00-00.000Z.tar.gz",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(result.backupPath, "/srv/verdaccio/backups/verdaccio-2026-06-25T12-00-00.000Z.tar.gz")
+        XCTAssertTrue(result.rollbackBackupPath.hasPrefix("/srv/verdaccio/backups/restore-rollback-"))
+        XCTAssertEqual(result.healthCheckURL, "http://127.0.0.1:4873/-/ping")
+        XCTAssertEqual(result.healthCheckOutput, #"{"ok":"verdaccio"}"#)
+        XCTAssertEqual(client.commands.count, 2)
+        XCTAssertTrue(client.commands[0].contains("systemctl stop \"$service\""))
+        XCTAssertTrue(client.commands[0].contains("tar -czf \"$rollback_path\" -C \"$install_path\" config.yaml -C \"$data_parent\" \"$data_name\""))
+        XCTAssertTrue(client.commands[0].contains("tar -xzf \"$archive_path\" -C \"$restore_dir\""))
+        XCTAssertTrue(client.commands[0].contains("test -f \"$restore_dir/config.yaml\""))
+        XCTAssertTrue(client.commands[0].contains("test -d \"$restore_dir/$data_name\""))
+        XCTAssertTrue(client.commands[0].contains("systemctl start \"$service\""))
+        XCTAssertEqual(client.commands[1], "curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'")
+    }
+
+    func testVerdaccioManagerRollsBackWhenRestoreHealthCheckFails() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: "token=secret-value", stderr: "connection refused", exitCode: 7, duration: 0),
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        do {
+            _ = try await manager.restoreBackup(
+                draft: VerdaccioInstallDraft(),
+                backupPath: "/srv/verdaccio/backups/verdaccio-2026-06-25T12-00-00.000Z.tar.gz",
+                profile: profile,
+                sshClient: client
+            )
+            XCTFail("Expected restore health check failure.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("connection refused"))
+            XCTAssertTrue(error.localizedDescription.contains("Rollback attempted using /srv/verdaccio/backups/restore-rollback-"))
+            XCTAssertFalse(error.localizedDescription.contains("secret-value"))
+            XCTAssertEqual(client.commands.count, 3)
+            XCTAssertTrue(client.commands[2].contains("archive_path='/srv/verdaccio/backups/restore-rollback-"))
+            XCTAssertFalse(client.commands[2].contains("rollback_path="))
+            XCTAssertTrue(client.commands[2].contains("tar -xzf \"$archive_path\" -C \"$restore_dir\""))
+        }
+    }
+
+    func testVerdaccioManagerRollsBackWhenRestoreCommandFails() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "token=secret-value", stderr: "tar failed", exitCode: 2, duration: 0),
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        do {
+            _ = try await manager.restoreBackup(
+                draft: VerdaccioInstallDraft(),
+                backupPath: "/srv/verdaccio/backups/verdaccio-2026-06-25T12-00-00.000Z.tar.gz",
+                profile: profile,
+                sshClient: client
+            )
+            XCTFail("Expected restore command failure.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("tar failed"))
+            XCTAssertTrue(error.localizedDescription.contains("Rollback attempted using /srv/verdaccio/backups/restore-rollback-"))
+            XCTAssertFalse(error.localizedDescription.contains("secret-value"))
+            XCTAssertEqual(client.commands.count, 2)
+            XCTAssertTrue(client.commands[1].contains("archive_path='/srv/verdaccio/backups/restore-rollback-"))
+            XCTAssertFalse(client.commands[1].contains("rollback_path="))
+        }
+    }
+
+    func testVerdaccioManagerRejectsUnsafeRestoreBackupPathBeforeSSH() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let manager = VerdaccioManager()
+
+        do {
+            _ = try await manager.restoreBackup(
+                draft: VerdaccioInstallDraft(),
+                backupPath: "/tmp/verdaccio.tar.gz",
+                profile: profile,
+                sshClient: client
+            )
+            XCTFail("Expected unsafe backup path failure.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("must be under"))
+            XCTAssertTrue(client.commands.isEmpty)
+        }
     }
 
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {

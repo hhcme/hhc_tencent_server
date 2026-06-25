@@ -1200,6 +1200,13 @@ struct VerdaccioRegistryBackupResult: Equatable, Sendable {
     var sizeBytes: Int64?
 }
 
+struct VerdaccioRegistryRestoreResult: Equatable, Sendable {
+    var backupPath: String
+    var rollbackBackupPath: String
+    var healthCheckURL: String
+    var healthCheckOutput: String
+}
+
 enum RegistryConfigurationError: LocalizedError, Equatable {
     case invalidName
     case invalidPath(String)
@@ -1538,6 +1545,78 @@ final class VerdaccioManager: @unchecked Sendable {
         )
     }
 
+    func restoreBackup(
+        draft: VerdaccioInstallDraft,
+        backupPath: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioRegistryRestoreResult {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let backupPath = try Self.validatedBackupPath(backupPath, for: draft)
+        let rollbackPath = "\(draft.installPath.trimmed)/backups/restore-rollback-\(Self.timestamp(for: now())).tar.gz"
+        let restoreResult = try await CloudProviderRequestRunner.withTimeout(30) {
+            try await sshClient.execute(
+                Self.restoreCommand(for: draft, backupPath: backupPath, rollbackBackupPath: rollbackPath),
+                profile: profile
+            )
+        }
+        guard restoreResult.exitCode == 0 else {
+            throw try await restoreFailureWithRollback(
+                draft: draft,
+                rollbackPath: rollbackPath,
+                result: restoreResult,
+                profile: profile,
+                sshClient: sshClient,
+                fallback: "Could not restore Verdaccio backup."
+            )
+        }
+
+        let healthCheckURL = Self.healthCheckURL(for: draft)
+        let healthResult = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute("curl -fsS --max-time 5 \(Self.shellQuote(healthCheckURL))", profile: profile)
+        }
+        guard healthResult.exitCode == 0 else {
+            let rollbackResult = try await CloudProviderRequestRunner.withTimeout(30) {
+                try await sshClient.execute(
+                    Self.rollbackCommand(for: draft, rollbackBackupPath: rollbackPath),
+                    profile: profile
+                )
+            }
+            let healthMessage = Self.redactedOutput(from: healthResult, fallback: "Verdaccio restore health check failed.")
+            if rollbackResult.exitCode == 0 {
+                throw SSHClientError.processFailed("\(healthMessage)\nRollback attempted using \(rollbackPath).")
+            }
+            let rollbackMessage = Self.redactedOutput(from: rollbackResult, fallback: "Rollback failed.")
+            throw SSHClientError.processFailed("\(healthMessage)\nRollback failed using \(rollbackPath): \(rollbackMessage)")
+        }
+
+        return VerdaccioRegistryRestoreResult(
+            backupPath: backupPath,
+            rollbackBackupPath: rollbackPath,
+            healthCheckURL: healthCheckURL,
+            healthCheckOutput: DeploymentLogRedactor.redact(healthResult.stdout.trimmed.nilIfEmpty ?? "ok")
+        )
+    }
+
+    private func restoreFailureWithRollback(
+        draft: VerdaccioInstallDraft,
+        rollbackPath: String,
+        result: CommandResult,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        fallback: String
+    ) async throws -> SSHClientError {
+        let restoreMessage = Self.redactedOutput(from: result, fallback: fallback)
+        let rollbackResult = try await CloudProviderRequestRunner.withTimeout(30) {
+            try await sshClient.execute(Self.rollbackCommand(for: draft, rollbackBackupPath: rollbackPath), profile: profile)
+        }
+        if rollbackResult.exitCode == 0 {
+            return SSHClientError.processFailed("\(restoreMessage)\nRollback attempted using \(rollbackPath).")
+        }
+        let rollbackMessage = Self.redactedOutput(from: rollbackResult, fallback: "Rollback failed.")
+        return SSHClientError.processFailed("\(restoreMessage)\nRollback failed using \(rollbackPath): \(rollbackMessage)")
+    }
+
     static func parseStatus(
         _ output: String,
         serviceName: String,
@@ -1615,11 +1694,34 @@ final class VerdaccioManager: @unchecked Sendable {
         return """
         set -e; \
         install_path=\(installPath); data_path=\(dataPath); backup_path=\(backupPath); \
+        data_parent=$(dirname -- "$data_path"); data_name=$(basename -- "$data_path"); \
         backup_dir=$(dirname -- "$backup_path"); \
         install -d -m 0750 "$backup_dir"; \
-        tar -czf "$backup_path" -C "$install_path" config.yaml -C "$data_path" .; \
+        tar -czf "$backup_path" -C "$install_path" config.yaml -C "$data_parent" "$data_name"; \
         stat -c %s "$backup_path"
         """
+    }
+
+    static func restoreCommand(
+        for draft: VerdaccioInstallDraft,
+        backupPath: String,
+        rollbackBackupPath: String
+    ) -> String {
+        restoreCommand(
+            for: draft,
+            archivePath: backupPath,
+            rollbackBackupPath: rollbackBackupPath,
+            createRollback: true
+        )
+    }
+
+    static func rollbackCommand(for draft: VerdaccioInstallDraft, rollbackBackupPath: String) -> String {
+        restoreCommand(
+            for: draft,
+            archivePath: rollbackBackupPath,
+            rollbackBackupPath: nil,
+            createRollback: false
+        )
     }
 
     static func readConfigCommand(path: String) -> String {
@@ -1680,6 +1782,62 @@ final class VerdaccioManager: @unchecked Sendable {
                 .joined(separator: "\n")
                 .nilIfEmpty ?? fallback
         )
+    }
+
+    private static func restoreCommand(
+        for draft: VerdaccioInstallDraft,
+        archivePath: String,
+        rollbackBackupPath: String?,
+        createRollback: Bool
+    ) -> String {
+        let installPath = shellQuote(draft.installPath.trimmed)
+        let dataPath = shellQuote(draft.dataPath.trimmed)
+        let archivePath = shellQuote(archivePath)
+        let rollbackSetup: String
+        if createRollback, let rollbackBackupPath {
+            rollbackSetup = "rollback_path=\(shellQuote(rollbackBackupPath)); rollback_dir=$(dirname -- \"$rollback_path\"); install -d -m 0750 \"$rollback_dir\"; tar -czf \"$rollback_path\" -C \"$install_path\" config.yaml -C \"$data_parent\" \"$data_name\"; "
+        } else {
+            rollbackSetup = ""
+        }
+        return """
+        set -e; \
+        install_path=\(installPath); data_path=\(dataPath); archive_path=\(archivePath); service=\(shellQuote("\(draft.serviceName.trimmed).service")); \
+        data_parent=$(dirname -- "$data_path"); data_name=$(basename -- "$data_path"); restore_dir=$(mktemp -d); \
+        trap 'rm -rf -- "$restore_dir"' EXIT; \
+        systemctl stop "$service"; \
+        \(rollbackSetup)\
+        tar -xzf "$archive_path" -C "$restore_dir"; \
+        test -f "$restore_dir/config.yaml"; \
+        test -d "$restore_dir/$data_name"; \
+        rm -rf -- "$data_path"; \
+        install -d -m 0755 "$data_path"; \
+        cp -a "$restore_dir/$data_name/." "$data_path/"; \
+        cp -p "$restore_dir/config.yaml" "$install_path/config.yaml"; \
+        systemctl start "$service"; \
+        trap - EXIT; \
+        rm -rf -- "$restore_dir"
+        """
+    }
+
+    private static func validatedBackupPath(_ path: String, for draft: VerdaccioInstallDraft) throws -> String {
+        let trimmed = path.trimmed
+        let backupsPrefix = "\(draft.installPath.trimmed)/backups/"
+        guard trimmed.hasPrefix(backupsPrefix),
+              trimmed.hasSuffix(".tar.gz"),
+              trimmed.range(of: #"^/(srv|opt|var/lib|home)(/[A-Za-z0-9._@-]+)+\.tar\.gz$"#, options: .regularExpression) != nil,
+              !trimmed.contains("/../"),
+              !trimmed.contains("\n"),
+              !trimmed.contains("\r"),
+              !trimmed.contains("\0")
+        else {
+            throw RegistryConfigurationError.invalidPath(trimmed)
+        }
+        return trimmed
+    }
+
+    private static func healthCheckURL(for draft: VerdaccioInstallDraft) -> String {
+        let host = draft.listenHost.trimmed == "0.0.0.0" ? "127.0.0.1" : draft.listenHost.trimmed
+        return "http://\(host):\(draft.listenPort)/-/ping"
     }
 
     private static func shellQuote(_ value: String) -> String {

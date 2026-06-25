@@ -111,9 +111,9 @@ CREATE TABLE registry_backups (
 
 ### Task 5：备份与恢复
 
-- [x] 备份 storage 和配置：已生成受控 tar.gz 备份命令，包含 `config.yaml` 和 storage 内容，并返回备份文件大小；真实服务器手动验收仍未执行。
-- [ ] 恢复前停止服务并二次确认。
-- [ ] 恢复失败时尝试回滚。
+- [x] 备份 storage 和配置：已生成受控 tar.gz 备份命令，包含 `config.yaml` 和 storage 目录，并返回备份文件大小；真实服务器手动验收仍未执行。
+- [x] 恢复前停止服务并二次确认：恢复命令会先创建 rollback 归档并停止服务；UI 层仍必须在调用前做二次确认。
+- [x] 恢复失败时尝试回滚：恢复命令失败或恢复后 health check 失败时，会尝试使用恢复前 rollback 归档回滚。
 - [ ] 记录备份历史：当前返回备份路径和大小，持久化历史仍待接入。
 
 ### Task 6：Dart/Flutter pub 方案验证
@@ -131,7 +131,7 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 安装命令和 health check 状态机测试。
 - [x] Verdaccio 状态、日志脱敏和配置保存前备份测试。
 - [x] 备份归档命令测试。
-- [ ] 恢复状态机测试。
+- [x] 恢复状态机测试：已覆盖恢复成功、health check 失败回滚、恢复命令失败回滚和非法备份路径拒绝。
 - [x] 日志脱敏测试：当前已覆盖 Verdaccio journal status 日志脱敏和安装失败输出脱敏。
 
 ### Task 8：手动验收

@@ -76,6 +76,7 @@ All notable changes to this project will be documented in this file.
 - Added a Verdaccio installer command flow for creating registry directories, writing config/systemd units, restarting the service, and checking `/-/ping`.
 - Added Verdaccio management foundations for systemd status, redacted journal logs, config reading, and backup-before-save config updates.
 - Added Verdaccio package summary listing from registry storage and tar.gz backup archive command generation.
+- Added Verdaccio backup restore flow with restricted archive paths, service stop/start, rollback archive creation, health checks, failure rollback attempts, and contract tests.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -147,3 +148,4 @@ All notable changes to this project will be documented in this file.
 - 添加 Verdaccio 安装命令流程，支持创建仓库目录、写入配置/systemd unit、重启服务并检查 `/-/ping`。
 - 添加 Verdaccio 管理基础能力，支持 systemd 状态、脱敏 journal 日志、配置读取，以及保存配置前备份。
 - 添加 Verdaccio 私有包摘要列表和 tar.gz 备份归档命令生成能力。
+- 添加 Verdaccio 备份恢复流程，包含受限归档路径、服务停止/启动、恢复前 rollback 归档、健康检查、失败回滚尝试和 contract 测试。
