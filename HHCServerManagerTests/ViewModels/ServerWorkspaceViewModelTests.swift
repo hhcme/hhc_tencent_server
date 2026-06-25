@@ -554,10 +554,17 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         try await waitUntil { viewModel.isRunningDeployment == false && viewModel.selectedDeploymentRun != nil }
 
         XCTAssertEqual(viewModel.selectedDeploymentRun?.status, .succeeded)
-        XCTAssertEqual(viewModel.selectedDeploymentRun?.previousCommit, "abc123")
-        XCTAssertEqual(viewModel.selectedDeploymentRun?.targetCommit, "def456")
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.previousCommit, "abc1234")
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.targetCommit, "def4567")
         XCTAssertTrue(viewModel.deploymentLogs.contains { $0.stepName == "finish" && $0.message == "Deployment completed." })
         XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'origin/main'") })
+        let audit = try XCTUnwrap(try repository.fetchRemoteChangeLogs(serverId: profile.id).first)
+        XCTAssertEqual(audit.targetType, "deployment")
+        XCTAssertEqual(audit.targetId, viewModel.selectedDeploymentProject?.id.uuidString)
+        XCTAssertEqual(audit.action, "deploy")
+        XCTAssertEqual(audit.status, "succeeded")
+        XCTAssertTrue(audit.beforeSnapshot?.contains("commit=abc1234") == true)
+        XCTAssertTrue(audit.afterSnapshot?.contains("commit=def4567") == true)
     }
 
     func testRunDeploymentShowsHealthCheckFailureInWorkspace() async throws {
@@ -586,6 +593,56 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedDeploymentRun?.summary, "health_check failed with exit code 1.")
         XCTAssertTrue(viewModel.deploymentLogs.contains { $0.stepName == "health_check" && $0.stream == .stderr && $0.message == "health_check failed" })
         XCTAssertTrue(client.commands.contains { $0.contains("curl -fsS http://127.0.0.1:3000/health") })
+        let audit = try XCTUnwrap(try repository.fetchRemoteChangeLogs(serverId: profile.id).first)
+        XCTAssertEqual(audit.targetType, "deployment")
+        XCTAssertEqual(audit.action, "deploy")
+        XCTAssertEqual(audit.status, "failed")
+        XCTAssertEqual(audit.message, "health_check failed with exit code 1.")
+    }
+
+    func testRollbackDeploymentPersistsRemoteChangeAudit() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = DeploymentWorkspaceMockSSHClient()
+        let runner = DeploymentRunner(
+            repository: repository,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        viewModel.startNewDeploymentProject(serverId: profile.id)
+        viewModel.deploymentName = "API"
+        viewModel.deploymentRepositoryURL = "git@gitlab.com:hhc/api.git"
+        viewModel.deploymentBranch = "main"
+        viewModel.deploymentPath = "/srv/api"
+        viewModel.runDeployment(
+            profile: profile,
+            sshClient: client,
+            deploymentRunner: runner,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isRunningDeployment == false && viewModel.selectedDeploymentRun?.status == .succeeded }
+
+        viewModel.rollbackDeployment(
+            profile: profile,
+            sshClient: client,
+            deploymentRunner: runner,
+            repository: repository
+        )
+        try await waitUntil {
+            viewModel.isRunningDeployment == false &&
+                viewModel.selectedDeploymentRun?.triggerType == .rollback
+        }
+
+        XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'abc1234'") })
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        let audit = try XCTUnwrap(logs.first { $0.action == "rollback" })
+        XCTAssertEqual(audit.targetType, "deployment")
+        XCTAssertEqual(audit.targetId, viewModel.selectedDeploymentProject?.id.uuidString)
+        XCTAssertEqual(audit.status, "succeeded")
+        XCTAssertTrue(audit.beforeSnapshot?.contains("commit=def4567") == true)
+        XCTAssertTrue(audit.afterSnapshot?.contains("commit=def4567") == true)
+        XCTAssertTrue(audit.message?.contains("Rollback completed") == true)
     }
 
     func testRunDeploymentStopsWorkspaceFlowAfterBuildFailure() async throws {
@@ -2482,10 +2539,10 @@ private final class DeploymentWorkspaceMockSSHClient: SSHClient, @unchecked Send
             return CommandResult(command: command, stdout: "", stderr: "\(step) failed", exitCode: 1, duration: 0.1)
         }
         if command.contains("if [ -d") && command.contains("git rev-parse HEAD") {
-            return CommandResult(command: command, stdout: "abc123\n", stderr: "", exitCode: 0, duration: 0.1)
+            return CommandResult(command: command, stdout: "abc1234\n", stderr: "", exitCode: 0, duration: 0.1)
         }
         if command.contains("git rev-parse HEAD") {
-            return CommandResult(command: command, stdout: "def456\n", stderr: "", exitCode: 0, duration: 0.1)
+            return CommandResult(command: command, stdout: "def4567\n", stderr: "", exitCode: 0, duration: 0.1)
         }
         return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0.1)
     }

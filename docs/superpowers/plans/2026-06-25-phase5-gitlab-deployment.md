@@ -123,6 +123,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] 健康检查命令失败时标记部署失败。
 - [x] 支持用户复制日志：当前 UI 日志和命令预览支持文本选择复制。
 - [x] 运行中自动刷新部署 run/log，日志区域显示 Live 状态。
+- [x] 手动部署写入远程变更审计：部署结束后记录 `remote_change_logs`，包含 project target、deploy action、状态、摘要，以及 previous/target commit 快照；失败状态同样记录。
 
 ### Task 5：回滚
 
@@ -131,6 +132,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] 回滚也记录独立 run。
 - [x] 没有 previous commit 时禁用回滚。
 - [x] 回滚前复用统一风险确认，展示目标 commit、命令预览、影响和恢复说明。
+- [x] 回滚写入远程变更审计：rollback run 完成或失败都会记录 `remote_change_logs`，包含 project target、rollback action、状态、摘要，以及回滚前后 commit 快照。
 
 ### Task 6：Webhook
 
@@ -148,6 +150,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] Deployment live log refresh 测试：已覆盖部署运行中自动读取 running run 和 plan 日志。
 - [x] Deployment workspace 验收测试：已覆盖不在白名单目录内的项目不会保存，build 失败会停止后续 restart/health check，以及 health check 失败会在工作台显示 failed 状态和 stderr 日志。
 - [x] Deployment rollback 风险确认测试：已覆盖统一风险模型的级别、审计类型、动作和命令预览。
+- [x] Deployment 远程变更审计测试：`testRunDeploymentPersistsRunLogsFromWorkspace` 覆盖成功部署审计，`testRunDeploymentShowsHealthCheckFailureInWorkspace` 覆盖失败部署审计，`testRollbackDeploymentPersistsRemoteChangeAudit` 覆盖回滚审计。
 - [x] 命令构建和目录白名单测试：已覆盖受控 clone/fetch/checkout/build/restart/health check 命令预览、危险路径拒绝、非法 branch/URL/多行命令拒绝。
 - [x] rollback 测试：已覆盖回滚 run、previous/target commit 捕获和 `git reset --hard <commit>` 命令。
 - [x] webhook secret 常量时间比较测试。

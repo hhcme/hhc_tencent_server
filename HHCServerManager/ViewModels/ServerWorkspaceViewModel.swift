@@ -1956,6 +1956,13 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.selectedDeploymentRun = run
                     self.deploymentActionMessage = run.summary
+                    self.saveDeploymentRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        project: project,
+                        run: run,
+                        action: "deploy"
+                    )
                     self.isRunningDeployment = false
                     self.stopDeploymentLogRefresh()
                     self.reloadDeploymentRunState(project: project, runId: run.id, repository: repository)
@@ -1963,6 +1970,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.deploymentErrorMessage = error.localizedDescription
+                    self.saveDeploymentRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        project: project,
+                        action: "deploy",
+                        status: "failed",
+                        message: error.localizedDescription
+                    )
                     self.isRunningDeployment = false
                     self.stopDeploymentLogRefresh()
                     self.reloadDeploymentRunState(project: project, runId: nil, repository: repository)
@@ -2003,6 +2018,13 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.selectedDeploymentRun = run
                     self.deploymentActionMessage = run.summary
+                    self.saveDeploymentRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        project: project,
+                        run: run,
+                        action: "rollback"
+                    )
                     self.isRunningDeployment = false
                     self.stopDeploymentLogRefresh()
                     self.reloadDeploymentRunState(project: project, runId: run.id, repository: repository)
@@ -2010,6 +2032,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.deploymentErrorMessage = error.localizedDescription
+                    self.saveDeploymentRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        project: project,
+                        action: "rollback",
+                        status: "failed",
+                        message: error.localizedDescription
+                    )
                     self.isRunningDeployment = false
                     self.stopDeploymentLogRefresh()
                     self.reloadDeploymentRunState(project: project, runId: nil, repository: repository)
@@ -2164,6 +2194,58 @@ final class ServerWorkspaceViewModel: ObservableObject {
         } catch {
             assertionFailure("Could not save remote change log: \(error.localizedDescription)")
         }
+    }
+
+    private func saveDeploymentRemoteChangeLog(
+        repository: ServerRepository,
+        profile: ServerProfile,
+        project: DeploymentProject,
+        run: DeploymentRun,
+        action: String
+    ) {
+        saveDeploymentRemoteChangeLog(
+            repository: repository,
+            profile: profile,
+            project: project,
+            action: action,
+            status: run.status.rawValue,
+            message: run.summary,
+            previousCommit: run.previousCommit,
+            targetCommit: run.targetCommit
+        )
+    }
+
+    private func saveDeploymentRemoteChangeLog(
+        repository: ServerRepository,
+        profile: ServerProfile,
+        project: DeploymentProject,
+        action: String,
+        status: String,
+        message: String?,
+        previousCommit: String? = nil,
+        targetCommit: String? = nil
+    ) {
+        saveRemoteChangeLog(
+            repository: repository,
+            profile: profile,
+            targetType: "deployment",
+            targetId: project.id.uuidString,
+            action: action,
+            beforeSnapshot: deploymentSnapshot(project: project, commit: previousCommit),
+            afterSnapshot: deploymentSnapshot(project: project, commit: targetCommit),
+            status: status,
+            message: message
+        )
+    }
+
+    private func deploymentSnapshot(project: DeploymentProject, commit: String?) -> String {
+        [
+            "project=\(project.name)",
+            "repository=\(project.repositoryURL)",
+            "branch=\(project.branch)",
+            "path=\(project.deployPath)",
+            "commit=\(commit ?? "unknown")"
+        ].joined(separator: "\n")
     }
 
     private static func systemdSnapshot(_ unit: SystemdUnit) -> String {
