@@ -115,8 +115,8 @@ CREATE TABLE environment_profiles (
 
 ### Task 5：防火墙
 
-- [ ] 探测 ufw/firewalld/iptables。
-- [ ] 展示规则。
+- [x] 探测 ufw/firewalld/iptables/nftables：当前只读探测 firewalld、ufw、nftables、iptables，并处理 firewalld 安装但未运行的状态。
+- [x] 展示规则：当前展示后端状态和原始规则输出。
 - [ ] 支持有限新增/删除规则。
 - [ ] 高风险规则二次确认。
 
@@ -132,7 +132,7 @@ CREATE TABLE environment_profiles (
 - [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验、Cron 解析和 crontab 写入内容、Nginx 配置列表解析和路径校验。
 - [ ] 风险确认 ViewModel 测试。
 - [x] Nginx 配置测试/回滚逻辑测试：已覆盖配置保存、保存前备份、`nginx -t`、测试失败回滚、测试通过后 reload 和审计日志写入。
-- [ ] Firewall adapter 能力探测测试。
+- [x] Firewall adapter 能力探测测试：已覆盖 firewalld、ufw、nftables、iptables 解析和 firewalld 未运行状态。
 - [x] RemoteChangeLogStore 测试：已覆盖保存、倒序查询、按 server 过滤和 server 删除后的 SET NULL。
 
 ### Task 8：手动验收
@@ -142,6 +142,7 @@ CREATE TABLE environment_profiles (
 - [ ] 新增安全组规则前显示预览和确认。
 - [ ] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，重启操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
 - [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，真实配置写入/reload 待谨慎手动验收。
+- [x] 防火墙后端只读探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作待后续谨慎验收。
 - [ ] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，禁用/恢复写操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
 - [ ] 所有写操作可在操作日志中查到。
 

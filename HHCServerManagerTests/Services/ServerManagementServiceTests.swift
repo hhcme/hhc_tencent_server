@@ -354,6 +354,45 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(client.configs["/www/server/nginx/conf/nginx.conf"], "user nginx;\n")
     }
 
+    func testFirewallManagerParsesAndLoadsSupportedBackends() async throws {
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let parsed = try FirewallManager.parseSnapshot("""
+        __HHC_FIREWALL_BACKEND__
+        ufw
+        __HHC_FIREWALL_STATUS__
+        Status: active
+        __HHC_FIREWALL_RULES__
+        Status: active
+        22/tcp ALLOW Anywhere
+        """, capturedAt: capturedAt)
+        XCTAssertEqual(parsed.backend, .ufw)
+        XCTAssertEqual(parsed.status, "Status: active")
+        XCTAssertTrue(parsed.rulesText.contains("22/tcp"))
+
+        let profile = makeServiceTestProfile()
+        let client = RecordingFirewallSSHClient()
+        let manager = FirewallManager(now: { capturedAt })
+
+        var snapshot = try await manager.loadSnapshot(profile: profile, sshClient: client)
+        XCTAssertEqual(snapshot.backend, .firewalld)
+        XCTAssertEqual(snapshot.status, "running")
+        XCTAssertTrue(snapshot.rulesText.contains("public"))
+        XCTAssertTrue(client.commands[0].contains("firewall-cmd --list-all-zones 2>&1 || true"))
+
+        client.firewalldRunning = false
+        snapshot = try await manager.loadSnapshot(profile: profile, sshClient: client)
+        XCTAssertEqual(snapshot.backend, .firewalld)
+        XCTAssertEqual(snapshot.status, "not running")
+        XCTAssertTrue(snapshot.rulesText.contains("FirewallD is not running"))
+
+        client.backend = .nft
+        snapshot = try await manager.loadSnapshot(profile: profile, sshClient: client)
+        XCTAssertEqual(snapshot.backend, .nft)
+        XCTAssertTrue(snapshot.rulesText.contains("table inet filter"))
+
+        XCTAssertThrowsError(try FirewallManager.parseSnapshot("bad", capturedAt: capturedAt))
+    }
+
     func testDashboardServiceAppendsCloudMetricsWhenLinked() async throws {
         let harness = try Harness(adapters: [
             MockCloudProviderAdapter(
@@ -1304,6 +1343,94 @@ private final class RecordingNginxSSHClient: SSHClient, @unchecked Sendable {
         else { return nil }
         return String(command[start.upperBound..<end.lowerBound])
     }
+}
+
+private final class RecordingFirewallSSHClient: SSHClient, @unchecked Sendable {
+    var backend: FirewallBackend = .firewalld
+    var firewalldRunning = true
+    private(set) var commands: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        switch backend {
+        case .firewalld:
+            return CommandResult(
+                command: command,
+                stdout: firewalldRunning ? """
+                __HHC_FIREWALL_BACKEND__
+                firewalld
+                __HHC_FIREWALL_STATUS__
+                running
+                __HHC_FIREWALL_RULES__
+                public
+                  services: ssh http https
+                """ : """
+                __HHC_FIREWALL_BACKEND__
+                firewalld
+                __HHC_FIREWALL_STATUS__
+                not running
+                __HHC_FIREWALL_RULES__
+                FirewallD is not running
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        case .ufw:
+            return CommandResult(
+                command: command,
+                stdout: """
+                __HHC_FIREWALL_BACKEND__
+                ufw
+                __HHC_FIREWALL_STATUS__
+                Status: active
+                __HHC_FIREWALL_RULES__
+                Status: active
+                22/tcp ALLOW Anywhere
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        case .nft:
+            return CommandResult(
+                command: command,
+                stdout: """
+                __HHC_FIREWALL_BACKEND__
+                nft
+                __HHC_FIREWALL_STATUS__
+                installed
+                __HHC_FIREWALL_RULES__
+                table inet filter { chain input { type filter hook input priority 0; } }
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        case .iptables:
+            return CommandResult(
+                command: command,
+                stdout: """
+                __HHC_FIREWALL_BACKEND__
+                iptables
+                __HHC_FIREWALL_STATUS__
+                installed
+                __HHC_FIREWALL_RULES__
+                -P INPUT ACCEPT
+                -A INPUT -p tcp --dport 22 -j ACCEPT
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
 }
 
 private final class RecordingTransferClient: RemoteFileTransferClient, @unchecked Sendable {

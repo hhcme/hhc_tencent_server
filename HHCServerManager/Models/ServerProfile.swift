@@ -223,6 +223,35 @@ struct NginxConfigSaveResult: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+enum FirewallBackend: String, CaseIterable, Identifiable, Sendable {
+    case firewalld
+    case ufw
+    case nft
+    case iptables
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .firewalld:
+            "firewalld"
+        case .ufw:
+            "ufw"
+        case .nft:
+            "nftables"
+        case .iptables:
+            "iptables"
+        }
+    }
+}
+
+struct FirewallSnapshot: Equatable, Hashable, Sendable {
+    var backend: FirewallBackend
+    var status: String
+    var rulesText: String
+    var capturedAt: Date
+}
+
 enum RemoteFileKind: String, Equatable, Hashable {
     case directory
     case file

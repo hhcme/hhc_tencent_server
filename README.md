@@ -17,7 +17,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - Credentials stored in macOS Keychain.
 - Host key verification as a first-class security requirement.
 - Server browser, dedicated server workspace, real smoke test, simplified command panel, and command metadata history are underway.
-- Dashboard auto-refresh, SSH metrics, linked Tencent Cloud CVM CPU metrics, remote file browsing, lightweight text editing with Save As, permission changes, queued single-file upload/download, systemd Services, Cron management, and guarded Nginx config edit/test/reload are underway.
+- Dashboard auto-refresh, SSH metrics, linked Tencent Cloud CVM CPU metrics, remote file browsing, lightweight text editing with Save As, permission changes, queued single-file upload/download, systemd Services, Cron management, guarded Nginx config edit/test/reload, and read-only Firewall inspection are underway.
 - Cloud account metadata and cloud credential storage foundation are in place.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper are in place.
 - Tencent Cloud adapter now includes TC3 request signing plus Region, CVM instance query parsing, and Cloud Monitor CPU metric query support.
@@ -29,7 +29,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - SSH 密码、私钥等敏感信息存入 macOS Keychain。
 - 把主机指纹验证作为基础安全能力。
 - 服务器列表、单服务器工作台、真实 smoke test、简化命令面板和命令元数据历史已进入实现。
-- Dashboard 自动刷新、SSH 指标、已关联腾讯云 CVM 的 CPU 云监控指标、远程文件浏览、带另存为的轻量文本编辑、权限修改、排队单文件上传/下载、systemd Services、Cron 管理和受保护的 Nginx 配置编辑/测试/reload 已进入实现。
+- Dashboard 自动刷新、SSH 指标、已关联腾讯云 CVM 的 CPU 云监控指标、远程文件浏览、带另存为的轻量文本编辑、权限修改、排队单文件上传/下载、systemd Services、Cron 管理、受保护的 Nginx 配置编辑/测试/reload 和只读防火墙查看已进入实现。
 - 云账号元数据和云凭据存储基础已经落地。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装已经落地。
 - 腾讯云 adapter 已包含 TC3 请求签名、地域查询、CVM 实例查询解析和云监控 CPU 指标查询。

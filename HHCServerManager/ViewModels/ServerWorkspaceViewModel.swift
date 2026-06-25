@@ -46,6 +46,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isReloadingNginx = false
     @Published var nginxErrorMessage: String?
     @Published var nginxActionMessage: String?
+    @Published var firewallSnapshot: FirewallSnapshot?
+    @Published var isLoadingFirewall = false
+    @Published var firewallErrorMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -1034,6 +1037,30 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.nginxErrorMessage = error.localizedDescription
                     self.isReloadingNginx = false
+                }
+            }
+        }
+    }
+
+    func loadFirewallSnapshot(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        firewallManager: FirewallManager
+    ) {
+        isLoadingFirewall = true
+        firewallErrorMessage = nil
+
+        Task {
+            do {
+                let snapshot = try await firewallManager.loadSnapshot(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.firewallSnapshot = snapshot
+                    self.isLoadingFirewall = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.firewallErrorMessage = error.localizedDescription
+                    self.isLoadingFirewall = false
                 }
             }
         }

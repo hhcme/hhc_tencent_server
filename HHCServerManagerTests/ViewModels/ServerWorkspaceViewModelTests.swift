@@ -727,6 +727,21 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(updatedLogs.map(\.status).prefix(3), ["failed", "success", "success"])
     }
 
+    func testFirewallSnapshotLoads() async throws {
+        let profile = makeProfile()
+        let client = FirewallViewModelMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let manager = FirewallManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadFirewallSnapshot(profile: profile, sshClient: client, firewallManager: manager)
+        try await waitUntil { viewModel.isLoadingFirewall == false && viewModel.firewallSnapshot != nil }
+
+        XCTAssertEqual(viewModel.firewallSnapshot?.backend, .iptables)
+        XCTAssertEqual(viewModel.firewallSnapshot?.status, "installed")
+        XCTAssertTrue(viewModel.firewallSnapshot?.rulesText.contains("--dport 22") == true)
+        XCTAssertNil(viewModel.firewallErrorMessage)
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -1322,4 +1337,30 @@ private final class NginxViewModelMockSSHClient: SSHClient, @unchecked Sendable 
         else { return nil }
         return String(command[start.upperBound..<end.lowerBound])
     }
+}
+
+private final class FirewallViewModelMockSSHClient: SSHClient, @unchecked Sendable {
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        CommandResult(
+            command: command,
+            stdout: """
+            __HHC_FIREWALL_BACKEND__
+            iptables
+            __HHC_FIREWALL_STATUS__
+            installed
+            __HHC_FIREWALL_RULES__
+            -P INPUT ACCEPT
+            -A INPUT -p tcp --dport 22 -j ACCEPT
+            """,
+            stderr: "",
+            exitCode: 0,
+            duration: 0
+        )
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
 }

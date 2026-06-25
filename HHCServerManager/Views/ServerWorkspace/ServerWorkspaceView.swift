@@ -34,6 +34,8 @@ struct ServerWorkspaceView: View {
                     .tag("services")
                 Label("Nginx", systemImage: "network")
                     .tag("nginx")
+                Label("Firewall", systemImage: "firewall")
+                    .tag("firewall")
                 Label("Cron", systemImage: "calendar.badge.clock")
                     .tag("cron")
                 Label("Cloud", systemImage: "cloud")
@@ -228,6 +230,8 @@ struct ServerWorkspaceView: View {
             servicesPanel
         case "nginx":
             nginxPanel
+        case "firewall":
+            firewallPanel
         case "cron":
             cronPanel
         default:
@@ -1040,6 +1044,87 @@ struct ServerWorkspaceView: View {
         .padding(20)
     }
 
+    private var firewallPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Firewall")
+                        .font(.title2.weight(.semibold))
+                    Spacer()
+                    Button {
+                        viewModel.loadFirewallSnapshot(
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            firewallManager: appState.firewallManager
+                        )
+                    } label: {
+                        if viewModel.isLoadingFirewall {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isLoadingFirewall)
+                }
+
+                if let capturedAt = viewModel.firewallSnapshot?.capturedAt {
+                    Text("Last updated \(capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = viewModel.firewallErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(20)
+
+            Divider()
+
+            if let snapshot = viewModel.firewallSnapshot {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 12) {
+                        FirewallSummaryTile(title: "Backend", value: snapshot.backend.displayName, systemImage: "shield")
+                        FirewallSummaryTile(title: "Status", value: snapshot.status, systemImage: "checkmark.shield")
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Rules")
+                            .font(.headline)
+                        ScrollView {
+                            Text(snapshot.rulesText)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                        }
+                        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+                .padding(20)
+            } else {
+                ContentUnavailableView(
+                    "No Firewall Rules Loaded",
+                    systemImage: "firewall",
+                    description: Text("Refresh to detect ufw, firewalld, nftables, or iptables on the remote server.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onAppear {
+            if viewModel.firewallSnapshot == nil && !viewModel.isLoadingFirewall {
+                viewModel.loadFirewallSnapshot(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    firewallManager: appState.firewallManager
+                )
+            }
+        }
+    }
+
     private var cronPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1581,6 +1666,35 @@ private struct NginxConfigRow: View {
             parts.append(modifiedAt.formatted(date: .abbreviated, time: .shortened))
         }
         return parts.isEmpty ? "config" : parts.joined(separator: " · ")
+    }
+}
+
+private struct FirewallSummaryTile: View {
+    let title: String
+    let value: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.blue)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value.isEmpty ? "unknown" : value)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+
+            Spacer()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

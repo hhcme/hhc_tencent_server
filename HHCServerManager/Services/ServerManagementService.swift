@@ -959,6 +959,75 @@ final class NginxConfigManager: @unchecked Sendable {
     }
 }
 
+final class FirewallManager: @unchecked Sendable {
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func loadSnapshot(profile: ServerProfile, sshClient: SSHClient) async throws -> FirewallSnapshot {
+        let command = """
+        if command -v firewall-cmd >/dev/null 2>&1; then \
+        printf '__HHC_FIREWALL_BACKEND__\\nfirewalld\\n__HHC_FIREWALL_STATUS__\\n'; \
+        firewall-cmd --state 2>&1 || true; \
+        printf '__HHC_FIREWALL_RULES__\\n'; \
+        firewall-cmd --list-all-zones 2>&1 || true; \
+        elif command -v ufw >/dev/null 2>&1; then \
+        printf '__HHC_FIREWALL_BACKEND__\\nufw\\n__HHC_FIREWALL_STATUS__\\n'; \
+        ufw status 2>&1 | sed -n '1p'; \
+        printf '__HHC_FIREWALL_RULES__\\n'; \
+        ufw status verbose 2>&1 || true; \
+        elif command -v nft >/dev/null 2>&1; then \
+        printf '__HHC_FIREWALL_BACKEND__\\nnft\\n__HHC_FIREWALL_STATUS__\\ninstalled\\n__HHC_FIREWALL_RULES__\\n'; \
+        nft list ruleset 2>&1 || true; \
+        elif command -v iptables >/dev/null 2>&1; then \
+        printf '__HHC_FIREWALL_BACKEND__\\niptables\\n__HHC_FIREWALL_STATUS__\\ninstalled\\n__HHC_FIREWALL_RULES__\\n'; \
+        iptables -S 2>&1 || true; \
+        else exit 3; fi
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(12) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            if result.exitCode == 3 {
+                throw SSHClientError.processFailed("No supported firewall backend was found.")
+            }
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not read firewall rules.")
+        }
+        return try Self.parseSnapshot(result.stdout, capturedAt: now())
+    }
+
+    static func parseSnapshot(_ text: String, capturedAt: Date) throws -> FirewallSnapshot {
+        guard let backendText = section("__HHC_FIREWALL_BACKEND__", in: text).firstLine,
+              let backend = FirewallBackend(rawValue: backendText.trimmed)
+        else {
+            throw SSHClientError.processFailed("Could not parse firewall backend.")
+        }
+        let status = section("__HHC_FIREWALL_STATUS__", in: text)
+            .trimmed
+            .nilIfEmpty ?? "unknown"
+        let rules = section("__HHC_FIREWALL_RULES__", in: text)
+            .trimmed
+            .nilIfEmpty ?? "(empty)"
+        return FirewallSnapshot(
+            backend: backend,
+            status: status,
+            rulesText: rules,
+            capturedAt: capturedAt
+        )
+    }
+
+    private static func section(_ marker: String, in text: String) -> String {
+        guard let start = text.range(of: "\(marker)\n") else { return "" }
+        let remaining = text[start.upperBound...]
+        if let end = remaining.range(of: "\n__HHC_FIREWALL_") {
+            return String(remaining[..<end.lowerBound])
+        }
+        return String(remaining)
+    }
+}
+
 final class RemoteFileService: @unchecked Sendable {
     static let maxEditableTextBytes = 256 * 1024
 
@@ -1892,6 +1961,12 @@ private struct TencentVirtualPrivateCloud: Decodable {
 private extension String {
     var trimmed: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var firstLine: String? {
+        split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            .first
+            .map(String.init)
     }
 
     var nilIfEmpty: String? {

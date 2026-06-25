@@ -56,6 +56,7 @@ All notable changes to this project will be documented in this file.
 - Added `remote_change_logs` persistence for remote environment changes and wired systemd/Cron write actions to before/after/status audit records.
 - Added Nginx workspace foundations with dynamic config path discovery, config file reading, `nginx -t`, confirmed reload, audit logging, tests, and read-only real-server validation against a non-`/etc/nginx` install.
 - Added guarded Nginx config editing with remote backup, `nginx -t` after save, automatic rollback on test failure, UI confirmation, and audit coverage.
+- Added read-only Firewall workspace foundations with backend detection for firewalld, ufw, nftables, and iptables, rules display, tests, and inactive firewalld handling.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -107,3 +108,4 @@ All notable changes to this project will be documented in this file.
 - 添加 `remote_change_logs` 远程变更持久化，并将 systemd/Cron 写操作接入 before/after/status 审计记录。
 - 添加 Nginx 工作台基础，支持动态探测配置路径、读取配置文件、执行 `nginx -t`、确认后 reload、审计日志、测试，并在非 `/etc/nginx` 安装路径的真实服务器上完成只读验证。
 - 添加受保护的 Nginx 配置编辑，支持远端备份、保存后执行 `nginx -t`、测试失败自动回滚、UI 二次确认和审计覆盖。
+- 添加只读防火墙工作台基础，支持 firewalld、ufw、nftables、iptables 后端探测、规则展示、测试和 firewalld 未运行状态处理。
