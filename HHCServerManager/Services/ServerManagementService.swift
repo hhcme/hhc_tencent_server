@@ -6745,6 +6745,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .snapshotActions,
         .diskAttachmentActions,
         .powerActions,
+        .cloudMetrics,
     ]
 
     private let transport: HuaweiCloudHTTPTransport
@@ -6827,7 +6828,37 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     }
 
     func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudMetrics)
+        let region = Self.decodeRegionId(query.regionId)
+        let response: HuaweiMetricDataResponse = try await request(
+            credential: credential,
+            host: "ces.\(region.regionName).myhuaweicloud.com",
+            path: "/V1.0/\(CloudSignature.percentEncode(region.projectId))/metric-data",
+            queryItems: [
+                URLQueryItem(name: "namespace", value: Self.huaweiMetricNamespace(query.namespace)),
+                URLQueryItem(name: "metric_name", value: Self.huaweiMetricName(query.metricName)),
+                URLQueryItem(name: "dim.0", value: "instance_id,\(query.instanceId)"),
+                URLQueryItem(name: "filter", value: "average"),
+                URLQueryItem(name: "period", value: "\(query.period)"),
+                URLQueryItem(name: "from", value: "\(Self.millisecondsSince1970(query.startTime))"),
+                URLQueryItem(name: "to", value: "\(Self.millisecondsSince1970(query.endTime))"),
+            ]
+        )
+        let samples = response.datapoints
+            .sorted { $0.timestamp < $1.timestamp }
+            .compactMap { datapoint -> (timestamp: Int64, value: Double)? in
+                guard let value = datapoint.average ?? datapoint.sum ?? datapoint.max ?? datapoint.min else {
+                    return nil
+                }
+                return (datapoint.timestamp, value)
+            }
+        return CloudMetricSeries(
+            metricName: query.metricName,
+            instanceId: query.instanceId,
+            regionId: query.regionId,
+            unit: samples.isEmpty ? nil : (response.datapoints.first(where: { $0.unit != nil })?.unit ?? "%"),
+            values: samples.map(\.value),
+            timestamps: samples.map { Date(timeIntervalSince1970: TimeInterval($0.timestamp) / 1_000) }
+        )
     }
 
     func fetchSecurityGroups(
@@ -7366,6 +7397,18 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         return formatter.string(from: date)
     }
 
+    private static func millisecondsSince1970(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1_000).rounded())
+    }
+
+    private static func huaweiMetricNamespace(_ namespace: String) -> String {
+        namespace == "QCE/CVM" ? "SYS.ECS" : namespace
+    }
+
+    private static func huaweiMetricName(_ metricName: String) -> String {
+        metricName == "CPUUsage" ? "cpu_util" : metricName
+    }
+
     private static func mapHuaweiSecurityGroupRules(
         _ rules: [HuaweiSecurityGroupRule],
         direction: CloudSecurityGroupRuleDirection
@@ -7901,6 +7944,70 @@ private struct HuaweiVolumesDetailResponse: Decodable {
 
 private struct HuaweiSnapshotsDetailResponse: Decodable {
     var snapshots: [HuaweiSnapshot]
+}
+
+private struct HuaweiMetricDataResponse: Decodable {
+    var datapoints: [HuaweiMetricDatapoint]
+
+    enum CodingKeys: String, CodingKey {
+        case datapoints = "datapoints"
+    }
+}
+
+private struct HuaweiMetricDatapoint: Decodable {
+    var average: Double?
+    var max: Double?
+    var min: Double?
+    var sum: Double?
+    var timestamp: Int64
+    var unit: String?
+
+    enum CodingKeys: String, CodingKey {
+        case average
+        case max
+        case min
+        case sum
+        case timestamp
+        case unit
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        average = try container.decodeFlexibleDoubleIfPresent(forKey: .average)
+        max = try container.decodeFlexibleDoubleIfPresent(forKey: .max)
+        min = try container.decodeFlexibleDoubleIfPresent(forKey: .min)
+        sum = try container.decodeFlexibleDoubleIfPresent(forKey: .sum)
+        timestamp = try container.decodeFlexibleInt64IfPresent(forKey: .timestamp) ?? 0
+        unit = try container.decodeIfPresent(String.self, forKey: .unit)
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeFlexibleDoubleIfPresent(forKey key: Key) throws -> Double? {
+        if let double = try? decodeIfPresent(Double.self, forKey: key) {
+            return double
+        }
+        if let int = try? decodeIfPresent(Int.self, forKey: key) {
+            return Double(int)
+        }
+        if let string = try? decodeIfPresent(String.self, forKey: key), let double = Double(string) {
+            return double
+        }
+        return nil
+    }
+
+    func decodeFlexibleInt64IfPresent(forKey key: Key) throws -> Int64? {
+        if let int64 = try? decodeIfPresent(Int64.self, forKey: key) {
+            return int64
+        }
+        if let int = try? decodeIfPresent(Int.self, forKey: key) {
+            return Int64(int)
+        }
+        if let string = try? decodeIfPresent(String.self, forKey: key), let int64 = Int64(string) {
+            return int64
+        }
+        return nil
+    }
 }
 
 private struct HuaweiCreateSnapshotPayload: Encodable {

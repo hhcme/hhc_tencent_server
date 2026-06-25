@@ -4760,6 +4760,65 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(rebootServers.first?["id"] as? String, "server-1")
     }
 
+    func testHuaweiCloudAdapterFetchesMetricSeriesUsesCESAPI() async throws {
+        let startTime = Date(timeIntervalSince1970: 1_700_000_000)
+        let endTime = Date(timeIntervalSince1970: 1_700_000_600)
+        let transport = MockHuaweiCloudTransport(responses: [
+            """
+            {
+              "datapoints": [
+                {"timestamp": 1700000600000, "average": 35.25, "unit": "%"},
+                {"timestamp": "1700000300000", "average": "30.5", "unit": "%"}
+              ]
+            }
+            """,
+        ])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { startTime },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        let series = try await adapter.fetchMetricSeries(
+            credential: credential,
+            query: CloudMetricQuery(
+                namespace: "QCE/CVM",
+                metricName: "CPUUsage",
+                instanceId: "server-1",
+                regionId: "ap-southeast-1|project-1",
+                period: 300,
+                startTime: startTime,
+                endTime: endTime
+            )
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.cloudMetrics))
+        XCTAssertEqual(series.metricName, "CPUUsage")
+        XCTAssertEqual(series.instanceId, "server-1")
+        XCTAssertEqual(series.regionId, "ap-southeast-1|project-1")
+        XCTAssertEqual(series.unit, "%")
+        XCTAssertEqual(series.values, [30.5, 35.25])
+        XCTAssertEqual(series.timestamps, [
+            Date(timeIntervalSince1970: 1_700_000_300),
+            Date(timeIntervalSince1970: 1_700_000_600),
+        ])
+
+        XCTAssertEqual(transport.requests.count, 1)
+        XCTAssertEqual(transport.requests[0].httpMethod, "GET")
+        XCTAssertEqual(transport.requests[0].url?.host, "ces.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[0].url?.path, "/V1.0/project-1/metric-data")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-Sdk-Date"), "20231114T221320Z")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("SDK-HMAC-SHA256 Access=HUAWEIAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("namespace"), "SYS.ECS")
+        XCTAssertEqual(transport.requests[0].queryValue("metric_name"), "cpu_util")
+        XCTAssertEqual(transport.requests[0].queryValue("dim.0"), "instance_id,server-1")
+        XCTAssertEqual(transport.requests[0].queryValue("filter"), "average")
+        XCTAssertEqual(transport.requests[0].queryValue("period"), "300")
+        XCTAssertEqual(transport.requests[0].queryValue("from"), "1700000000000")
+        XCTAssertEqual(transport.requests[0].queryValue("to"), "1700000600000")
+    }
+
     func testHuaweiCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedVPCAPI() async throws {
         let accountId = UUID()
         let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
