@@ -60,6 +60,30 @@ struct CommandResult: Equatable, Hashable {
     var duration: TimeInterval
 }
 
+struct ServerCapabilities: Equatable, Hashable {
+    var osName: String?
+    var osVersion: String?
+    var kernelVersion: String?
+    var hasProc: Bool
+    var hasSystemd: Bool
+    var hasSFTP: Bool
+    var detectedAt: Date
+}
+
+struct DashboardMetric: Identifiable, Equatable, Hashable {
+    var id: String { name }
+    var name: String
+    var value: String
+    var unit: String?
+    var source: String
+}
+
+struct ServerDashboardSnapshot: Equatable, Hashable {
+    var capabilities: ServerCapabilities
+    var metrics: [DashboardMetric]
+    var capturedAt: Date
+}
+
 struct CommandHistoryEntry: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var serverId: UUID

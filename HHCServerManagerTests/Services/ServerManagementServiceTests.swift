@@ -193,6 +193,28 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
+        let os = DashboardService.parseOSRelease("""
+        NAME="Ubuntu"
+        VERSION_ID="24.04"
+        PRETTY_NAME="Ubuntu 24.04.2 LTS"
+        """)
+        XCTAssertEqual(os.name, "Ubuntu 24.04.2 LTS")
+        XCTAssertEqual(os.version, "24.04")
+        XCTAssertTrue(DashboardService.parseYesNo("yes\n"))
+        XCTAssertEqual(DashboardService.parseLoadAverage("0.10 0.20 0.30 1/100 12345"), "0.10 / 0.20 / 0.30")
+        XCTAssertEqual(DashboardService.parseCPUCount("4\n"), "4")
+
+        let memory = DashboardService.parseMemoryUsage("""
+        MemTotal:        2048000 kB
+        MemAvailable:    1024000 kB
+        """)
+        XCTAssertEqual(memory, "1000 MiB / 2.0 GiB")
+
+        let disk = DashboardService.parseRootDiskUsage("/dev/vda1 20971520 10485760 10485760 50% /")
+        XCTAssertEqual(disk, "10.0 GiB / 20.0 GiB")
+    }
+
     func testCloudInstanceSyncUpsertsInstancesAndPreservesServerLink() async throws {
         let adapter = MockCloudProviderAdapter(
             providerId: .tencentCloud,

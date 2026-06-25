@@ -135,6 +135,22 @@ struct ServerWorkspaceView: View {
                     connectionBadge
 
                     Button {
+                        viewModel.refreshDashboard(
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            dashboardService: appState.dashboardService
+                        )
+                    } label: {
+                        if viewModel.isRefreshingDashboard {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Refresh Dashboard", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(viewModel.isRefreshingDashboard)
+
+                    Button {
                         viewModel.connect(profile: profile, sshClient: appState.sshClient)
                     } label: {
                         Label("Connect", systemImage: "bolt.horizontal.circle")
@@ -152,24 +168,74 @@ struct ServerWorkspaceView: View {
 
                 Divider()
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Smoke Test")
-                        .font(.headline)
-                    Text("Runs `printf hhc-ssh-ok` through the configured SSH connection.")
-                        .foregroundStyle(.secondary)
-
-                    if let result = viewModel.commandResult {
-                        CommandResultView(result: result)
-                    } else {
-                        Text("No command has run in this workspace yet.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                dashboardPanel
 
                 Spacer()
             }
             .padding(28)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var dashboardPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Dashboard")
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                if let capturedAt = viewModel.dashboardSnapshot?.capturedAt {
+                    Text(capturedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let error = viewModel.dashboardErrorMessage {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+            }
+
+            if let snapshot = viewModel.dashboardSnapshot {
+                capabilityPanel(snapshot.capabilities)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
+                    ForEach(snapshot.metrics) { metric in
+                        DashboardMetricTile(metric: metric)
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    "No Dashboard Snapshot",
+                    systemImage: "gauge.with.dots.needle.67percent",
+                    description: Text("Refresh the dashboard to collect SSH metrics and server capabilities.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+            }
+        }
+    }
+
+    private func capabilityPanel(_ capabilities: ServerCapabilities) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
+            if let osName = capabilities.osName {
+                GridRow {
+                    Text("OS").foregroundStyle(.secondary)
+                    Text(osName)
+                }
+            }
+            if let kernelVersion = capabilities.kernelVersion {
+                GridRow {
+                    Text("Kernel").foregroundStyle(.secondary)
+                    Text(kernelVersion)
+                }
+            }
+            GridRow {
+                Text("Capabilities").foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    CapabilityBadge(title: "/proc", enabled: capabilities.hasProc)
+                    CapabilityBadge(title: "systemd", enabled: capabilities.hasSystemd)
+                    CapabilityBadge(title: "sftp", enabled: capabilities.hasSFTP)
+                }
+            }
         }
     }
 
@@ -400,6 +466,46 @@ private struct CommandResultView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(isError ? Color.red.opacity(0.08) : Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
         }
+    }
+}
+
+private struct DashboardMetricTile: View {
+    let metric: DashboardMetric
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(metric.name)
+                    .font(.headline)
+                Spacer()
+                Text(metric.source)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(metric.value)
+                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            if let unit = metric.unit {
+                Text(unit)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct CapabilityBadge: View {
+    let title: String
+    let enabled: Bool
+
+    var body: some View {
+        Label(title, systemImage: enabled ? "checkmark.circle" : "minus.circle")
+            .font(.caption)
+            .foregroundStyle(enabled ? .green : .secondary)
     }
 }
 

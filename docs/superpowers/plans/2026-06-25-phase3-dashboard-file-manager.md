@@ -95,7 +95,7 @@ CREATE TABLE file_transfer_jobs (
 
 ### Task 1：能力探测
 
-- [ ] 实现 OS 和能力探测命令。
+- [x] 实现 OS 和能力探测命令。
 - [ ] 缓存探测结果。
 - [ ] 支持手动重新探测。
 - [ ] 测试 Ubuntu/Debian/CentOS/AlmaLinux 常见输出解析。
@@ -103,8 +103,9 @@ CREATE TABLE file_transfer_jobs (
 ### Task 2：SSH 指标采集
 
 - [ ] 实现 CPU、内存、磁盘、负载、网络采集。
+- [x] 实现 CPU 核心数、内存、根磁盘、负载基础采集。
 - [ ] 实现进程摘要采集。
-- [ ] 所有命令配置超时。
+- [x] Dashboard 基础采集命令配置超时。
 - [ ] 解析失败返回结构化错误。
 
 ### Task 3：云监控接入
@@ -115,8 +116,8 @@ CREATE TABLE file_transfer_jobs (
 
 ### Task 4：Dashboard UI
 
-- [ ] 实现 Dashboard ViewModel。
-- [ ] 实现指标卡片、系统信息、刷新状态。
+- [x] 实现 Dashboard ViewModel 基础刷新。
+- [x] 实现指标卡片、系统信息、刷新状态。
 - [ ] 实现错误和能力缺失提示。
 - [ ] 支持手动刷新和自动刷新开关。
 
@@ -137,9 +138,9 @@ CREATE TABLE file_transfer_jobs (
 
 ### Task 7：测试
 
-- [ ] 指标解析单元测试。
-- [ ] 能力探测测试。
-- [ ] Dashboard ViewModel 测试。
+- [x] 指标解析单元测试。
+- [x] 能力探测基础测试。
+- [x] Dashboard ViewModel 测试。
 - [ ] RemoteFileService 协议层测试。
 - [ ] 可选真实 SFTP 集成测试。
 

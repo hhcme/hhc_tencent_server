@@ -211,6 +211,28 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.persistedCommandHistory.map(\.command), ["uptime"])
     }
 
+    func testRefreshDashboardLoadsCapabilitiesAndMetrics() async throws {
+        let profile = makeProfile()
+        let client = DashboardMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.refreshDashboard(
+            profile: profile,
+            sshClient: client,
+            dashboardService: DashboardService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        )
+        try await waitUntil { viewModel.isRefreshingDashboard == false && viewModel.dashboardSnapshot != nil }
+
+        let snapshot = try XCTUnwrap(viewModel.dashboardSnapshot)
+        XCTAssertEqual(snapshot.capabilities.osName, "Ubuntu 24.04.2 LTS")
+        XCTAssertEqual(snapshot.capabilities.kernelVersion, "6.8.0")
+        XCTAssertTrue(snapshot.capabilities.hasProc)
+        XCTAssertTrue(snapshot.capabilities.hasSystemd)
+        XCTAssertTrue(snapshot.capabilities.hasSFTP)
+        XCTAssertEqual(snapshot.metrics.map(\.name), ["Load Average", "Memory", "Root Disk", "CPU Cores"])
+        XCTAssertNil(viewModel.dashboardErrorMessage)
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -325,6 +347,42 @@ private final class SlowSSHClient: SSHClient, @unchecked Sendable {
             exitCode: 0,
             duration: 5
         )
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class DashboardMockSSHClient: SSHClient, @unchecked Sendable {
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        let stdout: String
+        if command.contains("/etc/os-release") {
+            stdout = """
+            PRETTY_NAME="Ubuntu 24.04.2 LTS"
+            VERSION_ID="24.04"
+            """
+        } else if command == "uname -r" {
+            stdout = "6.8.0\n"
+        } else if command.contains("test -d /proc") || command.contains("systemctl") || command.contains("sftp") {
+            stdout = "yes\n"
+        } else if command.contains("/proc/loadavg") {
+            stdout = "0.10 0.20 0.30 1/100 12345\n"
+        } else if command.contains("/proc/meminfo") {
+            stdout = """
+            MemTotal:        2048000 kB
+            MemAvailable:    1024000 kB
+            """
+        } else if command.contains("df -kP") {
+            stdout = "/dev/vda1 20971520 10485760 10485760 50% /\n"
+        } else if command.contains("_NPROCESSORS_ONLN") {
+            stdout = "4\n"
+        } else {
+            stdout = ""
+        }
+        return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}

@@ -5,6 +5,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isRunningSmokeTest = false
     @Published var isRunningCommand = false
     @Published var connectionState: SSHConnectionState = .disconnected
+    @Published var isRefreshingDashboard = false
+    @Published var dashboardSnapshot: ServerDashboardSnapshot?
+    @Published var dashboardErrorMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -38,6 +41,30 @@ final class ServerWorkspaceViewModel: ObservableObject {
             persistedCommandHistory = try repository.fetchCommandHistory(serverId: profile.id)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshDashboard(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        dashboardService: DashboardService
+    ) {
+        isRefreshingDashboard = true
+        dashboardErrorMessage = nil
+
+        Task {
+            do {
+                let snapshot = try await dashboardService.loadSnapshot(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.dashboardSnapshot = snapshot
+                    self.isRefreshingDashboard = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.dashboardErrorMessage = error.localizedDescription
+                    self.isRefreshingDashboard = false
+                }
+            }
         }
     }
 

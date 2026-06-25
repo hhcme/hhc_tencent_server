@@ -261,6 +261,126 @@ final class CloudInstanceSyncService: @unchecked Sendable {
     }
 }
 
+final class DashboardService: @unchecked Sendable {
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func loadSnapshot(profile: ServerProfile, sshClient: SSHClient) async throws -> ServerDashboardSnapshot {
+        async let osRelease = runDashboardCommand("cat /etc/os-release 2>/dev/null || true", profile: profile, sshClient: sshClient)
+        async let kernel = runDashboardCommand("uname -r", profile: profile, sshClient: sshClient)
+        async let proc = runDashboardCommand("test -d /proc && echo yes || echo no", profile: profile, sshClient: sshClient)
+        async let systemd = runDashboardCommand("command -v systemctl >/dev/null 2>&1 && echo yes || echo no", profile: profile, sshClient: sshClient)
+        async let sftp = runDashboardCommand("command -v sftp >/dev/null 2>&1 && echo yes || echo no", profile: profile, sshClient: sshClient)
+        async let loadavg = runDashboardCommand("cat /proc/loadavg 2>/dev/null || true", profile: profile, sshClient: sshClient)
+        async let meminfo = runDashboardCommand("cat /proc/meminfo 2>/dev/null || true", profile: profile, sshClient: sshClient)
+        async let disk = runDashboardCommand("df -kP / 2>/dev/null | tail -1 || true", profile: profile, sshClient: sshClient)
+        async let cpu = runDashboardCommand("getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0", profile: profile, sshClient: sshClient)
+
+        let osReleaseResult = try await osRelease
+        let os = Self.parseOSRelease(osReleaseResult.stdout)
+        let kernelResult = try await kernel
+        let procResult = try await proc
+        let systemdResult = try await systemd
+        let sftpResult = try await sftp
+        let loadavgResult = try await loadavg
+        let meminfoResult = try await meminfo
+        let diskResult = try await disk
+        let cpuResult = try await cpu
+
+        let detectedAt = now()
+        let capabilities = ServerCapabilities(
+            osName: os.name,
+            osVersion: os.version,
+            kernelVersion: kernelResult.stdout.trimmed.nilIfEmpty,
+            hasProc: Self.parseYesNo(procResult.stdout),
+            hasSystemd: Self.parseYesNo(systemdResult.stdout),
+            hasSFTP: Self.parseYesNo(sftpResult.stdout),
+            detectedAt: detectedAt
+        )
+
+        var metrics: [DashboardMetric] = []
+        if let load = Self.parseLoadAverage(loadavgResult.stdout) {
+            metrics.append(DashboardMetric(name: "Load Average", value: load, unit: "1m 5m 15m", source: "SSH"))
+        }
+        if let memory = Self.parseMemoryUsage(meminfoResult.stdout) {
+            metrics.append(DashboardMetric(name: "Memory", value: memory, unit: nil, source: "SSH"))
+        }
+        if let disk = Self.parseRootDiskUsage(diskResult.stdout) {
+            metrics.append(DashboardMetric(name: "Root Disk", value: disk, unit: nil, source: "SSH"))
+        }
+        if let cpuCount = Self.parseCPUCount(cpuResult.stdout) {
+            metrics.append(DashboardMetric(name: "CPU Cores", value: cpuCount, unit: "online", source: "SSH"))
+        }
+
+        return ServerDashboardSnapshot(capabilities: capabilities, metrics: metrics, capturedAt: detectedAt)
+    }
+
+    private func runDashboardCommand(
+        _ command: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> CommandResult {
+        try await CloudProviderRequestRunner.withTimeout(8) {
+            try await sshClient.execute(command, profile: profile)
+        }
+    }
+
+    static func parseOSRelease(_ text: String) -> (name: String?, version: String?) {
+        let values = Dictionary(uniqueKeysWithValues: text.split(separator: "\n").compactMap { line -> (String, String)? in
+            let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { return nil }
+            return (parts[0], parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"")))
+        })
+        return (values["PRETTY_NAME"] ?? values["NAME"], values["VERSION_ID"] ?? values["VERSION"])
+    }
+
+    static func parseYesNo(_ text: String) -> Bool {
+        text.trimmed == "yes"
+    }
+
+    static func parseLoadAverage(_ text: String) -> String? {
+        let parts = text.split(separator: " ").prefix(3).map(String.init)
+        guard parts.count == 3 else { return nil }
+        return parts.joined(separator: " / ")
+    }
+
+    static func parseMemoryUsage(_ text: String) -> String? {
+        var values: [String: Double] = [:]
+        for line in text.split(separator: "\n") {
+            let parts = line.split(separator: " ").map(String.init)
+            guard parts.count >= 2 else { continue }
+            values[parts[0].trimmingCharacters(in: CharacterSet(charactersIn: ":"))] = Double(parts[1])
+        }
+        guard let total = values["MemTotal"], total > 0 else { return nil }
+        let available = values["MemAvailable"] ?? values["MemFree"] ?? 0
+        let used = max(0, total - available)
+        return "\(Self.formatKiB(used)) / \(Self.formatKiB(total))"
+    }
+
+    static func parseRootDiskUsage(_ text: String) -> String? {
+        let parts = text.split(separator: " ").map(String.init)
+        guard parts.count >= 5, let used = Double(parts[2]), let total = Double(parts[1]) else { return nil }
+        return "\(Self.formatKiB(used)) / \(Self.formatKiB(total))"
+    }
+
+    static func parseCPUCount(_ text: String) -> String? {
+        let value = text.trimmed
+        guard Int(value) != nil, value != "0" else { return nil }
+        return value
+    }
+
+    private static func formatKiB(_ kib: Double) -> String {
+        let mib = kib / 1024
+        if mib < 1024 {
+            return String(format: "%.0f MiB", mib)
+        }
+        return String(format: "%.1f GiB", mib / 1024)
+    }
+}
+
 protocol CloudProviderAdapter: Sendable {
     var providerId: CloudProviderID { get }
     var displayName: String { get }
@@ -741,6 +861,10 @@ private struct TencentVirtualPrivateCloud: Decodable {
 }
 
 private extension String {
+    var trimmed: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
