@@ -3184,6 +3184,11 @@ final class ServerWorkspaceViewModel: ObservableObject {
         guard let index = remoteFileTransferJobs.firstIndex(where: { $0.id == id }) else { return }
         remoteFileTransferJobs[index].status = status
         remoteFileTransferJobs[index].byteCount = result?.byteCount
+        if let result {
+            remoteFileTransferJobs[index].backend = result.backend
+            remoteFileTransferJobs[index].supportsResume = result.supportsResume
+            remoteFileTransferJobs[index].supportsStreamingProgress = result.supportsStreamingProgress
+        }
         remoteFileTransferJobs[index].progressFraction = status == .succeeded ? 1 : remoteFileTransferJobs[index].progressFraction
         remoteFileTransferJobs[index].message = message
         remoteFileTransferJobs[index].finishedAt = Date()
@@ -3200,6 +3205,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         if let totalBytes = progress.totalBytes {
             remoteFileTransferJobs[index].byteCount = totalBytes
         }
+        remoteFileTransferJobs[index].supportsStreamingProgress = true
         if let fraction = progress.fraction {
             remoteFileTransferJobs[index].progressFraction = fraction
         } else if let completed = progress.completedBytes,

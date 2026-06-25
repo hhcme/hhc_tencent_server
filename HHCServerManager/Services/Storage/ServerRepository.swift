@@ -196,8 +196,9 @@ final class ServerRepository: @unchecked Sendable {
         try database.execute("""
             INSERT INTO remote_file_transfers (
                 id, server_id, direction, remote_path, local_path, status, byte_count,
-                progress_fraction, message, started_at, finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                progress_fraction, backend, supports_resume, supports_streaming_progress,
+                message, started_at, finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 direction = excluded.direction,
                 remote_path = excluded.remote_path,
@@ -205,6 +206,9 @@ final class ServerRepository: @unchecked Sendable {
                 status = excluded.status,
                 byte_count = excluded.byte_count,
                 progress_fraction = excluded.progress_fraction,
+                backend = excluded.backend,
+                supports_resume = excluded.supports_resume,
+                supports_streaming_progress = excluded.supports_streaming_progress,
                 message = excluded.message,
                 started_at = excluded.started_at,
                 finished_at = excluded.finished_at
@@ -217,6 +221,9 @@ final class ServerRepository: @unchecked Sendable {
             .text(job.status.rawValue),
             job.byteCount.map { .int(Int($0)) } ?? .null,
             job.progressFraction.map(SQLiteValue.double) ?? .null,
+            .text(job.backend.rawValue),
+            .int(job.supportsResume ? 1 : 0),
+            .int(job.supportsStreamingProgress ? 1 : 0),
             job.message.map(SQLiteValue.text) ?? .null,
             .text(AppDatabase.string(from: job.startedAt)),
             job.finishedAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
@@ -226,7 +233,8 @@ final class ServerRepository: @unchecked Sendable {
     func fetchRemoteFileTransferJobs(serverId: UUID, limit: Int = 20) throws -> [RemoteFileTransferJob] {
         try database.query("""
             SELECT id, direction, remote_path, local_path, status, byte_count,
-                   progress_fraction, message, started_at, finished_at
+                   progress_fraction, backend, supports_resume, supports_streaming_progress,
+                   message, started_at, finished_at
             FROM remote_file_transfers
             WHERE server_id = ?
             ORDER BY started_at DESC
@@ -995,9 +1003,12 @@ final class ServerRepository: @unchecked Sendable {
             status: RemoteFileTransferStatus(rawValue: string(statement, 4)) ?? .failed,
             byteCount: optionalInt64(statement, 5),
             progressFraction: optionalDouble(statement, 6),
-            message: optionalString(statement, 7),
-            startedAt: date(statement, 8),
-            finishedAt: optionalDate(statement, 9)
+            backend: RemoteFileTransferBackend(rawValue: string(statement, 7)) ?? .unknown,
+            supportsResume: sqlite3_column_int(statement, 8) != 0,
+            supportsStreamingProgress: sqlite3_column_int(statement, 9) != 0,
+            message: optionalString(statement, 10),
+            startedAt: date(statement, 11),
+            finishedAt: optionalDate(statement, 12)
         )
     }
 

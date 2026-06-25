@@ -196,7 +196,10 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             remotePath: remotePath,
             localPath: localURL.path,
             byteCount: byteCount,
-            duration: Date().timeIntervalSince(start)
+            duration: Date().timeIntervalSince(start),
+            backend: .scp,
+            supportsResume: false,
+            supportsStreamingProgress: false
         )
     }
 
@@ -261,7 +264,10 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             remotePath: remotePath,
             localPath: localURL.path,
             byteCount: byteCount,
-            duration: Date().timeIntervalSince(start)
+            duration: Date().timeIntervalSince(start),
+            backend: .openSSHSFTP,
+            supportsResume: true,
+            supportsStreamingProgress: false
         )
     }
 
@@ -321,7 +327,10 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             remotePath: remotePath,
             localPath: localURL.path,
             byteCount: byteCount,
-            duration: Date().timeIntervalSince(start)
+            duration: Date().timeIntervalSince(start),
+            backend: .rsync,
+            supportsResume: true,
+            supportsStreamingProgress: true
         )
     }
 

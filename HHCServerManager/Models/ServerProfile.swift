@@ -425,11 +425,37 @@ struct RemoteTextSaveResult: Equatable, Hashable, Sendable {
     var backupPath: String?
 }
 
+enum RemoteFileTransferBackend: String, Equatable, Hashable, Sendable {
+    case unknown
+    case rsync
+    case openSSHSFTP
+    case scp
+    case nativeSFTP
+
+    var displayName: String {
+        switch self {
+        case .unknown:
+            "unknown"
+        case .rsync:
+            "rsync"
+        case .openSSHSFTP:
+            "OpenSSH SFTP"
+        case .scp:
+            "scp"
+        case .nativeSFTP:
+            "native SFTP"
+        }
+    }
+}
+
 struct RemoteFileTransferResult: Equatable, Hashable, Sendable {
     var remotePath: String
     var localPath: String
     var byteCount: Int64?
     var duration: TimeInterval
+    var backend: RemoteFileTransferBackend = .unknown
+    var supportsResume: Bool = false
+    var supportsStreamingProgress: Bool = false
 }
 
 struct RemoteFileTransferProgress: Equatable, Hashable, Sendable {
@@ -488,6 +514,9 @@ struct RemoteFileTransferJob: Identifiable, Equatable, Hashable, Sendable {
     var status: RemoteFileTransferStatus
     var byteCount: Int64?
     var progressFraction: Double?
+    var backend: RemoteFileTransferBackend = .unknown
+    var supportsResume: Bool = false
+    var supportsStreamingProgress: Bool = false
     var message: String?
     var startedAt: Date
     var finishedAt: Date?

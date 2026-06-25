@@ -198,12 +198,18 @@ final class ServerRepositoryTests: XCTestCase {
         newer.status = .succeeded
         newer.byteCount = 1_024
         newer.progressFraction = 1
+        newer.backend = .nativeSFTP
+        newer.supportsResume = true
+        newer.supportsStreamingProgress = true
         newer.message = "Downloaded app.env to /tmp/app.env."
         newer.finishedAt = Date(timeIntervalSince1970: 1_700_000_012)
         try repository.upsertRemoteFileTransferJob(newer, serverId: server.id)
 
         let jobs = try repository.fetchRemoteFileTransferJobs(serverId: server.id)
         XCTAssertEqual(jobs, [newer, older])
+        XCTAssertEqual(jobs.first?.backend, .nativeSFTP)
+        XCTAssertEqual(jobs.first?.supportsResume, true)
+        XCTAssertEqual(jobs.first?.supportsStreamingProgress, true)
 
         try repository.deleteServer(id: server.id)
         XCTAssertTrue(try repository.fetchRemoteFileTransferJobs(serverId: server.id).isEmpty)

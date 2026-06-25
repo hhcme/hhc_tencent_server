@@ -4588,6 +4588,15 @@ private struct RemoteTransferJobsView: View {
 
     private func metadata(for job: RemoteFileTransferJob) -> String {
         var parts = [job.status.rawValue.capitalized]
+        if job.backend != .unknown {
+            parts.append(job.backend.displayName)
+        }
+        if job.supportsResume {
+            parts.append("resumable")
+        }
+        if job.supportsStreamingProgress {
+            parts.append("streaming progress")
+        }
         if let progressFraction = job.progressFraction {
             parts.append("\(Int((progressFraction * 100).rounded()))%")
         } else if job.status == .running {

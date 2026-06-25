@@ -1229,11 +1229,17 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.remoteFileTransferJobs.count, 1)
         XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.id, failed.id)
         XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.progressFraction, 1)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.backend, .nativeSFTP)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.supportsResume, true)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first?.supportsStreamingProgress, true)
         XCTAssertEqual(client.uploads.map(\.remotePath), ["/var/www/retry.env"])
         let persisted = try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
         XCTAssertEqual(persisted.count, 1)
         XCTAssertEqual(persisted.first?.id, failed.id)
         XCTAssertEqual(persisted.first?.status, .succeeded)
+        XCTAssertEqual(persisted.first?.backend, .nativeSFTP)
+        XCTAssertEqual(persisted.first?.supportsResume, true)
+        XCTAssertEqual(persisted.first?.supportsStreamingProgress, true)
     }
 
     func testResumeRemoteFileTransferReusesInterruptedDownloadJobHistory() async throws {
@@ -1328,6 +1334,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(persisted.status, .running)
         XCTAssertEqual(persisted.progressFraction, 0.5)
         XCTAssertEqual(persisted.byteCount, 1_024)
+        XCTAssertEqual(persisted.supportsStreamingProgress, true)
         XCTAssertEqual(persisted.message, "Transferred 512 of 1024 bytes.")
 
         viewModel.cancelRemoteFileTransfer()
@@ -2724,7 +2731,10 @@ private final class RemoteFileTransferMockSSHClient: SSHClient, RemoteFileTransf
             remotePath: remotePath,
             localPath: localURL.path,
             byteCount: 8,
-            duration: 0
+            duration: 0,
+            backend: .nativeSFTP,
+            supportsResume: true,
+            supportsStreamingProgress: true
         )
     }
 
@@ -2737,7 +2747,10 @@ private final class RemoteFileTransferMockSSHClient: SSHClient, RemoteFileTransf
             remotePath: remotePath,
             localPath: localURL.path,
             byteCount: 8,
-            duration: 0
+            duration: 0,
+            backend: .nativeSFTP,
+            supportsResume: true,
+            supportsStreamingProgress: true
         )
     }
 

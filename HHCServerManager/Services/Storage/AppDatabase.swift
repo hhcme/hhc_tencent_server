@@ -202,6 +202,9 @@ final class AppDatabase: @unchecked Sendable {
                 finished_at TEXT
             )
         """)
+        try addColumnIfMissing(table: "remote_file_transfers", column: "backend", definition: "TEXT NOT NULL DEFAULT 'unknown'")
+        try addColumnIfMissing(table: "remote_file_transfers", column: "supports_resume", definition: "INTEGER NOT NULL DEFAULT 0")
+        try addColumnIfMissing(table: "remote_file_transfers", column: "supports_streaming_progress", definition: "INTEGER NOT NULL DEFAULT 0")
         try execute("""
             CREATE INDEX IF NOT EXISTS idx_remote_file_transfers_server_started_at
             ON remote_file_transfers(server_id, started_at DESC)
@@ -440,6 +443,11 @@ final class AppDatabase: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_registry_backups_registry_created_at
             ON registry_backups(registry_id, created_at DESC)
         """)
+    }
+
+    private func addColumnIfMissing(table: String, column: String, definition: String) throws {
+        guard try !columnExists(column, in: table) else { return }
+        try execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition)")
     }
 
     private var lastErrorMessage: String {
