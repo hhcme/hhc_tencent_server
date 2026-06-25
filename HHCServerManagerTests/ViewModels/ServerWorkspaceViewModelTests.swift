@@ -229,7 +229,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.hasProc)
         XCTAssertTrue(snapshot.capabilities.hasSystemd)
         XCTAssertTrue(snapshot.capabilities.hasSFTP)
-        XCTAssertEqual(snapshot.metrics.map(\.name), ["Load Average", "Memory", "Root Disk", "CPU Cores"])
+        XCTAssertEqual(snapshot.metrics.map(\.name), ["Load Average", "Memory", "Root Disk", "CPU Cores", "Network", "Processes"])
         XCTAssertNil(viewModel.dashboardErrorMessage)
     }
 
@@ -453,6 +453,14 @@ private final class DashboardMockSSHClient: SSHClient, @unchecked Sendable {
             stdout = "/dev/vda1 20971520 10485760 10485760 50% /\n"
         } else if command.contains("_NPROCESSORS_ONLN") {
             stdout = "4\n"
+        } else if command.contains("/proc/net/dev") {
+            stdout = """
+              Inter-|   Receive                                                |  Transmit
+               face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+                eth0: 1048576 0 0 0 0 0 0 0 2097152 0 0 0 0 0 0 0
+            """
+        } else if command.contains("ps -eo stat=") {
+            stdout = "total=120 running=2 sleeping=117 stopped=0 zombie=1\n"
         } else {
             stdout = ""
         }

@@ -27,7 +27,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装。
 - 腾讯云只读 adapter，包含 TC3 请求签名、地域查询和 CVM 实例查询解析。
 - 云导入 sheet：验证腾讯云账号、加载地域、同步 CVM 实例，并导入为 SSH profile。
-- Dashboard 基础：通过 SSH 探测 OS/能力，并展示负载、内存、磁盘和 CPU 指标卡片。
+- Dashboard 基础：通过 SSH 探测 OS/能力，并展示负载、内存、磁盘、CPU、网络和进程摘要指标卡片。
 - 远程文件浏览基础：支持路径导航、目录列表、文件元信息展示、重命名和可恢复移入回收目录。
 - 可选云账号接入：腾讯云、阿里云、华为云等通过 adapter 扩展。
 - 云实例发现、云资源元数据、云监控、安全组和电源操作。
@@ -80,7 +80,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 
 ## 开发状态
 
-macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础大体落地，Phase 3 Dashboard/文件浏览基础也已经启动：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、云实例同步/导入 UI 基础、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、基于 SSH 的 Dashboard 能力和指标采集、远程目录浏览、重命名、可恢复移入回收目录、操作日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。完整 SFTP 传输、上传下载、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
+macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础大体落地，Phase 3 Dashboard/文件浏览基础也已经启动：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、云实例同步/导入 UI 基础、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、基于 SSH 的 Dashboard 能力和指标采集（含网络与进程摘要）、远程目录浏览、重命名、可恢复移入回收目录、操作日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。完整 SFTP 传输、上传下载、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
 
 ## 参与贡献
 

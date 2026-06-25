@@ -278,6 +278,8 @@ final class DashboardService: @unchecked Sendable {
         async let meminfo = runDashboardCommand("cat /proc/meminfo 2>/dev/null || true", profile: profile, sshClient: sshClient)
         async let disk = runDashboardCommand("df -kP / 2>/dev/null | tail -1 || true", profile: profile, sshClient: sshClient)
         async let cpu = runDashboardCommand("getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0", profile: profile, sshClient: sshClient)
+        async let network = runDashboardCommand("cat /proc/net/dev 2>/dev/null || true", profile: profile, sshClient: sshClient)
+        async let processes = runDashboardCommand("ps -eo stat= 2>/dev/null | awk '{total++; state=substr($1,1,1); counts[state]++} END {printf \"total=%d running=%d sleeping=%d stopped=%d zombie=%d\\n\", total, counts[\"R\"], counts[\"S\"] + counts[\"I\"], counts[\"T\"], counts[\"Z\"]}'", profile: profile, sshClient: sshClient)
 
         let osReleaseResult = try await osRelease
         let os = Self.parseOSRelease(osReleaseResult.stdout)
@@ -289,6 +291,8 @@ final class DashboardService: @unchecked Sendable {
         let meminfoResult = try await meminfo
         let diskResult = try await disk
         let cpuResult = try await cpu
+        let networkResult = try await network
+        let processesResult = try await processes
 
         let detectedAt = now()
         let capabilities = ServerCapabilities(
@@ -313,6 +317,12 @@ final class DashboardService: @unchecked Sendable {
         }
         if let cpuCount = Self.parseCPUCount(cpuResult.stdout) {
             metrics.append(DashboardMetric(name: "CPU Cores", value: cpuCount, unit: "online", source: "SSH"))
+        }
+        if let networkSummary = Self.parseNetworkTotals(networkResult.stdout) {
+            metrics.append(DashboardMetric(name: "Network", value: networkSummary, unit: "rx / tx", source: "SSH"))
+        }
+        if let processSummary = Self.parseProcessSummary(processesResult.stdout) {
+            metrics.append(DashboardMetric(name: "Processes", value: processSummary, unit: "total / running / zombie", source: "SSH"))
         }
 
         return ServerDashboardSnapshot(capabilities: capabilities, metrics: metrics, capturedAt: detectedAt)
@@ -372,10 +382,59 @@ final class DashboardService: @unchecked Sendable {
         return value
     }
 
+    static func parseNetworkTotals(_ text: String) -> String? {
+        var receivedBytes: Double = 0
+        var transmittedBytes: Double = 0
+        for line in text.split(separator: "\n").map(String.init) {
+            guard line.contains(":") else { continue }
+            let interfaceAndData = line.split(separator: ":", maxSplits: 1).map(String.init)
+            guard interfaceAndData.count == 2 else { continue }
+            let interface = interfaceAndData[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard interface != "lo" else { continue }
+            let columns = interfaceAndData[1].split(separator: " ").map(String.init)
+            guard columns.count >= 16,
+                  let received = Double(columns[0]),
+                  let transmitted = Double(columns[8])
+            else { continue }
+            receivedBytes += received
+            transmittedBytes += transmitted
+        }
+        guard receivedBytes > 0 || transmittedBytes > 0 else { return nil }
+        return "\(Self.formatBytes(receivedBytes)) / \(Self.formatBytes(transmittedBytes))"
+    }
+
+    static func parseProcessSummary(_ text: String) -> String? {
+        var values: [String: Int] = [:]
+        for pair in text.split(whereSeparator: { $0.isWhitespace }) {
+            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let value = Int(parts[1]) else { continue }
+            values[parts[0]] = value
+        }
+        guard let total = values["total"], total > 0 else { return nil }
+        let running = values["running"] ?? 0
+        let zombie = values["zombie"] ?? 0
+        return "\(total) / \(running) / \(zombie)"
+    }
+
     private static func formatKiB(_ kib: Double) -> String {
         let mib = kib / 1024
         if mib < 1024 {
             return String(format: "%.0f MiB", mib)
+        }
+        return String(format: "%.1f GiB", mib / 1024)
+    }
+
+    private static func formatBytes(_ bytes: Double) -> String {
+        if bytes < 1024 {
+            return String(format: "%.0f B", bytes)
+        }
+        let kib = bytes / 1024
+        if kib < 1024 {
+            return String(format: "%.1f KiB", kib)
+        }
+        let mib = kib / 1024
+        if mib < 1024 {
+            return String(format: "%.1f MiB", mib)
         }
         return String(format: "%.1f GiB", mib / 1024)
     }

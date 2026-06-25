@@ -47,7 +47,7 @@ xcodebuild \
 - TencentCloudAdapter：TC3 签名、Region 查询、CVM DescribeInstances 查询、分页、provider 错误映射、mock transport fixture 测试。
 - CloudInstanceSyncService：读取 Keychain 云凭据、同步云实例 upsert、保留已有 SSH 关联、从云实例创建 SSH profile、关联/解除关联。
 - CloudImportSheet / CloudImportViewModel：腾讯云账号验证后保存、加载可用地域、同步实例、选择实例并导入为 SSH profile。
-- DashboardService：通过 SSH 探测 OS、kernel、`/proc`、systemd、sftp，并采集负载、内存、根磁盘和 CPU 核心数基础指标。
+- DashboardService：通过 SSH 探测 OS、kernel、`/proc`、systemd、sftp，并采集负载、内存、根磁盘、CPU 核心数、网络收发总量和进程摘要基础指标。
 - RemoteFileService：通过 SSH 命令进行文件管理 bootstrap，支持目录列表、重命名、可恢复移入远端回收目录，并解析文件类型、大小、权限、修改时间和路径。
 - AddServerViewModel：表单校验。
 - ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行与取消、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史、历史命令重跑、Dashboard 刷新、远程目录浏览、重命名和可恢复移入回收目录。

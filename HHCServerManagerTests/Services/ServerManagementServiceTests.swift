@@ -204,6 +204,13 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(DashboardService.parseYesNo("yes\n"))
         XCTAssertEqual(DashboardService.parseLoadAverage("0.10 0.20 0.30 1/100 12345"), "0.10 / 0.20 / 0.30")
         XCTAssertEqual(DashboardService.parseCPUCount("4\n"), "4")
+        XCTAssertEqual(DashboardService.parseProcessSummary("total=120 running=2 sleeping=117 stopped=0 zombie=1\n"), "120 / 2 / 1")
+        XCTAssertEqual(DashboardService.parseNetworkTotals("""
+            Inter-|   Receive                                                |  Transmit
+             face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+                lo: 1000 0 0 0 0 0 0 0 2000 0 0 0 0 0 0 0
+              eth0: 1048576 0 0 0 0 0 0 0 2097152 0 0 0 0 0 0 0
+        """), "1.0 MiB / 2.0 MiB")
 
         let memory = DashboardService.parseMemoryUsage("""
         MemTotal:        2048000 kB
