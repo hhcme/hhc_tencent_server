@@ -233,6 +233,51 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(RemoteFileService.parentPath(for: "/"), "/")
     }
 
+    func testRemoteFileServiceRenamesAndMovesToTrashWithSafeCommands() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let entry = RemoteFileEntry(
+            name: "index.html",
+            path: "/var/www/index.html",
+            kind: .file,
+            size: 10,
+            modifiedAt: nil,
+            permissions: "-rw-r--r--"
+        )
+
+        try await service.rename(entry: entry, to: "home.html", profile: profile, sshClient: client)
+        let trashPath = try await service.moveToTrash(entry: entry, profile: profile, sshClient: client)
+
+        XCTAssertEqual(client.commands.count, 2)
+        XCTAssertEqual(client.commands[0], "mv -n -- '/var/www/index.html' '/var/www/home.html'")
+        XCTAssertTrue(client.commands[1].contains("mkdir -p -- '~/.hhc-server-manager-trash' && mv -n -- '/var/www/index.html' '~/.hhc-server-manager-trash/"))
+        XCTAssertTrue(trashPath.hasPrefix("~/.hhc-server-manager-trash/"))
+        XCTAssertTrue(trashPath.hasSuffix("-index.html"))
+    }
+
+    func testRemoteFileServiceRejectsUnsafeRenameTargets() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let service = RemoteFileService()
+        let entry = RemoteFileEntry(
+            name: "index.html",
+            path: "/var/www/index.html",
+            kind: .file,
+            size: 10,
+            modifiedAt: nil,
+            permissions: "-rw-r--r--"
+        )
+
+        do {
+            try await service.rename(entry: entry, to: "../bad", profile: profile, sshClient: client)
+            XCTFail("Expected invalid rename target.")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "File name cannot be empty, '.', '..', or contain '/'.")
+            XCTAssertTrue(client.commands.isEmpty)
+        }
+    }
+
     func testCloudInstanceSyncUpsertsInstancesAndPreservesServerLink() async throws {
         let adapter = MockCloudProviderAdapter(
             providerId: .tencentCloud,
@@ -531,6 +576,36 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
             ),
         ]
     }
+}
+
+private func makeServiceTestProfile() -> ServerProfile {
+    ServerProfile(
+        id: UUID(),
+        name: "Test",
+        host: "example.internal",
+        port: 22,
+        username: "root",
+        authType: .privateKey,
+        keychainRef: "server_test",
+        groupName: nil,
+        createdAt: Date(),
+        updatedAt: Date()
+    )
+}
+
+private final class RecordingSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
 }
 
 private final class MockTencentCloudTransport: TencentCloudHTTPTransport, @unchecked Sendable {

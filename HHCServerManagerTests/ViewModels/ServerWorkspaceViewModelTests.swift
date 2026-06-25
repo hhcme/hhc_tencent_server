@@ -268,6 +268,45 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(listing.entries.map(\.name), ["app.log"])
     }
 
+    func testRemoteFileActionsRenameAndMoveToTrashThenRefreshListing() async throws {
+        let profile = makeProfile()
+        let client = RemoteFileActionMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadRemoteFiles(
+            path: "/var/www",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["index.html"] }
+        let original = try XCTUnwrap(viewModel.remoteDirectoryListing?.entries.first)
+
+        viewModel.renameRemoteFile(
+            original,
+            to: "home.html",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["home.html"] }
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Renamed index.html.")
+        XCTAssertTrue(client.commands.contains("mv -n -- '/var/www/index.html' '/var/www/home.html'"))
+
+        let renamed = try XCTUnwrap(viewModel.remoteDirectoryListing?.entries.first)
+        viewModel.moveRemoteFileToTrash(
+            renamed,
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.isEmpty == true }
+        XCTAssertTrue(viewModel.remoteFileActionMessage?.contains("Moved home.html to ~/.hhc-server-manager-trash/") == true)
+        XCTAssertTrue(client.commands.contains { $0.contains("mkdir -p -- '~/.hhc-server-manager-trash'") })
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -439,6 +478,36 @@ private final class RemoteFileMockSSHClient: SSHClient, @unchecked Sendable {
             """
         }
         return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class RemoteFileActionMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+    private var currentName: String? = "index.html"
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.hasPrefix("mv -n -- '/var/www/index.html' '/var/www/home.html'") {
+            currentName = "home.html"
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("mkdir -p -- '~/.hhc-server-manager-trash'") {
+            currentName = nil
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("find . -maxdepth 1") {
+            let stdout = currentName.map { name in
+                "\(name)\tf\t2048\t1700000001.0\t-rw-r--r--\n"
+            } ?? ""
+            return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}

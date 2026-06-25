@@ -410,6 +410,45 @@ final class RemoteFileService: @unchecked Sendable {
         )
     }
 
+    func rename(
+        entry: RemoteFileEntry,
+        to newName: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws {
+        let targetName = Self.validatedFileName(newName)
+        guard !targetName.isEmpty else {
+            throw SSHClientError.processFailed("File name cannot be empty, '.', '..', or contain '/'.")
+        }
+        guard targetName != entry.name else { return }
+        let targetPath = Self.joinedPath(basePath: Self.parentPath(for: entry.path), name: targetName)
+        let command = "mv -n -- \(Self.shellQuote(entry.path)) \(Self.shellQuote(targetPath))"
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not rename \(entry.name).")
+        }
+    }
+
+    func moveToTrash(
+        entry: RemoteFileEntry,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> String {
+        let trashDirectory = "~/.hhc-server-manager-trash"
+        let timestamp = Self.trashTimestamp(for: now())
+        let trashPath = Self.joinedPath(basePath: trashDirectory, name: "\(timestamp)-\(entry.name)")
+        let command = "mkdir -p -- \(Self.shellQuote(trashDirectory)) && mv -n -- \(Self.shellQuote(entry.path)) \(Self.shellQuote(trashPath))"
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not move \(entry.name) to trash.")
+        }
+        return trashPath
+    }
+
     static func parentPath(for path: String) -> String {
         let normalized = normalizedDirectoryPath(path)
         guard normalized != "/" else { return "/" }
@@ -425,6 +464,14 @@ final class RemoteFileService: @unchecked Sendable {
             return trimmed
         }
         return trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
+    }
+
+    static func validatedFileName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != ".", trimmed != "..", !trimmed.contains("/") else {
+            return ""
+        }
+        return trimmed
     }
 
     static func parseFindListing(_ text: String, basePath: String) -> [RemoteFileEntry] {
@@ -476,6 +523,12 @@ final class RemoteFileService: @unchecked Sendable {
 
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func trashTimestamp(for date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 }
 

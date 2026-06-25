@@ -28,7 +28,7 @@ Target users include:
 - Tencent Cloud read-only adapter with TC3 request signing plus Region and CVM instance query parsing.
 - Cloud import sheet for verifying Tencent Cloud accounts, loading regions, syncing CVM instances, and importing instances as SSH profiles.
 - Dashboard foundations with SSH-based OS/capability detection and load, memory, disk, and CPU metric cards.
-- Read-only remote file browser foundations with path navigation, directory listing, and file metadata display.
+- Remote file browser foundations with path navigation, directory listing, file metadata display, rename, and recoverable move-to-trash.
 - Optional cloud account integration through provider adapters.
 - Cloud instance discovery, resource metadata, cloud metrics, security groups, and power operations.
 - Simplified command panel and server dashboard.
@@ -81,7 +81,7 @@ Target users include:
 
 ## Development Status
 
-The macOS app is now under active implementation. Phase 1 foundations are in place, Phase 2 foundations are largely in place, and Phase 3 Dashboard/file browser foundations have started: SwiftUI app structure, local SQLite persistence, Keychain-backed SSH/cloud credentials, host-key trust, OpenSSH-based real command execution with cancellation, command metadata history with reruns, split stdout/stderr output, cloud account metadata, cloud instance links, cloud instance sync/import UI foundations, provider adapter registry, normalized cloud errors, Tencent Cloud TC3 request signing, Region/CVM instance response parsing, SSH-based Dashboard capability and metric collection, read-only remote directory browsing, operation logs, unit tests, and GitHub Actions CI. Command output remains session-scoped and is not persisted by default. Full SFTP transfer, deployment, package registry, and Windows native work remain planned later phases.
+The macOS app is now under active implementation. Phase 1 foundations are in place, Phase 2 foundations are largely in place, and Phase 3 Dashboard/file browser foundations have started: SwiftUI app structure, local SQLite persistence, Keychain-backed SSH/cloud credentials, host-key trust, OpenSSH-based real command execution with cancellation, command metadata history with reruns, split stdout/stderr output, cloud account metadata, cloud instance links, cloud instance sync/import UI foundations, provider adapter registry, normalized cloud errors, Tencent Cloud TC3 request signing, Region/CVM instance response parsing, SSH-based Dashboard capability and metric collection, remote directory browsing, rename, recoverable move-to-trash, operation logs, unit tests, and GitHub Actions CI. Command output remains session-scoped and is not persisted by default. Full SFTP transfer, upload/download, deployment, package registry, and Windows native work remain planned later phases.
 
 ## Contributing
 

@@ -132,9 +132,9 @@ CREATE TABLE file_transfer_jobs (
 
 - [x] 实现路径导航和只读目录列表 bootstrap。
 - [ ] 实现上传、下载、取消和进度。
-- [ ] 实现重命名。
+- [x] 实现重命名。
 - [x] 实现权限查看基础展示。
-- [ ] 删除前二次确认，优先移动到远端应用回收目录。
+- [x] 删除前二次确认，优先移动到远端应用回收目录。
 - [ ] 文本文件编辑保存前创建备份。
 
 ### Task 7：测试
@@ -144,6 +144,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] Dashboard ViewModel 测试。
 - [x] RemoteFileService 目录列表解析测试。
 - [x] 文件浏览 ViewModel 测试。
+- [x] 文件重命名和可恢复删除测试。
 - [ ] 可选真实 SFTP 集成测试。
 
 ### Task 8：手动验收

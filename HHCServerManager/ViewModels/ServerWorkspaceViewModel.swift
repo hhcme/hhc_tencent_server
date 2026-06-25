@@ -11,7 +11,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var remoteFilePath = "~"
     @Published var remoteDirectoryListing: RemoteDirectoryListing?
     @Published var isLoadingRemoteFiles = false
+    @Published var isMutatingRemoteFile = false
     @Published var remoteFileErrorMessage: String?
+    @Published var remoteFileActionMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -82,6 +84,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         remoteFilePath = targetPath
         isLoadingRemoteFiles = true
         remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
 
         Task {
             do {
@@ -125,6 +128,77 @@ final class ServerWorkspaceViewModel: ObservableObject {
             sshClient: sshClient,
             remoteFileService: remoteFileService
         )
+    }
+
+    func renameRemoteFile(
+        _ entry: RemoteFileEntry,
+        to newName: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService
+    ) {
+        isMutatingRemoteFile = true
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+
+        Task {
+            do {
+                try await remoteFileService.rename(entry: entry, to: newName, profile: profile, sshClient: sshClient)
+                let listing = try await remoteFileService.listDirectory(
+                    path: self.remoteFilePath,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.remoteDirectoryListing = listing
+                    self.remoteFilePath = listing.path
+                    self.remoteFileActionMessage = "Renamed \(entry.name)."
+                    self.isMutatingRemoteFile = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.isMutatingRemoteFile = false
+                }
+            }
+        }
+    }
+
+    func moveRemoteFileToTrash(
+        _ entry: RemoteFileEntry,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService
+    ) {
+        isMutatingRemoteFile = true
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+
+        Task {
+            do {
+                let trashPath = try await remoteFileService.moveToTrash(
+                    entry: entry,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let listing = try await remoteFileService.listDirectory(
+                    path: self.remoteFilePath,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.remoteDirectoryListing = listing
+                    self.remoteFilePath = listing.path
+                    self.remoteFileActionMessage = "Moved \(entry.name) to \(trashPath)."
+                    self.isMutatingRemoteFile = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.isMutatingRemoteFile = false
+                }
+            }
+        }
     }
 
     private func runSmokeTest(

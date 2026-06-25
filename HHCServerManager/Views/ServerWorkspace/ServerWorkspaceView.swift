@@ -6,6 +6,9 @@ struct ServerWorkspaceView: View {
     @State private var selectedSection = "overview"
     @State private var commandText = ""
     @State private var filePathText = "~"
+    @State private var remoteFileRenameEntry: RemoteFileEntry?
+    @State private var remoteFileRenameText = ""
+    @State private var remoteFileTrashEntry: RemoteFileEntry?
 
     let profile: ServerProfile
 
@@ -50,6 +53,43 @@ struct ServerWorkspaceView: View {
             }
         } message: {
             Text(viewModel.errorMessage ?? "")
+        }
+        .alert("Move to Trash?", isPresented: remoteFileTrashBinding) {
+            Button("Cancel", role: .cancel) {
+                remoteFileTrashEntry = nil
+            }
+            Button("Move", role: .destructive) {
+                if let entry = remoteFileTrashEntry {
+                    viewModel.moveRemoteFileToTrash(
+                        entry,
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        remoteFileService: appState.remoteFileService
+                    )
+                }
+                remoteFileTrashEntry = nil
+            }
+        } message: {
+            Text(remoteFileTrashEntry.map { "Move \($0.name) to ~/.hhc-server-manager-trash on the remote server." } ?? "")
+        }
+        .sheet(item: $remoteFileRenameEntry) { entry in
+            RenameRemoteFileSheet(
+                entry: entry,
+                name: $remoteFileRenameText,
+                cancel: {
+                    remoteFileRenameEntry = nil
+                },
+                rename: {
+                    viewModel.renameRemoteFile(
+                        entry,
+                        to: remoteFileRenameText,
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        remoteFileService: appState.remoteFileService
+                    )
+                    remoteFileRenameEntry = nil
+                }
+            )
         }
         .onAppear {
             viewModel.configure(initialState: appState.connectionState(for: profile))
@@ -332,7 +372,7 @@ struct ServerWorkspaceView: View {
                     } label: {
                         Label("Up", systemImage: "arrow.up")
                     }
-                    .disabled(viewModel.isLoadingRemoteFiles || viewModel.remoteFilePath == "/")
+                    .disabled(viewModel.isLoadingRemoteFiles || viewModel.isMutatingRemoteFile || viewModel.remoteFilePath == "/")
 
                     TextField("Remote path", text: $filePathText)
                         .textFieldStyle(.roundedBorder)
@@ -352,7 +392,7 @@ struct ServerWorkspaceView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isLoadingRemoteFiles)
+                    .disabled(viewModel.isLoadingRemoteFiles || viewModel.isMutatingRemoteFile)
                 }
 
                 if let capturedAt = viewModel.remoteDirectoryListing?.capturedAt {
@@ -364,6 +404,11 @@ struct ServerWorkspaceView: View {
                 if let error = viewModel.remoteFileErrorMessage {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
+                }
+
+                if let message = viewModel.remoteFileActionMessage {
+                    Label(message, systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
                 }
             }
             .padding(20)
@@ -411,7 +456,33 @@ struct ServerWorkspaceView: View {
                 RemoteFileRow(entry: entry)
             }
             .buttonStyle(.plain)
-            .disabled(entry.kind != .directory)
+            .contextMenu {
+                Button {
+                    startRenaming(entry)
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .disabled(viewModel.isMutatingRemoteFile)
+                Button(role: .destructive) {
+                    remoteFileTrashEntry = entry
+                } label: {
+                    Label("Move to Trash", systemImage: "trash")
+                }
+                .disabled(viewModel.isMutatingRemoteFile)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) {
+                    remoteFileTrashEntry = entry
+                } label: {
+                    Label("Trash", systemImage: "trash")
+                }
+                Button {
+                    startRenaming(entry)
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .tint(.blue)
+            }
         }
         .overlay {
             if entries.isEmpty {
@@ -427,6 +498,11 @@ struct ServerWorkspaceView: View {
             sshClient: appState.sshClient,
             remoteFileService: appState.remoteFileService
         )
+    }
+
+    private func startRenaming(_ entry: RemoteFileEntry) {
+        remoteFileRenameText = entry.name
+        remoteFileRenameEntry = entry
     }
 
     private var persistedHistorySection: some View {
@@ -546,6 +622,17 @@ struct ServerWorkspaceView: View {
             set: { isPresented in
                 if !isPresented {
                     viewModel.errorMessage = nil
+                }
+            }
+        )
+    }
+
+    private var remoteFileTrashBinding: Binding<Bool> {
+        Binding(
+            get: { remoteFileTrashEntry != nil },
+            set: { isPresented in
+                if !isPresented {
+                    remoteFileTrashEntry = nil
                 }
             }
         )
@@ -696,6 +783,39 @@ private struct RemoteFileRow: View {
             return String(format: "%.1f MiB", mib)
         }
         return String(format: "%.1f GiB", mib / 1024)
+    }
+}
+
+private struct RenameRemoteFileSheet: View {
+    let entry: RemoteFileEntry
+    @Binding var name: String
+    let cancel: () -> Void
+    let rename: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Rename")
+                .font(.title2.weight(.semibold))
+
+            Text(entry.path)
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: cancel)
+                Button("Rename", action: rename)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(RemoteFileService.validatedFileName(name).isEmpty || name == entry.name)
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
     }
 }
 
