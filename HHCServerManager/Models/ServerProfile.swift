@@ -389,6 +389,159 @@ struct RemoteChangeLogEntry: Identifiable, Codable, Equatable, Hashable, Sendabl
     var createdAt: Date
 }
 
+enum RemoteOperationRiskLevel: String, Codable, CaseIterable, Identifiable, Sendable {
+    case low
+    case medium
+    case high
+    case critical
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .low:
+            "Low"
+        case .medium:
+            "Medium"
+        case .high:
+            "High"
+        case .critical:
+            "Critical"
+        }
+    }
+}
+
+struct RemoteOperationRisk: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: String
+    var level: RemoteOperationRiskLevel
+    var title: String
+    var target: String
+    var commandPreview: String?
+    var impact: [String]
+    var recovery: String?
+    var auditTargetType: String
+    var auditAction: String
+
+    var confirmationMessage: String {
+        var lines = [
+            "Risk: \(level.displayName)",
+            "Target: \(target)",
+        ]
+        if let commandPreview, !commandPreview.isEmpty {
+            lines.append("Command: \(commandPreview)")
+        }
+        if !impact.isEmpty {
+            lines.append("Impact: \(impact.joined(separator: " "))")
+        }
+        if let recovery, !recovery.isEmpty {
+            lines.append("Recovery: \(recovery)")
+        }
+        lines.append("This action will be written to the remote change audit log when supported.")
+        return lines.joined(separator: "\n")
+    }
+}
+
+enum RemoteOperationRiskFactory {
+    static func moveToTrash(entry: RemoteFileEntry) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "remote-file-trash-\(entry.id)",
+            level: .medium,
+            title: "Move to Trash",
+            target: entry.path,
+            commandPreview: "mv -n <target> ~/.hhc-server-manager-trash/",
+            impact: ["The selected remote item will disappear from its current directory."],
+            recovery: "Restore it manually from ~/.hhc-server-manager-trash if needed.",
+            auditTargetType: "remote_file",
+            auditAction: "move_to_trash"
+        )
+    }
+
+    static func changePermissions(entry: RemoteFileEntry, mode: String) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "remote-file-chmod-\(entry.id)-\(mode)",
+            level: mode.hasSuffix("777") || mode.hasSuffix("666") ? .high : .medium,
+            title: "Change Permissions",
+            target: entry.path,
+            commandPreview: "chmod \(mode) <target>",
+            impact: ["Permission changes can expose files or break service access."],
+            recovery: "Reapply the previous mode shown in the file list if the change is wrong.",
+            auditTargetType: "remote_file",
+            auditAction: "chmod"
+        )
+    }
+
+    static func systemd(action: SystemdUnitAction, unit: SystemdUnit) -> RemoteOperationRisk {
+        let level: RemoteOperationRiskLevel = action == .stop || action == .restart ? .high : .medium
+        return RemoteOperationRisk(
+            id: "systemd-\(action.rawValue)-\(unit.id)",
+            level: level,
+            title: "\(action.displayName) Service",
+            target: unit.name,
+            commandPreview: "systemctl \(action.rawValue) \(unit.name)",
+            impact: ["Service state may change immediately and connected users may be interrupted."],
+            recovery: "Use the inverse systemd action or inspect journal logs if the service fails.",
+            auditTargetType: "systemd",
+            auditAction: action.rawValue
+        )
+    }
+
+    static func cron(action: CronEntryAction, entry: CronEntry) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "cron-\(action.rawValue)-\(entry.id)",
+            level: action == .delete ? .high : .medium,
+            title: "\(action.displayName) Cron Entry",
+            target: entry.originalLine,
+            commandPreview: "crontab <updated file>",
+            impact: ["The remote user's scheduled task list will be rewritten."],
+            recovery: "A remote crontab backup is created before write operations.",
+            auditTargetType: "cron",
+            auditAction: action.rawValue
+        )
+    }
+
+    static func saveNginxConfig(path: String) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "nginx-save-\(path)",
+            level: .high,
+            title: "Save Nginx Config",
+            target: path,
+            commandPreview: "backup -> write temp file -> nginx -t -> rollback on failure",
+            impact: ["The selected Nginx configuration file will be replaced on the remote server."],
+            recovery: "A remote backup is created and failed nginx -t results are rolled back automatically.",
+            auditTargetType: "nginx",
+            auditAction: "save"
+        )
+    }
+
+    static func reloadNginx(path: String?) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "nginx-reload-\(path ?? "nginx")",
+            level: .medium,
+            title: "Reload Nginx",
+            target: path ?? "nginx",
+            commandPreview: "nginx -t && nginx -s reload",
+            impact: ["Nginx will reload active configuration after a successful config test."],
+            recovery: "Fix the config and reload again if nginx -t fails.",
+            auditTargetType: "nginx",
+            auditAction: "reload"
+        )
+    }
+
+    static func saveEnvironmentFile(path: String) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "environment-save-\(path)",
+            level: .high,
+            title: "Save Environment File",
+            target: path,
+            commandPreview: "backup -> replace selected file",
+            impact: ["Environment changes may affect later service starts, deploys, or shell commands."],
+            recovery: "A remote backup is created before replacing the file.",
+            auditTargetType: "environment",
+            auditAction: "save"
+        )
+    }
+}
+
 enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
     case tencentCloud = "tencent_cloud"
 

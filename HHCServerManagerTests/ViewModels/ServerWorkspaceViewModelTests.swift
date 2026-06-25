@@ -3,6 +3,52 @@ import XCTest
 
 @MainActor
 final class ServerWorkspaceViewModelTests: XCTestCase {
+    func testRemoteOperationRiskFactoryBuildsConfirmationMessages() {
+        let unit = SystemdUnit(
+            name: "nginx.service",
+            loadState: "loaded",
+            activeState: "active",
+            subState: "running",
+            description: "Nginx"
+        )
+        let entry = CronEntry(
+            schedule: "0 2 * * *",
+            command: "/usr/bin/backup",
+            isEnabled: true,
+            originalLine: "0 2 * * * /usr/bin/backup"
+        )
+        let file = RemoteFileEntry(
+            name: "config.yml",
+            path: "/srv/app/config.yml",
+            kind: .file,
+            size: 12,
+            modifiedAt: nil,
+            permissions: "-rw-r--r--"
+        )
+
+        let restartRisk = RemoteOperationRiskFactory.systemd(action: .restart, unit: unit)
+        XCTAssertEqual(restartRisk.level, .high)
+        XCTAssertEqual(restartRisk.auditTargetType, "systemd")
+        XCTAssertTrue(restartRisk.confirmationMessage.contains("systemctl restart nginx.service"))
+
+        let cronDeleteRisk = RemoteOperationRiskFactory.cron(action: .delete, entry: entry)
+        XCTAssertEqual(cronDeleteRisk.level, .high)
+        XCTAssertTrue(cronDeleteRisk.confirmationMessage.contains("crontab <updated file>"))
+        XCTAssertTrue(cronDeleteRisk.confirmationMessage.contains("backup"))
+
+        let permissiveChmodRisk = RemoteOperationRiskFactory.changePermissions(entry: file, mode: "777")
+        XCTAssertEqual(permissiveChmodRisk.level, .high)
+        XCTAssertTrue(permissiveChmodRisk.confirmationMessage.contains("chmod 777"))
+
+        let nginxSaveRisk = RemoteOperationRiskFactory.saveNginxConfig(path: "/etc/nginx/nginx.conf")
+        XCTAssertEqual(nginxSaveRisk.level, .high)
+        XCTAssertTrue(nginxSaveRisk.confirmationMessage.contains("rollback"))
+
+        let environmentRisk = RemoteOperationRiskFactory.saveEnvironmentFile(path: "/srv/app/.env")
+        XCTAssertEqual(environmentRisk.auditTargetType, "environment")
+        XCTAssertTrue(environmentRisk.confirmationMessage.contains("Environment changes"))
+    }
+
     func testConnectSuccessUpdatesConnectionStateAndStoresResult() async throws {
         let profile = makeProfile()
         let client = MockSSHClient(result: CommandResult(

@@ -89,12 +89,12 @@ struct ServerWorkspaceView: View {
                 remoteFileTrashEntry = nil
             }
         } message: {
-            Text(remoteFileTrashEntry.map { "Move \($0.name) to ~/.hhc-server-manager-trash on the remote server." } ?? "")
+            Text(remoteFileTrashEntry.map { RemoteOperationRiskFactory.moveToTrash(entry: $0).confirmationMessage } ?? "")
         }
         .alert(item: $pendingSystemdAction) { request in
             Alert(
                 title: Text("\(request.action.displayName) \(request.unit.name)?"),
-                message: Text("This will run systemctl \(request.action.rawValue) for \(request.unit.name) on the remote server."),
+                message: Text(request.risk.confirmationMessage),
                 primaryButton: .destructive(Text(request.action.displayName)) {
                     viewModel.performSystemdAction(
                         request.action,
@@ -111,7 +111,7 @@ struct ServerWorkspaceView: View {
         .alert(item: $pendingCronAction) { request in
             Alert(
                 title: Text("\(request.action.displayName) Cron Entry?"),
-                message: Text(request.entry.command),
+                message: Text(request.risk.confirmationMessage),
                 primaryButton: request.action == .delete ? .destructive(Text(request.action.displayName)) {
                     performCronAction(request)
                 } : .default(Text(request.action.displayName)) {
@@ -131,7 +131,7 @@ struct ServerWorkspaceView: View {
                 )
             }
         } message: {
-            Text("This will run nginx -t first and reload only if the configuration test passes.")
+            Text(RemoteOperationRiskFactory.reloadNginx(path: viewModel.selectedNginxConfig?.path).confirmationMessage)
         }
         .alert("Save Nginx Config?", isPresented: $pendingNginxSave) {
             Button("Cancel", role: .cancel) {}
@@ -144,7 +144,7 @@ struct ServerWorkspaceView: View {
                 )
             }
         } message: {
-            Text("This will create a remote backup, write the config, run nginx -t, and restore the backup if the test fails.")
+            Text(RemoteOperationRiskFactory.saveNginxConfig(path: viewModel.nginxConfigContent?.file.path ?? "nginx").confirmationMessage)
         }
         .alert("Save Environment File?", isPresented: $pendingEnvironmentSave) {
             Button("Cancel", role: .cancel) {}
@@ -157,7 +157,7 @@ struct ServerWorkspaceView: View {
                 )
             }
         } message: {
-            Text("This will create a remote backup and replace the selected environment file.")
+            Text(RemoteOperationRiskFactory.saveEnvironmentFile(path: viewModel.environmentFileContent?.file.path ?? "environment file").confirmationMessage)
         }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
@@ -1993,6 +1993,10 @@ private struct SystemdActionRequest: Identifiable {
     var id: String {
         "\(unit.id)-\(action.id)"
     }
+
+    var risk: RemoteOperationRisk {
+        RemoteOperationRiskFactory.systemd(action: action, unit: unit)
+    }
 }
 
 private struct CronActionRequest: Identifiable {
@@ -2001,6 +2005,10 @@ private struct CronActionRequest: Identifiable {
 
     var id: String {
         "\(entry.id)-\(action.id)"
+    }
+
+    var risk: RemoteOperationRisk {
+        RemoteOperationRiskFactory.cron(action: action, entry: entry)
     }
 }
 
@@ -2460,6 +2468,8 @@ private struct RemoteFilePermissionsSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.body, design: .monospaced))
 
+            RiskPreviewView(risk: RemoteOperationRiskFactory.changePermissions(entry: entry, mode: mode))
+
             HStack {
                 Spacer()
                 Button("Cancel", action: cancel)
@@ -2488,6 +2498,52 @@ private struct RemoteFilePermissionsSheet: View {
         let trimmed = mode.trimmingCharacters(in: .whitespacesAndNewlines)
         let characters = Array(trimmed)
         return [3, 4].contains(characters.count) && characters.allSatisfy { "01234567".contains($0) }
+    }
+}
+
+private struct RiskPreviewView: View {
+    let risk: RemoteOperationRisk
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label(risk.level.displayName, systemImage: "exclamationmark.triangle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(color)
+                Text(risk.title)
+                    .font(.caption.weight(.semibold))
+                Spacer()
+            }
+
+            Text(risk.target)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            if let command = risk.commandPreview {
+                Text(command)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+
+            Text(risk.impact.joined(separator: " "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var color: Color {
+        switch risk.level {
+        case .low:
+            .secondary
+        case .medium:
+            .orange
+        case .high, .critical:
+            .red
+        }
     }
 }
 

@@ -55,6 +55,7 @@ xcodebuild \
 - NginxConfigManager：通过 SSH 动态探测 Nginx 配置路径，优先读取 `nginx -V` 的 `--conf-path` / `--prefix`，并兼容 `/etc/nginx`、`/usr/local/nginx/conf`、`/opt/nginx/conf` 等常见目录；支持配置文件列表、UTF-8 配置读取、保存前远端备份、保存后 `nginx -t`、测试失败自动恢复备份和确认后 reload。
 - FirewallManager：通过 SSH 只读探测 firewalld、ufw、nftables、iptables 后端，读取后端状态和规则输出；firewalld 安装但未运行时会展示 `not running`，不阻断其他功能。
 - EnvironmentFileManager：通过 SSH 受限发现常见 `.env`、`/etc/default`、`/etc/sysconfig` 和 systemd drop-in 环境文件；支持 256 KiB 内 UTF-8 内容读取、保存前远端备份和临时文件替换。
+- RemoteOperationRisk：为远程文件删除/权限修改、systemd、Cron、Nginx、Environment 写操作生成统一风险级别、目标、命令预览、影响范围和恢复说明，供确认 UI 和后续写操作复用。
 - AddServerViewModel：表单校验。
 - ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行与取消、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史、历史命令重跑、Dashboard 手动/自动刷新、远程目录浏览、排队单文件上传/下载、当前传输取消、待传队列清空、传输任务状态记录、重命名、chmod 权限修改、可恢复移入回收目录、轻量文本编辑、腾讯云安全组只读查看、systemd 服务管理、Cron 管理、Nginx 配置管理、Firewall 只读状态流和 Environment 文件管理。
 - SSHIntegrationTests：通过环境变量启用，默认跳过。
@@ -110,6 +111,7 @@ export HHC_TEST_SSH_PASSPHRASE=""
 - Dashboard 当前为 Phase 3 bootstrap：指标通过 SSH 即时采集，支持手动刷新和自动刷新；已关联腾讯云 CVM 时会通过 Cloud Monitor `GetMonitorData` 拉取 Cloud CPU 指标并标记来源为 Cloud API；单项可选指标失败会以 warning 降级展示，尚未写入 `dashboard_snapshots` 缓存表，更多云监控指标仍待扩展。
 - 文件管理当前为 bootstrap：目录浏览通过 SSH `find` 命令实现，上传/下载通过本机 OpenSSH `scp` 实现排队单文件传输，并在 UI 中记录最近传输任务的 pending/running/succeeded/failed/cancelled 状态；当前运行中的传输可取消，待传队列可清空。重命名使用 `mv -n`，权限修改使用经过八进制校验的 `chmod`，删除入口会二次确认并移动到 `~/.hhc-server-manager-trash`；小型 UTF-8 文本文件可通过 SSH/base64 读取和保存，限制 256 KiB，保存前会生成 `*.hhc-backup-*` 备份，另存为默认不覆盖已有文件，并通过临时文件替换。已在真实 Linux 服务器上验证 `sftp` 命令存在以及 scp 上传/下载往返可用；尚未完成 SwiftNIO SSH/libssh2 正式 SFTP 替换、进度百分比、批量/并发传输和队列持久化。
 - Services 当前为 Phase 4 bootstrap：systemd 服务列表和日志通过 SSH 即时读取，start/stop/restart/reload 操作需要 UI 确认，unit 名限制为简单 `.service` 名称，并会写入 `remote_change_logs` 审计表；真实服务器已完成只读服务列表验证，真实重启/停止等写操作仍需手动验收。
+- 危险操作确认当前为 Phase 4 bootstrap：`RemoteOperationRisk` 已为远程文件删除/权限修改、systemd、Cron、Nginx、Environment 生成统一风险级别、目标、命令预览、影响和恢复说明；现有确认弹窗已接入风险文案，chmod sheet 会展示风险预览。后续安全组、防火墙写操作和 GitLab 部署需要复用同一模型。
 - Cron 当前为 Phase 4 bootstrap：用户级 crontab 通过 SSH 即时读取，添加/启用/禁用/删除操作需要 UI 确认并在远端创建备份，同时会写入 `remote_change_logs` 审计表；真实服务器已完成只读 crontab 验证，真实写操作由 mock/contract 测试覆盖，仍需谨慎手动验收。尚未支持系统级 `/etc/cron*` 管理。
 - Nginx 当前为 Phase 4 bootstrap：配置路径通过 `nginx -V` 动态探测，已覆盖 `/etc/nginx` 和 `/www/server/nginx/conf` 这类非标准安装路径；配置文件可浏览和编辑，保存时会先创建 `.hhc-backup-*` 远端备份，再写入配置并执行 `nginx -t`，测试失败会自动恢复备份；reload 需要 UI 确认并写入 `remote_change_logs` 审计表。真实服务器已完成 `nginx -t` 和配置目录只读验证；真实配置写入/reload 仍需谨慎手动验收。
 - Firewall 当前为 Phase 4 bootstrap：只读探测 firewalld、ufw、nftables、iptables 并展示规则输出；真实服务器已验证 firewalld 安装但未运行的降级状态。新增/删除规则等写操作仍待规则 diff、风险确认和审计流程接入。

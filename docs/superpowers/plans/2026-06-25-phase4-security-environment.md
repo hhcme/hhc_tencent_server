@@ -78,16 +78,16 @@ CREATE TABLE environment_profiles (
 - 工作台新增“防火墙”页：展示当前探测到的防火墙后端和规则。
 - 工作台新增“Cron”页：任务列表、启用/禁用、编辑。
 - 工作台新增“环境变量”页：常用 env 文件管理。
-- 所有危险操作使用统一确认 sheet，展示命令、目标和影响范围。
+- 所有危险操作使用统一风险模型和确认入口，展示命令、目标、影响范围和恢复说明。
 
 ## 7. 实施任务
 
 ### Task 1：危险操作框架
 
-- [ ] 定义 `RemoteOperationRisk` 和确认模型。
+- [x] 定义 `RemoteOperationRisk` 和确认模型：当前已覆盖远程文件删除/权限修改、systemd、Cron、Nginx、Environment 的风险级别、目标、命令预览、影响和恢复说明。
 - [x] 所有写操作写入 `remote_change_logs`：当前 systemd、Cron、Nginx 和 Environment 写操作已记录 before/after/status/message，安全组、防火墙待接入。
 - [x] 操作失败时保存 stderr 和上下文：当前 systemd、Cron、Nginx 和 Environment 失败会记录 before snapshot 与错误 message。
-- [ ] UI 展示操作预览和风险说明。
+- [x] UI 展示操作预览和风险说明：当前现有危险确认弹窗已使用统一风险文案，chmod 权限修改 sheet 已展示风险预览。
 
 ### Task 2：安全组
 
@@ -130,7 +130,7 @@ CREATE TABLE environment_profiles (
 ### Task 7：测试
 
 - [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验、Cron 解析和 crontab 写入内容、Nginx 配置列表解析和路径校验、Environment 文件列表解析和路径校验。
-- [ ] 风险确认 ViewModel 测试。
+- [x] 风险确认模型测试：已覆盖 systemd、Cron、Nginx、Environment、远程文件权限修改的风险级别、命令预览、恢复说明和确认文案。
 - [x] Nginx 配置测试/回滚逻辑测试：已覆盖配置保存、保存前备份、`nginx -t`、测试失败回滚、测试通过后 reload 和审计日志写入。
 - [x] Firewall adapter 能力探测测试：已覆盖 firewalld、ufw、nftables、iptables 解析和 firewalld 未运行状态。
 - [x] Environment 文件读写测试：已覆盖受限文件发现、UTF-8 读取、保存前备份、ViewModel 状态流和审计日志写入。
@@ -152,7 +152,7 @@ CREATE TABLE environment_profiles (
 
 1. 云安全组只读基础已可用；规则 diff 和写操作仍待后续接入。
 2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。当前 systemd、Nginx、Cron、Environment 已有工作台基础，Firewall 已有只读探测。
-3. 所有远程写操作有确认和审计。
+3. 所有远程写操作有确认和审计。当前 systemd、Cron、Nginx、Environment 已接入审计；现有危险确认已接入统一风险模型，安全组/防火墙写操作待实现后接入。
 4. Nginx 等配置类操作有备份和回滚。当前 Nginx 已具备读取、编辑、保存前备份、保存后测试、失败回滚和 reload 前保护。
 5. 测试和手动验收通过。
 
