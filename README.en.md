@@ -4,7 +4,7 @@ English | [中文](README.zh-CN.md)
 
 HHC Server Manager is an open-source macOS native server management client. It aims to manage multiple Linux servers through SSH and provide a desktop experience similar to Baota Panel, with optional cloud provider API enhancements for instance discovery, cloud-side metrics, security groups, and power operations.
 
-The repository is currently in the design and implementation planning stage. The first milestone is not a mocked UI. It is a secure, real, verifiable SSH MVP: save a server profile, store credentials, verify the host key, connect to a remote server, run a smoke-test command, and disconnect cleanly.
+The repository is in early macOS implementation. The app can already save server profiles, store credentials in Keychain, verify SSH host keys, run a real OpenSSH smoke test, and execute single remote commands from a simplified command panel.
 
 ## Why
 
@@ -16,12 +16,13 @@ Target users include:
 - Small teams that want one place to manage Tencent Cloud, Alibaba Cloud, Huawei Cloud, or self-hosted Linux servers.
 - Developers who prefer local desktop workflows for server configuration, deployment, and package registry management.
 
-## Planned Features
+## Features
 
 - Server list, groups, search, and connection states.
 - Password and private-key authentication.
 - Sensitive credentials stored in macOS Keychain.
 - First-use SSH host key trust and follow-up verification.
+- Real OpenSSH smoke test and simplified single-command panel.
 - Optional cloud account integration through provider adapters.
 - Cloud instance discovery, resource metadata, cloud metrics, security groups, and power operations.
 - Simplified command panel and server dashboard.
@@ -36,9 +37,9 @@ Target users include:
 |-------|--------|
 | Language | Swift 6.1+ |
 | UI | SwiftUI, with AppKit where needed |
-| SSH | SwiftNIO SSH 0.13.x |
+| SSH | Current bootstrap: system OpenSSH adapter; target core: SwiftNIO SSH 0.13.x |
 | Cloud APIs | Optional provider adapters |
-| Database | SQLite + GRDB 7.x |
+| Database | Current bootstrap: SQLite C API; target persistence layer may move to GRDB 7.x |
 | Credentials | macOS Keychain |
 | Minimum OS | macOS 14 |
 
@@ -74,7 +75,7 @@ Target users include:
 
 ## Development Status
 
-There is no application code yet. The repository first captures architecture, boundaries, open-source collaboration rules, and phase implementation plans so implementation does not need to revisit security, dependency, host-key trust, private-key storage, and concurrency decisions later.
+The macOS app is now under active implementation. Phase 1 foundations are in place: SwiftUI app structure, local SQLite persistence, Keychain-backed credentials, host-key trust, OpenSSH-based real command execution, unit tests, and GitHub Actions CI. Cloud provider integration, dashboard, SFTP, deployment, package registry, and Windows native work remain planned later phases.
 
 ## Contributing
 

@@ -44,6 +44,7 @@ xcodebuild \
 - KeychainService：password、private key 写入、读取、覆盖、删除。
 - ServerManagementService：服务器创建、删除、凭据清理。
 - AddServerViewModel：表单校验。
+- ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行和本次会话历史。
 - SSHIntegrationTests：通过环境变量启用，默认跳过。
 
 ## 真实 SSH 手动验证
@@ -92,7 +93,7 @@ export HHC_TEST_SSH_PASSPHRASE=""
 
 ## 当前实现边界
 
-- 当前 SSH 适配层是 bootstrap OpenSSH adapter，用于先打通真实服务器、主机指纹信任和 smoke test。
+- 当前 SSH 适配层是 bootstrap OpenSSH adapter，用于先打通真实服务器、主机指纹信任、smoke test 和单条命令执行。
 - `SSHClient` 协议已经隔离 UI/ViewModel 与具体 SSH 实现，后续可以替换为 SwiftNIO SSH。
 - OpenSSH adapter 当前支持私钥认证，也支持通过临时 `SSH_ASKPASS` 脚本进行 password 认证。密码从 Keychain 读出后只注入当前 SSH 子进程环境，脚本执行后立即删除。
 - 后续仍需要把 bootstrap OpenSSH adapter 替换或补齐为 SwiftNIO SSH 正式实现。

@@ -4,6 +4,7 @@ struct ServerWorkspaceView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = ServerWorkspaceViewModel()
     @State private var selectedSection = "overview"
+    @State private var commandText = ""
 
     let profile: ServerProfile
 
@@ -14,7 +15,6 @@ struct ServerWorkspaceView: View {
                     .tag("overview")
                 Label("Terminal", systemImage: "terminal")
                     .tag("terminal")
-                    .foregroundStyle(.secondary)
                 Label("Files", systemImage: "folder")
                     .tag("files")
                     .foregroundStyle(.secondary)
@@ -30,7 +30,7 @@ struct ServerWorkspaceView: View {
             VStack(spacing: 0) {
                 workspaceToolbar
                 Divider()
-                overview
+                detailContent
             }
         }
         .sheet(item: $viewModel.pendingHostKey) { hostKey in
@@ -56,6 +56,16 @@ struct ServerWorkspaceView: View {
         }
         .onChange(of: viewModel.connectionState) { _, newState in
             appState.setConnectionState(newState, for: profile)
+        }
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        switch selectedSection {
+        case "terminal":
+            commandPanel
+        default:
+            overview
         }
     }
 
@@ -160,6 +170,81 @@ struct ServerWorkspaceView: View {
             .padding(28)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var commandPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Terminal")
+                    .font(.title2.weight(.semibold))
+
+                HStack(spacing: 8) {
+                    TextField("Run a single command", text: $commandText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .onSubmit {
+                            runCommand()
+                        }
+
+                    Button {
+                        runCommand()
+                    } label: {
+                        if viewModel.isRunningCommand {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Run", systemImage: "play.fill")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isRunningCommand || commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                HStack(spacing: 8) {
+                    quickCommandButton("uptime")
+                    quickCommandButton("whoami")
+                    quickCommandButton("df -h")
+                    quickCommandButton("free -h")
+                }
+            }
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if viewModel.commandHistory.isEmpty {
+                        ContentUnavailableView(
+                            "No Commands Yet",
+                            systemImage: "terminal",
+                            description: Text("Run a command to see stdout, stderr, exit code, and duration.")
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 240)
+                    } else {
+                        ForEach(Array(viewModel.commandHistory.enumerated()), id: \.offset) { _, result in
+                            CommandResultView(result: result)
+                        }
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func quickCommandButton(_ command: String) -> some View {
+        Button(command) {
+            commandText = command
+            runCommand()
+        }
+        .buttonStyle(.bordered)
+        .disabled(viewModel.isRunningCommand)
+    }
+
+    private func runCommand() {
+        let command = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return }
+        viewModel.executeCommand(command, profile: profile, sshClient: appState.sshClient)
     }
 
     private var currentServerBinding: Binding<UUID> {

@@ -66,6 +66,56 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testExecuteCommandStoresResultInHistory() async throws {
+        let profile = makeProfile()
+        let client = MockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.executeCommand("  uptime  ", profile: profile, sshClient: client)
+        try await waitUntil { viewModel.isRunningCommand == false && viewModel.commandResult != nil }
+
+        XCTAssertEqual(viewModel.commandResult?.command, "uptime")
+        XCTAssertEqual(viewModel.commandResult?.stdout, "ran: uptime")
+        XCTAssertEqual(viewModel.commandHistory.map(\.command), ["uptime"])
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testExecuteCommandRejectsEmptyInput() {
+        let profile = makeProfile()
+        let client = MockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.executeCommand("   ", profile: profile, sshClient: client)
+
+        XCTAssertEqual(viewModel.errorMessage, "Command cannot be empty.")
+        XCTAssertFalse(viewModel.isRunningCommand)
+        XCTAssertNil(viewModel.commandResult)
+        XCTAssertTrue(viewModel.commandHistory.isEmpty)
+    }
+
+    func testTrustPendingHostKeyResumesOriginalCommand() async throws {
+        let profile = makeProfile()
+        let hostKey = HostKeyInfo(
+            host: profile.host,
+            port: profile.port,
+            algorithm: "ssh-ed25519",
+            fingerprintSHA256: "SHA256:test",
+            rawPublicKey: "\(profile.host) ssh-ed25519 AAAATEST"
+        )
+        let client = TrustThenExecuteMockSSHClient(hostKey: hostKey)
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.executeCommand("whoami", profile: profile, sshClient: client)
+        try await waitUntil { viewModel.pendingHostKey != nil }
+
+        viewModel.trustPendingHostKey(profile: profile, sshClient: client)
+        try await waitUntil { viewModel.isRunningCommand == false && viewModel.commandResult != nil }
+
+        XCTAssertEqual(viewModel.commandResult?.command, "whoami")
+        XCTAssertEqual(viewModel.commandResult?.stdout, "ran after trust: whoami")
+        XCTAssertTrue(client.didTrustHostKey)
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -119,8 +169,49 @@ private final class MockSSHClient: SSHClient, @unchecked Sendable {
     }
 
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
-        try await runSmokeTest(profile: profile)
+        if let error {
+            throw error
+        }
+        return result ?? CommandResult(
+            command: command,
+            stdout: "ran: \(command)",
+            stderr: "",
+            exitCode: 0,
+            duration: 0
+        )
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class TrustThenExecuteMockSSHClient: SSHClient, @unchecked Sendable {
+    private let hostKey: HostKeyInfo
+    private var shouldThrowHostKey = true
+    private(set) var didTrustHostKey = false
+
+    init(hostKey: HostKeyInfo) {
+        self.hostKey = hostKey
+    }
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        if shouldThrowHostKey {
+            throw SSHClientError.unknownHostKey(hostKey)
+        }
+        return CommandResult(
+            command: command,
+            stdout: "ran after trust: \(command)",
+            stderr: "",
+            exitCode: 0,
+            duration: 0
+        )
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {
+        didTrustHostKey = true
+        shouldThrowHostKey = false
+    }
 }
