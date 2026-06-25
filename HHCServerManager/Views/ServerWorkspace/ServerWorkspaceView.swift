@@ -20,6 +20,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingNginxSave = false
     @State private var pendingEnvironmentSave = false
     @State private var pendingFirewallRule: FirewallRuleRequest?
+    @State private var pendingCloudSecurityGroupRule: CloudSecurityGroupRuleRequest?
     @State private var pendingDeploymentRollback: DeploymentRollbackRequest?
     @State private var pendingVerdaccioInstall = false
     @State private var pendingVerdaccioUserDelete = false
@@ -190,6 +191,18 @@ struct ServerWorkspaceView: View {
                     applyFirewallRule(request.draft)
                 } : .default(Text(request.draft.mutation.displayName)) {
                     applyFirewallRule(request.draft)
+                },
+                secondaryButton: .cancel()
+            )
+        }
+        .alert(item: $pendingCloudSecurityGroupRule) { request in
+            Alert(
+                title: Text("\(request.preview.action.displayName) Security Group Rule?"),
+                message: Text(request.risk.confirmationMessage),
+                primaryButton: request.preview.action == .remove ? .destructive(Text(request.preview.action.displayName)) {
+                    applyCloudSecurityGroupRule(request.preview)
+                } : .default(Text(request.preview.action.displayName)) {
+                    applyCloudSecurityGroupRule(request.preview)
                 },
                 secondaryButton: .cancel()
             )
@@ -2310,6 +2323,11 @@ struct ServerWorkspaceView: View {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                 }
+
+                if let message = viewModel.cloudSecurityGroupActionMessage {
+                    Label(message, systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
+                }
             }
             .padding(20)
 
@@ -2452,11 +2470,17 @@ struct ServerWorkspaceView: View {
                     }
                     CloudSecurityGroupRuleRow(rule: preview.proposedRule)
                     Button {
+                        pendingCloudSecurityGroupRule = CloudSecurityGroupRuleRequest(preview: preview)
                     } label: {
-                        Label("Apply Later", systemImage: "lock")
+                        if viewModel.isMutatingCloudSecurityGroupRule {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Apply", systemImage: "checkmark.circle")
+                        }
                     }
-                    .disabled(true)
-                    .help("Write operations are intentionally disabled until security group API mutation and audit flow are implemented.")
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isCloudSecurityGroupBusy)
                 }
             }
         }
@@ -2476,7 +2500,22 @@ struct ServerWorkspaceView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(rules) { rule in
-                            CloudSecurityGroupRuleRow(rule: rule)
+                            HStack(alignment: .top, spacing: 8) {
+                                CloudSecurityGroupRuleRow(rule: rule)
+                                Spacer()
+                                Button {
+                                    if let snapshot = viewModel.cloudSecurityGroupPolicySnapshot {
+                                        pendingCloudSecurityGroupRule = CloudSecurityGroupRuleRequest(
+                                            preview: CloudSecurityGroupRuleChangePreview.removing(rule: rule, from: snapshot)
+                                        )
+                                    }
+                                } label: {
+                                    Label("Remove", systemImage: "minus.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .tint(.red)
+                                .disabled(isCloudSecurityGroupBusy)
+                            }
                         }
                     }
                     .padding(10)
@@ -2828,6 +2867,15 @@ struct ServerWorkspaceView: View {
             profile: profile,
             sshClient: appState.sshClient,
             firewallManager: appState.firewallManager,
+            repository: appState.repository
+        )
+    }
+
+    private func applyCloudSecurityGroupRule(_ preview: CloudSecurityGroupRuleChangePreview) {
+        viewModel.applyCloudSecurityGroupRuleChange(
+            preview,
+            profile: profile,
+            cloudSecurityGroupService: appState.cloudSecurityGroupService,
             repository: appState.repository
         )
     }
@@ -3296,7 +3344,8 @@ struct ServerWorkspaceView: View {
 
     private var isCloudSecurityGroupBusy: Bool {
         viewModel.isLoadingCloudSecurityGroups ||
-            viewModel.isLoadingCloudSecurityGroupPolicies
+            viewModel.isLoadingCloudSecurityGroupPolicies ||
+            viewModel.isMutatingCloudSecurityGroupRule
     }
 
     private var isRegistryBusy: Bool {
@@ -3438,6 +3487,18 @@ private struct FirewallRuleRequest: Identifiable {
 
     var id: String {
         risk.id
+    }
+}
+
+private struct CloudSecurityGroupRuleRequest: Identifiable {
+    var preview: CloudSecurityGroupRuleChangePreview
+
+    var id: String {
+        preview.id
+    }
+
+    var risk: RemoteOperationRisk {
+        RemoteOperationRiskFactory.securityGroupChange(preview)
     }
 }
 

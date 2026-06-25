@@ -800,7 +800,7 @@ enum RemoteOperationRiskFactory {
             target: "\(preview.group.name) (\(preview.group.securityGroupId))",
             commandPreview: preview.commandPreview,
             impact: preview.impact,
-            recovery: "Review the generated diff before enabling future write operations. No cloud-side change is executed by this preview.",
+            recovery: preview.action == .add ? "Remove the same rule if the cloud-side change was too broad." : "Add the same rule again if traffic should remain allowed.",
             auditTargetType: "security_group",
             auditAction: preview.action.rawValue
         )
@@ -1005,6 +1005,7 @@ enum CloudCapability: String, Codable, CaseIterable, Identifiable, Sendable {
     case instanceMetadata
     case cloudMetrics
     case securityGroups
+    case securityGroupActions
     case cloudDisks
     case cloudSnapshots
     case cloudBilling
@@ -1026,6 +1027,8 @@ enum CloudCapability: String, Codable, CaseIterable, Identifiable, Sendable {
             "Cloud Metrics"
         case .securityGroups:
             "Security Groups"
+        case .securityGroupActions:
+            "Security Group Actions"
         case .cloudDisks:
             "Cloud Disks"
         case .cloudSnapshots:
@@ -1402,6 +1405,14 @@ struct CloudSecurityGroupRuleChangePreview: Identifiable, Equatable, Hashable, S
         }
         return results
     }
+}
+
+struct CloudSecurityGroupRuleChangeResult: Equatable, Hashable, Sendable {
+    var preview: CloudSecurityGroupRuleChangePreview
+    var requestId: String?
+    var beforeSnapshot: CloudSecurityGroupPolicySnapshot
+    var afterSnapshot: CloudSecurityGroupPolicySnapshot
+    var capturedAt: Date
 }
 
 extension CloudSecurityGroupRule {

@@ -3598,6 +3598,29 @@ final class CloudSecurityGroupService: @unchecked Sendable {
         )
     }
 
+    func applyRuleChange(_ preview: CloudSecurityGroupRuleChangePreview) async throws -> CloudSecurityGroupRuleChangeResult {
+        guard let account = try repository.fetchCloudProviderAccounts().first(where: { $0.id == preview.group.accountId && $0.enabled }) else {
+            throw CloudProviderError.authenticationFailed("Linked cloud account is missing or disabled.")
+        }
+        try registry.require(.securityGroupActions, providerId: account.providerId)
+        guard let credential = try keychain.readCloudCredential(keychainRef: account.keychainRef) else {
+            throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
+        }
+        let beforeSnapshot = try await loadPolicies(for: preview.group)
+        let requestId = try await registry.adapter(for: account.providerId).applySecurityGroupRuleChange(
+            credential: credential,
+            preview: preview
+        )
+        let afterSnapshot = try await loadPolicies(for: preview.group)
+        return CloudSecurityGroupRuleChangeResult(
+            preview: preview,
+            requestId: requestId,
+            beforeSnapshot: beforeSnapshot,
+            afterSnapshot: afterSnapshot,
+            capturedAt: now()
+        )
+    }
+
     private func linkedCloudContext(for profile: ServerProfile) throws -> (
         link: CloudInstanceLink,
         account: CloudProviderAccount,
@@ -4805,6 +4828,10 @@ protocol CloudProviderAdapter: Sendable {
         group: CloudSecurityGroup,
         capturedAt: Date
     ) async throws -> CloudSecurityGroupPolicySnapshot
+    func applySecurityGroupRuleChange(
+        credential: CloudProviderCredential,
+        preview: CloudSecurityGroupRuleChangePreview
+    ) async throws -> String?
     func fetchDisks(
         credential: CloudProviderCredential,
         accountId: UUID,
@@ -4862,6 +4889,15 @@ protocol CloudProviderAdapter: Sendable {
         regionId: String,
         instanceId: String
     ) async throws
+}
+
+extension CloudProviderAdapter {
+    func applySecurityGroupRuleChange(
+        credential: CloudProviderCredential,
+        preview: CloudSecurityGroupRuleChangePreview
+    ) async throws -> String? {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .securityGroupActions)
+    }
 }
 
 enum CloudProviderError: LocalizedError, Equatable {
@@ -5145,6 +5181,7 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .instanceMetadata,
         .cloudMetrics,
         .securityGroups,
+        .securityGroupActions,
         .cloudDisks,
         .cloudSnapshots,
         .cloudBilling,
@@ -5350,6 +5387,41 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             egress: Self.mapSecurityGroupRules(policySet?.egress ?? [], direction: .egress),
             capturedAt: capturedAt
         )
+    }
+
+    func applySecurityGroupRuleChange(
+        credential: CloudProviderCredential,
+        preview: CloudSecurityGroupRuleChangePreview
+    ) async throws -> String? {
+        let payload = TencentSecurityGroupPolicyMutationPayload(
+            securityGroupId: preview.group.securityGroupId,
+            securityGroupPolicySet: TencentSecurityGroupPolicyMutationSet(preview: preview)
+        )
+        let action: String
+        switch (preview.action, preview.proposedRule.direction) {
+        case (.add, .ingress):
+            action = "AuthorizeSecurityGroupIngress"
+        case (.add, .egress):
+            action = "AuthorizeSecurityGroupEgress"
+        case (.remove, .ingress):
+            action = "RevokeSecurityGroupIngress"
+        case (.remove, .egress):
+            action = "RevokeSecurityGroupEgress"
+        }
+
+        let response: TencentCloudEnvelope<TencentSecurityGroupPolicyMutationResponse> = try await request(
+            credential: credential,
+            endpoint: TencentCloudEndpoint(
+                host: "vpc.intl.tencentcloudapi.com",
+                service: "vpc",
+                action: action,
+                version: "2017-03-12",
+                region: preview.group.regionId
+            ),
+            payload: payload
+        )
+        try throwIfNeeded(response.response.error)
+        return response.response.requestId
     }
 
     func fetchDisks(
@@ -6783,6 +6855,71 @@ private struct TencentDescribeSecurityGroupPoliciesPayload: Encodable {
     }
 }
 
+private struct TencentSecurityGroupPolicyMutationPayload: Encodable {
+    var securityGroupId: String
+    var securityGroupPolicySet: TencentSecurityGroupPolicyMutationSet
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroupId = "SecurityGroupId"
+        case securityGroupPolicySet = "SecurityGroupPolicySet"
+    }
+}
+
+private struct TencentSecurityGroupPolicyMutationSet: Encodable {
+    var ingress: [TencentSecurityGroupPolicyPayload]?
+    var egress: [TencentSecurityGroupPolicyPayload]?
+
+    init(preview: CloudSecurityGroupRuleChangePreview) {
+        let policy = TencentSecurityGroupPolicyPayload(rule: preview.proposedRule)
+        switch preview.proposedRule.direction {
+        case .ingress:
+            ingress = [policy]
+            egress = nil
+        case .egress:
+            ingress = nil
+            egress = [policy]
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ingress = "Ingress"
+        case egress = "Egress"
+    }
+}
+
+private struct TencentSecurityGroupPolicyPayload: Encodable {
+    var policyIndex: Int?
+    var protocolName: String?
+    var port: String?
+    var cidrBlock: String?
+    var ipv6CidrBlock: String?
+    var securityGroupId: String?
+    var action: String?
+    var policyDescription: String?
+
+    init(rule: CloudSecurityGroupRule) {
+        policyIndex = rule.policyIndex
+        protocolName = rule.protocolName
+        port = rule.port
+        cidrBlock = rule.cidrBlock
+        ipv6CidrBlock = rule.ipv6CidrBlock
+        securityGroupId = rule.referencedSecurityGroupId
+        action = rule.action
+        policyDescription = rule.description
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case policyIndex = "PolicyIndex"
+        case protocolName = "Protocol"
+        case port = "Port"
+        case cidrBlock = "CidrBlock"
+        case ipv6CidrBlock = "Ipv6CidrBlock"
+        case securityGroupId = "SecurityGroupId"
+        case action = "Action"
+        case policyDescription = "PolicyDescription"
+    }
+}
+
 private struct TencentGetMonitorDataPayload: Encodable {
     var namespace: String
     var metricName: String
@@ -6939,6 +7076,16 @@ private struct TencentDescribeSecurityGroupPoliciesResponse: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case securityGroupPolicySet = "SecurityGroupPolicySet"
+        case error = "Error"
+    }
+}
+
+private struct TencentSecurityGroupPolicyMutationResponse: Decodable {
+    var requestId: String?
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case requestId = "RequestId"
         case error = "Error"
     }
 }

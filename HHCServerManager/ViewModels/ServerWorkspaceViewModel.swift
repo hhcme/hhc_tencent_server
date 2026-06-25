@@ -65,7 +65,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var cloudSecurityGroupPolicySnapshot: CloudSecurityGroupPolicySnapshot?
     @Published var isLoadingCloudSecurityGroups = false
     @Published var isLoadingCloudSecurityGroupPolicies = false
+    @Published var isMutatingCloudSecurityGroupRule = false
     @Published var cloudSecurityGroupErrorMessage: String?
+    @Published var cloudSecurityGroupActionMessage: String?
     @Published var deploymentProjects: [DeploymentProject] = []
     @Published var selectedDeploymentProject: DeploymentProject?
     @Published var deploymentRuns: [DeploymentRun] = []
@@ -1366,6 +1368,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     ) {
         isLoadingCloudSecurityGroups = true
         cloudSecurityGroupErrorMessage = nil
+        cloudSecurityGroupActionMessage = nil
 
         Task {
             do {
@@ -1404,6 +1407,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         selectedCloudSecurityGroup = group
         isLoadingCloudSecurityGroupPolicies = true
         cloudSecurityGroupErrorMessage = nil
+        cloudSecurityGroupActionMessage = nil
 
         Task {
             do {
@@ -1416,6 +1420,56 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.cloudSecurityGroupErrorMessage = error.localizedDescription
                     self.isLoadingCloudSecurityGroupPolicies = false
+                }
+            }
+        }
+    }
+
+    func applyCloudSecurityGroupRuleChange(
+        _ preview: CloudSecurityGroupRuleChangePreview,
+        profile: ServerProfile,
+        cloudSecurityGroupService: CloudSecurityGroupService,
+        repository: ServerRepository? = nil
+    ) {
+        isMutatingCloudSecurityGroupRule = true
+        cloudSecurityGroupErrorMessage = nil
+        cloudSecurityGroupActionMessage = nil
+
+        Task {
+            do {
+                let result = try await cloudSecurityGroupService.applyRuleChange(preview)
+                let message = "\(preview.action.displayName) security group rule succeeded."
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "security_group",
+                    targetId: preview.group.securityGroupId,
+                    action: preview.action.rawValue,
+                    beforeSnapshot: Self.securityGroupSnapshotText(result.beforeSnapshot),
+                    afterSnapshot: Self.securityGroupSnapshotText(result.afterSnapshot),
+                    status: "success",
+                    message: result.requestId.map { "\(message) RequestId: \($0)." } ?? message
+                )
+                await MainActor.run {
+                    self.cloudSecurityGroupPolicySnapshot = result.afterSnapshot
+                    self.cloudSecurityGroupActionMessage = message
+                    self.isMutatingCloudSecurityGroupRule = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "security_group",
+                    targetId: preview.group.securityGroupId,
+                    action: preview.action.rawValue,
+                    beforeSnapshot: self.cloudSecurityGroupPolicySnapshot.map(Self.securityGroupSnapshotText),
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.cloudSecurityGroupErrorMessage = error.localizedDescription
+                    self.isMutatingCloudSecurityGroupRule = false
                 }
             }
         }
@@ -1811,6 +1865,19 @@ final class ServerWorkspaceViewModel: ObservableObject {
             "active=\(unit.activeState)",
             "sub=\(unit.subState)",
             "description=\(unit.description)",
+        ].joined(separator: "\n")
+    }
+
+    private static func securityGroupSnapshotText(_ snapshot: CloudSecurityGroupPolicySnapshot) -> String {
+        let ingress = snapshot.ingress.map { "ingress \($0.summary)" }.joined(separator: "\n")
+        let egress = snapshot.egress.map { "egress \($0.summary)" }.joined(separator: "\n")
+        return [
+            "group=\(snapshot.group.securityGroupId)",
+            "version=\(snapshot.version ?? "unknown")",
+            "ingress:",
+            ingress.isEmpty ? "(empty)" : ingress,
+            "egress:",
+            egress.isEmpty ? "(empty)" : egress,
         ].joined(separator: "\n")
     }
 

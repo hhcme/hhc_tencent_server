@@ -100,6 +100,7 @@ All notable changes to this project will be documented in this file.
 - Added Dashboard snapshot persistence so successful refreshes are cached in SQLite and restored when reopening a server workspace.
 - Persisted remote file transfer history with progress state restoration in the macOS workspace.
 - Added limited Firewall rule add/delete actions with validation, risk confirmation, refreshed snapshots, and remote change audit logs.
+- Added Tencent Cloud security group single-rule add/remove actions with provider capability gating, risk confirmation, refreshed policy snapshots, RequestId capture, and remote change audit logs.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -195,3 +196,4 @@ All notable changes to this project will be documented in this file.
 - 添加 Dashboard 快照持久化，成功刷新会缓存到 SQLite，重新打开服务器工作台时恢复最近快照。
 - 添加远程文件传输历史持久化，macOS 工作台可恢复最近传输记录和进度状态。
 - 添加受限防火墙规则新增/删除动作，包含输入校验、风险确认、规则快照刷新和远程变更审计日志。
+- 添加腾讯云安全组单条规则新增/删除动作，包含 provider capability 门禁、风险确认、规则快照刷新、RequestId 捕获和远程变更审计日志。

@@ -2833,6 +2833,62 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].jsonBody?["SecurityGroupId"] as? String, "sg-123")
     }
 
+    func testTencentCloudAdapterAppliesSecurityGroupRuleChanges() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "RequestId": "request-authorize"
+              }
+            }
+            """
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+        let group = CloudSecurityGroup(
+            accountId: UUID(),
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            securityGroupId: "sg-123",
+            name: "web",
+            description: nil,
+            projectId: nil,
+            isDefault: false,
+            createdTime: nil,
+            updatedTime: nil
+        )
+        let preview = CloudSecurityGroupRuleChangePreview.adding(
+            draft: CloudSecurityGroupRuleDraft(
+                direction: .ingress,
+                protocolName: "TCP",
+                port: "443",
+                cidrBlock: "203.0.113.0/24",
+                action: "ACCEPT",
+                description: "HTTPS"
+            ),
+            to: CloudSecurityGroupPolicySnapshot(group: group, version: "7", ingress: [], egress: [], capturedAt: Date())
+        )
+
+        let requestId = try await adapter.applySecurityGroupRuleChange(
+            credential: CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE"),
+            preview: preview
+        )
+
+        XCTAssertEqual(requestId, "request-authorize")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Action"), "AuthorizeSecurityGroupIngress")
+        XCTAssertEqual(transport.requests[0].url?.host, "vpc.intl.tencentcloudapi.com")
+        XCTAssertEqual(transport.requests[0].jsonBody?["SecurityGroupId"] as? String, "sg-123")
+        let policySet = try XCTUnwrap(transport.requests[0].jsonBody?["SecurityGroupPolicySet"] as? [String: Any])
+        let ingress = try XCTUnwrap(policySet["Ingress"] as? [[String: Any]])
+        XCTAssertEqual(ingress.first?["Protocol"] as? String, "TCP")
+        XCTAssertEqual(ingress.first?["Port"] as? String, "443")
+        XCTAssertEqual(ingress.first?["CidrBlock"] as? String, "203.0.113.0/24")
+        XCTAssertEqual(ingress.first?["Action"] as? String, "ACCEPT")
+    }
+
     func testTencentCloudAdapterFetchesDisksSnapshotsAndBillingStates() async throws {
         let transport = MockTencentCloudTransport(responses: [
             """

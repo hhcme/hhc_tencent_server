@@ -62,7 +62,7 @@ CREATE TABLE environment_profiles (
 
 ## 5. 模块设计
 
-- `CloudSecurityGroupService`：云安全组只读读取、规则读取；后续扩展规则 diff 和写操作提交。
+- `CloudSecurityGroupService`：云安全组读取、规则读取、规则 diff 和支持 provider 的单条写操作提交。
 - `SystemdServiceManager`：服务列表、状态、start/stop/restart、journal 日志。
 - `NginxConfigManager`：站点配置读取、编辑、测试、reload、回滚。
 - `FirewallAdapter`：ufw/firewalld/iptables 能力探测和有限操作。
@@ -85,7 +85,7 @@ CREATE TABLE environment_profiles (
 ### Task 1：危险操作框架
 
 - [x] 定义 `RemoteOperationRisk` 和确认模型：当前已覆盖远程文件删除/权限修改、systemd、Cron、Nginx、Environment 的风险级别、目标、命令预览、影响和恢复说明。
-- [x] 所有写操作写入 `remote_change_logs`：当前 systemd、Cron、Nginx、Environment 和 Firewall 写操作已记录 before/after/status/message，安全组云端写操作待接入。
+- [x] 所有写操作写入 `remote_change_logs`：当前 systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已记录 before/after/status/message。
 - [x] 操作失败时保存 stderr 和上下文：当前 systemd、Cron、Nginx、Environment 和 Firewall 失败会记录 before snapshot 与错误 message。
 - [x] UI 展示操作预览和风险说明：当前现有危险确认弹窗已使用统一风险文案，chmod 权限修改 sheet 已展示风险预览。
 
@@ -93,8 +93,8 @@ CREATE TABLE environment_profiles (
 
 - [x] 扩展 CloudProviderAdapter 支持安全组读取：当前 provider capability 已包含 `securityGroups`，并接入 `CloudSecurityGroupService`。
 - [x] 腾讯云安全组规则读取：当前通过 VPC `DescribeSecurityGroups` / `DescribeSecurityGroupPolicies` 读取账号地域下的安全组和规则。
-- [x] 规则 diff 和预览：当前已支持本地生成安全组规则新增/删除 diff、before/after 计数、风险级别、命令预览和警告；尚不执行云端写入。
-- [ ] 有限写操作：新增/删除单条规则。
+- [x] 规则 diff 和预览：当前已支持本地生成安全组规则新增/删除 diff、before/after 计数、风险级别、命令预览和警告。
+- [x] 有限写操作：腾讯云已支持新增/删除单条 ingress/egress 规则，并在执行前确认风险。
 - [ ] 权限不足时明确提示。
 
 ### Task 3：systemd
@@ -134,25 +134,25 @@ CREATE TABLE environment_profiles (
 - [x] Nginx 配置测试/回滚逻辑测试：已覆盖配置保存、保存前备份、`nginx -t`、测试失败回滚、测试通过后 reload 和审计日志写入。
 - [x] Firewall adapter 能力探测测试：已覆盖 firewalld、ufw、nftables、iptables 解析和 firewalld 未运行状态。
 - [x] Environment 文件读写测试：已覆盖受限文件发现、UTF-8 读取、保存前备份、ViewModel 状态流和审计日志写入。
-- [x] 安全组只读测试：已覆盖 TencentCloudAdapter VPC 安全组/规则 API contract、CloudSecurityGroupService 账号/凭据/关联链路和 ViewModel 加载/选择状态流。
+- [x] 安全组测试：已覆盖 TencentCloudAdapter VPC 安全组/规则读取和单条写操作 API contract、CloudSecurityGroupService 账号/凭据/关联链路、ViewModel 加载/选择/写入刷新和审计状态流。
 - [x] RemoteChangeLogStore 测试：已覆盖保存、倒序查询、按 server 过滤和 server 删除后的 SET NULL。
 
 ### Task 8：手动验收
 
 - [ ] 无云账号时安全组页不可用但 SSH 功能正常。
 - [ ] 腾讯云安全组可读取。当前 mock/contract 测试已通过，真实腾讯云账号手动验收待执行。
-- [x] 新增安全组规则前显示预览和确认基础：当前安全组详情页可生成拟新增规则预览并展示风险，写操作按钮保持禁用。
+- [x] 新增安全组规则前显示预览和确认基础：当前安全组详情页可生成拟新增规则预览并展示风险，确认后执行腾讯云单条规则写入。
 - [ ] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，重启操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
 - [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，真实配置写入/reload 待谨慎手动验收。
 - [x] 防火墙后端只读探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作已有 mock/contract 测试覆盖，真实服务器写入仍需谨慎手动验收。
 - [ ] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，禁用/恢复写操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
-- [ ] 所有写操作可在操作日志中查到。当前 systemd、Cron、Nginx、Environment 和 Firewall 写操作已写入 `remote_change_logs`，安全组云端写操作待实现后接入。
+- [ ] 所有写操作可在操作日志中查到。当前 systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`，真实服务器/真实云账号验收仍需继续补齐。
 
 ## 8. 完成标志
 
-1. 云安全组只读基础和规则 diff/preview 已可用；云端写操作仍待后续接入。
+1. 云安全组读取、规则 diff/preview 和腾讯云单条规则写操作已可用；实例精确安全组关联和多云写操作仍待后续接入。
 2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。当前 systemd、Nginx、Cron、Environment 已有工作台基础，Firewall 已支持只读探测和受限规则写操作。
-3. 所有远程写操作有确认和审计。当前 systemd、Cron、Nginx、Environment 和 Firewall 已接入审计；现有危险确认已接入统一风险模型，安全组云端写操作待实现后接入。
+3. 所有远程写操作有确认和审计。当前 systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 已接入审计；现有危险确认已接入统一风险模型。
 4. Nginx 等配置类操作有备份和回滚。当前 Nginx 已具备读取、编辑、保存前备份、保存后测试、失败回滚和 reload 前保护。
 5. 测试和手动验收通过。
 
