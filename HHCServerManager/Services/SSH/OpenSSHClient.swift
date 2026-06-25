@@ -7,6 +7,7 @@ enum SSHClientError: LocalizedError {
     case missingPassword
     case processFailed(String)
     case invalidHostKeyScan
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +23,8 @@ enum SSHClientError: LocalizedError {
             message
         case .invalidHostKeyScan:
             "Could not read a valid host key from ssh-keyscan."
+        case .cancelled:
+            "Command was cancelled."
         }
     }
 }
@@ -219,34 +222,73 @@ final class OpenSSHClient: SSHClient, @unchecked Sendable {
         arguments: [String],
         environment: [String: String] = [:]
     ) async throws -> ProcessResult {
-        try await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = arguments
-            if !environment.isEmpty {
-                process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
-            }
+        let processBox = ProcessBox()
+        return try await withTaskCancellationHandler {
+            try await Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
 
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
+                let process = Process()
+                processBox.set(process)
+                process.executableURL = URL(fileURLWithPath: executable)
+                process.arguments = arguments
+                if !environment.isEmpty {
+                    process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+                }
 
-            do {
-                try process.run()
-            } catch {
-                throw SSHClientError.processFailed(error.localizedDescription)
-            }
-            process.waitUntilExit()
+                let stdout = Pipe()
+                let stderr = Pipe()
+                process.standardOutput = stdout
+                process.standardError = stderr
 
-            let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
-            return ProcessResult(
-                stdout: String(data: stdoutData, encoding: .utf8) ?? "",
-                stderr: String(data: stderrData, encoding: .utf8) ?? "",
-                exitCode: process.terminationStatus
-            )
-        }.value
+                do {
+                    try process.run()
+                } catch {
+                    throw SSHClientError.processFailed(error.localizedDescription)
+                }
+
+                if Task.isCancelled {
+                    processBox.terminate()
+                    throw SSHClientError.cancelled
+                }
+
+                process.waitUntilExit()
+
+                if Task.isCancelled {
+                    throw SSHClientError.cancelled
+                }
+
+                let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
+                let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+                return ProcessResult(
+                    stdout: String(data: stdoutData, encoding: .utf8) ?? "",
+                    stderr: String(data: stderrData, encoding: .utf8) ?? "",
+                    exitCode: process.terminationStatus
+                )
+            }.value
+        } onCancel: {
+            processBox.terminate()
+        }
+    }
+}
+
+private final class ProcessBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+
+    func set(_ process: Process) {
+        lock.lock()
+        self.process = process
+        lock.unlock()
+    }
+
+    func terminate() {
+        lock.lock()
+        let process = process
+        lock.unlock()
+
+        if process?.isRunning == true {
+            process?.terminate()
+        }
     }
 }
 

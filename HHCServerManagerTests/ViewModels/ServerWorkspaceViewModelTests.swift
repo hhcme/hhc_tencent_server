@@ -130,6 +130,22 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.commandHistory.map(\.command), ["df -h"])
     }
 
+    func testCancelCommandStopsRunningStateAndShowsCancellationSummary() async throws {
+        let profile = makeProfile()
+        let client = SlowSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.executeCommand("sleep 30", profile: profile, sshClient: client)
+        try await waitUntil { viewModel.isRunningCommand }
+        viewModel.cancelCommand()
+
+        XCTAssertFalse(viewModel.isRunningCommand)
+        XCTAssertEqual(viewModel.lastCommandFailure, CommandFailureSummary(
+            command: "sleep 30",
+            message: "Command was cancelled."
+        ))
+    }
+
     func testTrustPendingHostKeyResumesOriginalCommand() async throws {
         let profile = makeProfile()
         let hostKey = HostKeyInfo(
@@ -293,4 +309,23 @@ private final class TrustThenExecuteMockSSHClient: SSHClient, @unchecked Sendabl
         didTrustHostKey = true
         shouldThrowHostKey = false
     }
+}
+
+private final class SlowSSHClient: SSHClient, @unchecked Sendable {
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        try await Task.sleep(nanoseconds: 5_000_000_000)
+        return CommandResult(
+            command: command,
+            stdout: "",
+            stderr: "",
+            exitCode: 0,
+            duration: 5
+        )
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
 }

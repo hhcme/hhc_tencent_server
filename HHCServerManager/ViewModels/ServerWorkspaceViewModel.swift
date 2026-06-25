@@ -12,6 +12,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var pendingHostKey: HostKeyInfo?
     private var pendingHostKeyAction: PendingHostKeyAction?
+    private var commandTask: Task<Void, Never>?
+    private var runningCommand: String?
 
     func configure(initialState: SSHConnectionState) {
         connectionState = initialState
@@ -92,20 +94,34 @@ final class ServerWorkspaceViewModel: ObservableObject {
         errorMessage = nil
         commandResult = nil
         lastCommandFailure = nil
+        runningCommand = trimmedCommand
 
-        Task {
+        commandTask?.cancel()
+        commandTask = Task {
             do {
                 let result = try await sshClient.execute(trimmedCommand, profile: profile)
                 await MainActor.run {
                     self.storeCommandResult(result)
                     self.persistCommandResult(result, profile: profile, repository: repository)
                     self.isRunningCommand = false
+                    self.commandTask = nil
+                    self.runningCommand = nil
                 }
             } catch SSHClientError.unknownHostKey(let hostKeyInfo) {
                 await MainActor.run {
                     self.pendingHostKey = hostKeyInfo
                     self.pendingHostKeyAction = .command(trimmedCommand, repository)
                     self.isRunningCommand = false
+                    self.commandTask = nil
+                    self.runningCommand = nil
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.storeCommandCancellation(command: trimmedCommand)
+                }
+            } catch SSHClientError.cancelled {
+                await MainActor.run {
+                    self.storeCommandCancellation(command: trimmedCommand)
                 }
             } catch {
                 await MainActor.run {
@@ -117,9 +133,23 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     )
                     self.errorMessage = error.localizedDescription
                     self.isRunningCommand = false
+                    self.commandTask = nil
+                    self.runningCommand = nil
                 }
             }
         }
+    }
+
+    func cancelCommand() {
+        guard isRunningCommand else { return }
+        commandTask?.cancel()
+        commandTask = nil
+        isRunningCommand = false
+        lastCommandFailure = CommandFailureSummary(
+            command: runningCommand ?? "Current command",
+            message: SSHClientError.cancelled.localizedDescription
+        )
+        runningCommand = nil
     }
 
     func rerunCommand(
@@ -230,6 +260,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func storeCommandCancellation(command: String) {
+        lastCommandFailure = CommandFailureSummary(
+            command: command,
+            message: SSHClientError.cancelled.localizedDescription
+        )
+        errorMessage = nil
+        isRunningCommand = false
+        commandTask = nil
+        runningCommand = nil
     }
 }
 

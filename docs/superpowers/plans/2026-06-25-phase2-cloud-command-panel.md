@@ -152,7 +152,7 @@ CREATE TABLE operation_logs (
 
 ### Task 6：简化命令面板
 
-- [ ] 实现命令输入、执行状态、取消、输出展示。
+- [x] 实现命令输入、执行状态、取消、输出展示。
 - [x] 持久化 command、exit code、duration、created at 等命令元数据。
 - [x] 明确 stdout/stderr 默认只保留在本次会话中，不写入 SQLite。
 - [x] stdout/stderr 分开展示。

@@ -48,7 +48,7 @@ xcodebuild \
 - CloudInstanceSyncService：读取 Keychain 云凭据、同步云实例 upsert、保留已有 SSH 关联、从云实例创建 SSH profile、关联/解除关联。
 - CloudImportSheet / CloudImportViewModel：腾讯云账号验证后保存、加载可用地域、同步实例、选择实例并导入为 SSH profile。
 - AddServerViewModel：表单校验。
-- ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史和历史命令重跑。
+- ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行与取消、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史和历史命令重跑。
 - SSHIntegrationTests：通过环境变量启用，默认跳过。
 
 ## 真实 SSH 手动验证
@@ -97,7 +97,7 @@ export HHC_TEST_SSH_PASSPHRASE=""
 
 ## 当前实现边界
 
-- 当前 SSH 适配层是 bootstrap OpenSSH adapter，用于先打通真实服务器、主机指纹信任、smoke test 和单条命令执行。
+- 当前 SSH 适配层是 bootstrap OpenSSH adapter，用于先打通真实服务器、主机指纹信任、smoke test、单条命令执行和取消；取消运行中命令时会 terminate 对应 OpenSSH 子进程。
 - 命令面板只持久化 command、exit code、duration 和 created at；stdout/stderr 默认只保留在本次工作台会话中，分开展示但不写入 SQLite，避免把敏感输出落盘。
 - 云账号当前已实现本地元数据、云实例关联表、Keychain 云凭据命名空间、Tencent Cloud 只读 adapter、云实例同步服务和基础导入 UI；真实腾讯云账号手动验收仍在后续任务中。
 - TencentCloudAdapter 已接入腾讯云 API 3.0 TC3-HMAC-SHA256 签名流程，并实现 Region 与 CVM instance 只读查询；默认测试使用 mock transport，不提交真实 SecretId/SecretKey。

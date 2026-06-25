@@ -190,15 +190,17 @@ struct ServerWorkspaceView: View {
                     Button {
                         runCommand()
                     } label: {
-                        if viewModel.isRunningCommand {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Label("Run", systemImage: "play.fill")
-                        }
+                        Label("Run", systemImage: "play.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.isRunningCommand || commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button {
+                        viewModel.cancelCommand()
+                    } label: {
+                        Label("Cancel", systemImage: "stop.fill")
+                    }
+                    .disabled(!viewModel.isRunningCommand)
                 }
 
                 HStack(spacing: 8) {
