@@ -2,9 +2,9 @@
 
 [English](README.en.md) | [中文](README.zh-CN.md)
 
-HHC Server Manager is an open-source macOS native server management client. It aims to provide a Baota-like desktop experience for managing Linux servers over SSH, without depending on any cloud vendor API.
+HHC Server Manager is an open-source macOS native server management client. It aims to provide a Baota-like desktop experience for managing Linux servers through SSH, with optional cloud provider API enhancements for instance discovery, cloud-side metrics, security groups, and power operations.
 
-HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，目标是通过纯 SSH 提供类似宝塔面板的桌面端体验，不依赖腾讯云、阿里云、华为云等云厂商 API。
+HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，目标是以 SSH 为核心提供类似宝塔面板的桌面端体验，并在用户配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
 > Project status: design and Phase 1 planning. The first implementation milestone is a secure, real SSH connection MVP.
 >
@@ -13,14 +13,14 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 ## Highlights / 亮点
 
 - macOS native app planned with SwiftUI.
-- Vendor-neutral server management through SSH.
+- SSH-first server management with optional cloud API enhancement.
 - Credentials stored in macOS Keychain.
 - Host key verification as a first-class security requirement.
 - Bilingual documentation in English and Chinese.
 - MIT licensed.
 
 - 计划使用 SwiftUI 构建 macOS 原生应用。
-- 通过 SSH 管理服务器，不绑定云厂商。
+- SSH-first 服务器管理，云 API 作为可选增强能力。
 - SSH 密码、私钥等敏感信息存入 macOS Keychain。
 - 把主机指纹验证作为基础安全能力。
 - 中英文双语文档。
@@ -31,17 +31,20 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - [Documentation index / 文档索引](docs/README.md)
 - [Design document, Chinese / 设计文档中文](docs/superpowers/specs/2026-06-25-server-manager-design.md)
 - [Design document, English](docs/en/2026-06-25-server-manager-design.md)
+- [Cloud Provider API enhancement, Chinese / 云厂商 API 增强层中文](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)
+- [Cloud Provider API enhancement, English](docs/en/2026-06-25-cloud-provider-integration.md)
 - [Phase 1 plan, Chinese / Phase 1 中文计划](docs/superpowers/plans/2026-06-25-phase1-ssh-connection.md)
 - [Phase 1 plan, English](docs/en/2026-06-25-phase1-ssh-connection.md)
 
 ## Planned Roadmap / 规划路线
 
 1. Phase 1: macOS app skeleton, server CRUD, Keychain integration, host key trust, real SSH command smoke test.
-2. Phase 2: Dashboard and simplified command panel.
-3. Phase 3: SFTP technical validation and file manager.
-4. Phase 4: systemd, Nginx, firewall, cron, and environment management.
+2. Phase 2: Cloud provider foundation, cloud account settings, Tencent Cloud read-only instance discovery, and simplified command panel.
+3. Phase 3: Dashboard combining SSH metrics and cloud metrics, plus SFTP technical validation and file manager.
+4. Phase 4: security group management, systemd, Nginx, firewall, cron, and environment management.
 5. Phase 5: GitLab deployment workflows.
 6. Phase 6: private npm and Dart/Flutter package registries.
+7. Phase 7: additional cloud providers, snapshots, disks, billing, and advanced cloud resource management.
 
 ## Contributing / 参与贡献
 

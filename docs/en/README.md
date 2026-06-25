@@ -1,6 +1,7 @@
 # English Documentation
 
 - [Design document](2026-06-25-server-manager-design.md)
+- [Cloud Provider API enhancement](2026-06-25-cloud-provider-integration.md)
 - [Phase 1 implementation plan: app skeleton and real SSH MVP](2026-06-25-phase1-ssh-connection.md)
 - [中文文档](../zh/README.md)
 

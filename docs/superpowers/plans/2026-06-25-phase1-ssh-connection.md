@@ -25,6 +25,7 @@ Phase 1 不实现以下能力：
 - 完整 PTY 终端。
 - SFTP 文件管理器。
 - Dashboard 监控图表。
+- 云厂商 API 接入、实例发现、云监控和安全组管理。
 - systemd/Nginx/firewall/Cron 管理。
 - GitLab 部署、Webhook 服务、回滚。
 - Verdaccio/unpub 一键安装。
@@ -547,8 +548,9 @@ Phase 1 只有在以下条件都满足时才算完成：
 
 ## 14. 后续 Phase 边界
 
-- **Phase 2:** Dashboard + 简化命令面板。复用 Phase 1 的 `execute`，不要引入 PTY。
-- **Phase 3:** SFTP 技术验证 + 文件管理器。先证明 SFTP 库/协议方案可用。
-- **Phase 4:** 环境配置。所有功能基于远端能力探测。
+- **Phase 2:** 云厂商基础层 + 简化命令面板。加入 CloudProviderAdapter、云账号设置、腾讯云只读实例发现；命令面板复用 Phase 1 的 `execute`，不要引入 PTY。
+- **Phase 3:** Dashboard + SFTP 技术验证 + 文件管理器。Dashboard 聚合 SSH 指标和云监控指标；先证明 SFTP 库/协议方案可用。
+- **Phase 4:** 安全组 + 环境配置。云安全组走 provider adapter，系统内部配置基于远端能力探测。
 - **Phase 5:** GitLab 部署。先做手动部署日志，再做 webhook。
 - **Phase 6:** 私有包仓库。Verdaccio/unpub 安装前做版本和系统依赖检测。
+- **Phase 7:** 更多云厂商、高级云资源管理、快照、云盘和计费信息。

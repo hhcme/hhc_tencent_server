@@ -9,11 +9,13 @@ This directory contains the architecture and implementation planning documents f
 ## English
 
 - [Design document](en/2026-06-25-server-manager-design.md)
+- [Cloud Provider API enhancement](en/2026-06-25-cloud-provider-integration.md)
 - [Phase 1: app skeleton and real SSH MVP](en/2026-06-25-phase1-ssh-connection.md)
 
 ## 中文
 
 - [设计文档](superpowers/specs/2026-06-25-server-manager-design.md)
+- [云厂商 API 增强层设计](superpowers/specs/2026-06-25-cloud-provider-integration.md)
 - [Phase 1：项目骨架 + 真实 SSH 最小闭环](superpowers/plans/2026-06-25-phase1-ssh-connection.md)
 
 ## Documentation policy / 文档维护原则

@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
 - Added bilingual documentation index.
 - Added English summaries for the design document and Phase 1 implementation plan.
 - Refined the project design and Phase 1 plan around real SSH behavior, host key trust, Keychain storage, and SwiftNIO SSH version constraints.
+- Added SSH-first plus optional Cloud API enhancement direction.
+- Added bilingual Cloud Provider API enhancement design.
+- Updated roadmap to introduce cloud provider adapters after the real SSH MVP.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -19,3 +22,6 @@ All notable changes to this project will be documented in this file.
 - 添加中英文文档索引。
 - 添加英文版设计文档和 Phase 1 实施计划摘要。
 - 围绕真实 SSH 行为、主机指纹信任、Keychain 存储和 SwiftNIO SSH 版本约束修订项目设计与 Phase 1 计划。
+- 添加 SSH-first + 云 API 可选增强的产品方向。
+- 添加中英文《云厂商 API 增强层设计》。
+- 更新路线图，在真实 SSH MVP 之后引入云厂商 adapter。

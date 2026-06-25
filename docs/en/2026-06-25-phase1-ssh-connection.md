@@ -21,6 +21,7 @@ Phase 1 does not implement:
 - Full PTY terminal.
 - SFTP file manager.
 - Dashboard graphs.
+- Cloud provider APIs, instance discovery, cloud monitoring, and security group management.
 - systemd, Nginx, firewall, cron, or environment management.
 - GitLab deployment.
 - Verdaccio or Dart/Flutter package registry installation.
@@ -251,3 +252,12 @@ Phase 1 is complete only when:
 7. Disconnect releases NIO resources.
 8. Unit tests pass.
 9. Manual acceptance passes.
+
+## 14. Later phase boundary
+
+- **Phase 2:** cloud provider foundation and simplified command panel. Add `CloudProviderAdapter`, cloud account settings, and Tencent Cloud read-only instance discovery; reuse Phase 1 `execute` for commands and do not introduce PTY yet.
+- **Phase 3:** dashboard, SFTP validation, and file manager. The dashboard can combine SSH metrics and cloud metrics.
+- **Phase 4:** security groups and environment configuration. Cloud security groups go through provider adapters; OS-internal configuration remains capability-detected SSH work.
+- **Phase 5:** GitLab deployment.
+- **Phase 6:** private package registries.
+- **Phase 7:** more cloud providers, advanced cloud resource management, snapshots, disks, and billing data.
