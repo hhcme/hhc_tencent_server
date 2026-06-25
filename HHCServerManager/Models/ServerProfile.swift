@@ -750,6 +750,40 @@ enum RemoteOperationRiskFactory {
             auditAction: "delete_snapshot"
         )
     }
+
+    static func attachCloudDisk(resource: CloudUnifiedResource, instanceId: String) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "cloud-disk-attach-\(resource.id)-\(instanceId)",
+            level: .high,
+            title: "Attach Cloud Disk",
+            target: "\(resource.displayName) (\(resource.resourceId))",
+            commandPreview: "AttachDisks DiskIds=[\(resource.resourceId)] InstanceId=\(instanceId)",
+            impact: [
+                "The disk will be attached to the selected cloud instance.",
+                "The instance may expose the disk as a new block device that still needs OS-side mounting.",
+            ],
+            recovery: "Detach the disk again after confirming no filesystem writes are in progress.",
+            auditTargetType: "cloud_disk",
+            auditAction: "attach_disk"
+        )
+    }
+
+    static func detachCloudDisk(resource: CloudUnifiedResource) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "cloud-disk-detach-\(resource.id)",
+            level: .critical,
+            title: "Detach Cloud Disk",
+            target: "\(resource.displayName) (\(resource.resourceId))",
+            commandPreview: "DetachDisks DiskIds=[\(resource.resourceId)]",
+            impact: [
+                "The disk will be detached from its current cloud instance.",
+                "Applications using this disk may fail if the filesystem is still mounted or actively written.",
+            ],
+            recovery: "Reattach the disk to the original instance and inspect application logs if the detach was unintended.",
+            auditTargetType: "cloud_disk",
+            auditAction: "detach_disk"
+        )
+    }
 }
 
 enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {

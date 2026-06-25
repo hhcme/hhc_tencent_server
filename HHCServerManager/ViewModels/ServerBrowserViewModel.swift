@@ -399,6 +399,40 @@ final class CloudResourceCenterViewModel: ObservableObject {
         }
     }
 
+    func attachDisk(for resource: CloudUnifiedResource, instanceId: String, appState: AppState) async {
+        guard let account = account(for: resource, from: appState.cloudProviderAccounts),
+              let regionId = resource.regionId else { return }
+        await run("Attaching disk...") {
+            try await appState.cloudInstanceSyncService.attachDisk(
+                account: account,
+                regionId: regionId,
+                diskId: resource.resourceId,
+                instanceId: instanceId,
+                currentStatus: resource.status
+            )
+            refreshLocalResources(appState: appState)
+            selectedResourceId = resource.id
+            statusMessage = "Disk \(resource.resourceId) is attaching to \(instanceId)."
+        }
+    }
+
+    func detachDisk(for resource: CloudUnifiedResource, appState: AppState) async {
+        guard let account = account(for: resource, from: appState.cloudProviderAccounts),
+              let regionId = resource.regionId else { return }
+        await run("Detaching disk...") {
+            try await appState.cloudInstanceSyncService.detachDisk(
+                account: account,
+                regionId: regionId,
+                diskId: resource.resourceId,
+                currentInstanceId: resource.primaryAddress,
+                currentStatus: resource.status
+            )
+            refreshLocalResources(appState: appState)
+            selectedResourceId = resource.id
+            statusMessage = "Disk \(resource.resourceId) is detaching."
+        }
+    }
+
     func resetFilters(appState: AppState) {
         searchText = ""
         statusFilter = ""

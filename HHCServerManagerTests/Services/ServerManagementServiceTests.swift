@@ -2345,6 +2345,70 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(deleteLog.status, "success")
     }
 
+    func testCloudDiskAttachmentActionsPersistCacheAndAuditLogs() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .tencentCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudDisks, .diskAttachmentActions]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_400)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        try harness.repository.upsertCloudDisk(CloudDisk(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            diskId: "disk-attach",
+            instanceId: nil,
+            name: "data",
+            diskType: "CLOUD_PREMIUM",
+            sizeGB: 100,
+            status: "UNATTACHED",
+            billingType: "POSTPAID_BY_HOUR",
+            expiredTime: nil,
+            rawJSON: nil,
+            lastSyncedAt: nil
+        ))
+
+        try await harness.cloudInstanceSyncService.attachDisk(
+            account: account,
+            regionId: "ap-guangzhou",
+            diskId: "disk-attach",
+            instanceId: "ins-target",
+            currentStatus: "UNATTACHED"
+        )
+
+        var disk = try XCTUnwrap(harness.repository.fetchCloudDisks(accountId: account.id).first { $0.diskId == "disk-attach" })
+        XCTAssertEqual(disk.instanceId, "ins-target")
+        XCTAssertEqual(disk.status, "ATTACHING")
+        var logs = try harness.repository.fetchRemoteChangeLogs()
+        let attachLog = try XCTUnwrap(logs.first { $0.action == "attach_disk" })
+        XCTAssertEqual(attachLog.targetId, "disk-attach")
+        XCTAssertEqual(attachLog.status, "success")
+
+        disk.status = "ATTACHED"
+        try harness.repository.upsertCloudDisk(disk)
+        try await harness.cloudInstanceSyncService.detachDisk(
+            account: account,
+            regionId: "ap-guangzhou",
+            diskId: "disk-attach",
+            currentInstanceId: "ins-target",
+            currentStatus: "ATTACHED"
+        )
+
+        let detachingDisk = try XCTUnwrap(harness.repository.fetchCloudDisks(accountId: account.id).first { $0.diskId == "disk-attach" })
+        XCTAssertEqual(detachingDisk.instanceId, "ins-target")
+        XCTAssertEqual(detachingDisk.status, "DETACHING")
+        logs = try harness.repository.fetchRemoteChangeLogs()
+        let detachLog = try XCTUnwrap(logs.first { $0.action == "detach_disk" })
+        XCTAssertEqual(detachLog.targetId, "disk-attach")
+        XCTAssertEqual(detachLog.status, "success")
+    }
+
     func testCloudInstanceSyncCreatesServerFromInstanceAndLinksIt() throws {
         let harness = try Harness()
         let account = try harness.cloudAccountService.createAccount(
@@ -2827,6 +2891,51 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].jsonBody?["SnapshotName"] as? String, "before-upgrade")
         XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "X-TC-Action"), "DeleteSnapshots")
         XCTAssertEqual(transport.requests[1].jsonBody?["SnapshotIds"] as? [String], ["snap-created"])
+    }
+
+    func testTencentCloudAdapterAttachesAndDetachesDisks() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "RequestId": "request-attach"
+              }
+            }
+            """,
+            """
+            {
+              "Response": {
+                "RequestId": "request-detach"
+              }
+            }
+            """,
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE")
+
+        try await adapter.attachDisk(
+            credential: credential,
+            regionId: "ap-guangzhou",
+            diskId: "disk-123",
+            instanceId: "ins-456"
+        )
+        try await adapter.detachDisk(
+            credential: credential,
+            regionId: "ap-guangzhou",
+            diskId: "disk-123"
+        )
+
+        XCTAssertEqual(transport.requests[0].url?.host, "cbs.intl.tencentcloudapi.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Action"), "AttachDisks")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Region"), "ap-guangzhou")
+        XCTAssertEqual(transport.requests[0].jsonBody?["DiskIds"] as? [String], ["disk-123"])
+        XCTAssertEqual(transport.requests[0].jsonBody?["InstanceId"] as? String, "ins-456")
+        XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "X-TC-Action"), "DetachDisks")
+        XCTAssertEqual(transport.requests[1].jsonBody?["DiskIds"] as? [String], ["disk-123"])
     }
 
     func testCloudSecurityGroupServiceLoadsLinkedServerGroupsAndPolicies() async throws {
@@ -3374,6 +3483,19 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
         credential: CloudProviderCredential,
         regionId: String,
         snapshotId: String
+    ) async throws {}
+
+    func attachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String,
+        instanceId: String
+    ) async throws {}
+
+    func detachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String
     ) async throws {}
 }
 

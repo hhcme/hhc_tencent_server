@@ -175,6 +175,8 @@ private struct CloudResourceCenterSheet: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = CloudResourceCenterViewModel()
     @State private var pendingSnapshotAction: CloudSnapshotActionRequest?
+    @State private var pendingDiskAction: CloudDiskActionRequest?
+    @State private var attachDiskInstanceId = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -282,6 +284,22 @@ private struct CloudResourceCenterSheet: View {
                 secondaryButton: .cancel()
             )
         }
+        .alert(item: $pendingDiskAction) { request in
+            Alert(
+                title: Text(request.risk.title),
+                message: Text(request.risk.confirmationMessage),
+                primaryButton: request.isDestructive ? .destructive(Text(request.confirmTitle)) {
+                    Task {
+                        await runDiskAction(request)
+                    }
+                } : .default(Text(request.confirmTitle)) {
+                    Task {
+                        await runDiskAction(request)
+                    }
+                },
+                secondaryButton: .cancel()
+            )
+        }
     }
 
     private var cloudControls: some View {
@@ -381,6 +399,8 @@ private struct CloudResourceCenterSheet: View {
                 VStack(spacing: 0) {
                     CloudResourceDetailView(resource: resource)
                     cloudSnapshotActions(for: resource)
+                        .padding(.horizontal, 24)
+                    cloudDiskAttachmentActions(for: resource)
                         .padding([.horizontal, .bottom], 24)
                 }
             } else {
@@ -435,6 +455,64 @@ private struct CloudResourceCenterSheet: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func cloudDiskAttachmentActions(for resource: CloudUnifiedResource) -> some View {
+        let supportsDiskAttachment = appState.cloudProviderRegistry.supports(.diskAttachmentActions, providerId: resource.providerId)
+        if supportsDiskAttachment && resource.kind == .disk {
+            Divider()
+                .padding(.bottom, 12)
+            let normalizedStatus = resource.status?.uppercased()
+            if normalizedStatus == "UNATTACHED" || normalizedStatus == "DETACHED" || normalizedStatus == nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Target Instance ID", text: $attachDiskInstanceId)
+                        .textFieldStyle(.roundedBorder)
+                    Button {
+                        let instanceId = attachDiskInstanceId.trimmingCharacters(in: .whitespacesAndNewlines)
+                        pendingDiskAction = CloudDiskActionRequest(
+                            kind: .attach(instanceId: instanceId),
+                            resource: resource,
+                            risk: RemoteOperationRiskFactory.attachCloudDisk(resource: resource, instanceId: instanceId),
+                            confirmTitle: "Attach Disk"
+                        )
+                    } label: {
+                        Label("Attach Disk", systemImage: "externaldrive.badge.plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isWorking || attachDiskInstanceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            } else {
+                Button {
+                    pendingDiskAction = CloudDiskActionRequest(
+                        kind: .detach,
+                        resource: resource,
+                        risk: RemoteOperationRiskFactory.detachCloudDisk(resource: resource),
+                        confirmTitle: "Detach Disk"
+                    )
+                } label: {
+                    Label("Detach Disk", systemImage: "externaldrive.badge.minus")
+                }
+                .buttonStyle(.bordered)
+                .foregroundStyle(.red)
+                .disabled(viewModel.isWorking || normalizedStatus != "ATTACHED")
+                if normalizedStatus != "ATTACHED" {
+                    Text("Only ATTACHED disks can be detached.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func runDiskAction(_ request: CloudDiskActionRequest) async {
+        switch request.kind {
+        case let .attach(instanceId):
+            await viewModel.attachDisk(for: request.resource, instanceId: instanceId, appState: appState)
+            attachDiskInstanceId = ""
+        case .detach:
+            await viewModel.detachDisk(for: request.resource, appState: appState)
+        }
+    }
 }
 
 private struct CloudSnapshotActionRequest: Identifiable {
@@ -444,6 +522,26 @@ private struct CloudSnapshotActionRequest: Identifiable {
     }
 
     var id: String { risk.id }
+    let kind: Kind
+    let resource: CloudUnifiedResource
+    let risk: RemoteOperationRisk
+    let confirmTitle: String
+}
+
+private struct CloudDiskActionRequest: Identifiable {
+    enum Kind {
+        case attach(instanceId: String)
+        case detach
+    }
+
+    var id: String { risk.id }
+    var isDestructive: Bool {
+        if case .detach = kind {
+            return true
+        }
+        return false
+    }
+
     let kind: Kind
     let resource: CloudUnifiedResource
     let risk: RemoteOperationRisk

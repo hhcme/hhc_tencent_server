@@ -100,6 +100,7 @@ CREATE TABLE cloud_billing_states (
 - 已新增 `AlibabaCloudAdapter` 和 `HuaweiCloudAdapter`，支持签名后的只读地域/项目发现、ECS 实例发现、分页和核心字段映射，并通过 fixture 测试覆盖请求签名与解析。
 - 已泛化 macOS 云导入入口，三家云账号可在同一流程中选择 provider、验证凭据、加载地域/项目、同步实例并导入 SSH profile。
 - 已为腾讯云 CBS 接入快照创建/删除操作，云资源中心会按 `snapshotActions` capability 展示操作、执行风险确认、更新本地缓存，并写入 `remote_change_logs` 云端变更审计。
+- 已为腾讯云 CBS 接入云盘挂载/卸载操作，云资源中心会按 `diskAttachmentActions` capability 展示操作；挂载仅允许 `UNATTACHED`/`DETACHED` 云盘，卸载仅允许 `ATTACHED` 云盘，执行后本地缓存进入 `ATTACHING`/`DETACHING` 并写入云端变更审计。
 
 ## 6. UI 范围
 
@@ -147,7 +148,8 @@ CREATE TABLE cloud_billing_states (
 - [x] 腾讯云创建快照操作。
 - [x] 腾讯云删除快照操作。
 - [ ] 阿里云、华为云快照操作按 capability 补齐。
-- [ ] 云盘挂载/卸载预留接口，默认只在验证通过后启用。
+- [x] 腾讯云云盘挂载/卸载操作。
+- [ ] 阿里云、华为云云盘挂载/卸载按 capability 补齐。
 - [x] 已接入的危险云操作写入变更审计日志。
 
 ### Task 6：云资源中心 UI
@@ -157,6 +159,7 @@ CREATE TABLE cloud_billing_states (
 - [x] capability matrix 展示。
 - [x] 三家云账号导入入口。
 - [x] 腾讯云快照操作风险确认。
+- [x] 腾讯云云盘挂载/卸载风险确认。
 
 ### Task 7：测试
 
@@ -165,6 +168,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 云盘/快照/计费解析测试。
 - [x] 跨云搜索测试。
 - [x] 腾讯云快照危险操作确认和审计测试。
+- [x] 腾讯云云盘挂载/卸载请求、状态缓存和审计测试。
 
 ### Task 8：手动验收
 
@@ -173,6 +177,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 腾讯云云盘和快照信息可展示。
 - [x] 计费/到期状态有来源和刷新时间。
 - [ ] 真实腾讯云账号创建快照需要二次确认并写日志。
+- [ ] 真实腾讯云账号云盘挂载/卸载需要二次确认并写日志。
 - [ ] 权限不足时能力自动降级。
 
 ## 8. 完成标志

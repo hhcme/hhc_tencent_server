@@ -116,6 +116,18 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(deleteSnapshotRisk.level, .critical)
         XCTAssertEqual(deleteSnapshotRisk.auditAction, "delete_snapshot")
         XCTAssertTrue(deleteSnapshotRisk.confirmationMessage.contains("DeleteSnapshots SnapshotIds=[snap-123]"))
+
+        let attachDiskRisk = RemoteOperationRiskFactory.attachCloudDisk(resource: diskResource, instanceId: "ins-456")
+        XCTAssertEqual(attachDiskRisk.level, .high)
+        XCTAssertEqual(attachDiskRisk.auditTargetType, "cloud_disk")
+        XCTAssertEqual(attachDiskRisk.auditAction, "attach_disk")
+        XCTAssertTrue(attachDiskRisk.confirmationMessage.contains("AttachDisks DiskIds=[disk-123] InstanceId=ins-456"))
+
+        let detachDiskRisk = RemoteOperationRiskFactory.detachCloudDisk(resource: diskResource)
+        XCTAssertEqual(detachDiskRisk.level, .critical)
+        XCTAssertEqual(detachDiskRisk.auditTargetType, "cloud_disk")
+        XCTAssertEqual(detachDiskRisk.auditAction, "detach_disk")
+        XCTAssertTrue(detachDiskRisk.confirmationMessage.contains("DetachDisks DiskIds=[disk-123]"))
     }
 
     func testCloudSecurityGroupRuleChangePreviewBuildsDiffAndRisk() {
@@ -2402,5 +2414,22 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
         snapshotId: String
     ) async throws {
         throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+    }
+
+    func attachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+    }
+
+    func detachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
     }
 }

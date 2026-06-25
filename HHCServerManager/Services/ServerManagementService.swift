@@ -400,6 +400,128 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         }
     }
 
+    func attachDisk(
+        account: CloudProviderAccount,
+        regionId: String,
+        diskId: String,
+        instanceId: String,
+        currentStatus: String?
+    ) async throws {
+        guard account.enabled else {
+            throw CloudProviderError.providerFailure("Cloud account is disabled.")
+        }
+        let trimmedInstanceId = instanceId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInstanceId.isEmpty else {
+            throw CloudProviderError.providerFailure("Target instance id is required.")
+        }
+        if let currentStatus {
+            let normalizedStatus = currentStatus.uppercased()
+            guard normalizedStatus == "UNATTACHED" || normalizedStatus == "DETACHED" else {
+                throw CloudProviderError.providerFailure("Only UNATTACHED disks can be attached safely. Current status: \(currentStatus).")
+            }
+        }
+        try registry.require(.diskAttachmentActions, providerId: account.providerId)
+        let capturedAt = now()
+        let credential = try credential(for: account)
+        do {
+            try await registry.adapter(for: account.providerId).attachDisk(
+                credential: credential,
+                regionId: regionId,
+                diskId: diskId,
+                instanceId: trimmedInstanceId
+            )
+            try persistDiskTransition(
+                account: account,
+                regionId: regionId,
+                diskId: diskId,
+                instanceId: trimmedInstanceId,
+                status: "ATTACHING",
+                capturedAt: capturedAt
+            )
+            try saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_disk",
+                targetId: diskId,
+                action: "attach_disk",
+                beforeSnapshot: "disk=\(diskId), status=\(currentStatus ?? "unknown")",
+                afterSnapshot: "instance=\(trimmedInstanceId), status=ATTACHING",
+                status: "success",
+                message: "region=\(regionId)",
+                createdAt: capturedAt
+            )
+        } catch {
+            try? saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_disk",
+                targetId: diskId,
+                action: "attach_disk",
+                beforeSnapshot: "disk=\(diskId), status=\(currentStatus ?? "unknown")",
+                afterSnapshot: "instance=\(trimmedInstanceId)",
+                status: "failed",
+                message: error.localizedDescription,
+                createdAt: capturedAt
+            )
+            throw error
+        }
+    }
+
+    func detachDisk(
+        account: CloudProviderAccount,
+        regionId: String,
+        diskId: String,
+        currentInstanceId: String?,
+        currentStatus: String?
+    ) async throws {
+        guard account.enabled else {
+            throw CloudProviderError.providerFailure("Cloud account is disabled.")
+        }
+        if let currentStatus, currentStatus.uppercased() != "ATTACHED" {
+            throw CloudProviderError.providerFailure("Only ATTACHED disks can be detached safely. Current status: \(currentStatus).")
+        }
+        try registry.require(.diskAttachmentActions, providerId: account.providerId)
+        let capturedAt = now()
+        let credential = try credential(for: account)
+        do {
+            try await registry.adapter(for: account.providerId).detachDisk(
+                credential: credential,
+                regionId: regionId,
+                diskId: diskId
+            )
+            try persistDiskTransition(
+                account: account,
+                regionId: regionId,
+                diskId: diskId,
+                instanceId: currentInstanceId,
+                status: "DETACHING",
+                capturedAt: capturedAt
+            )
+            try saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_disk",
+                targetId: diskId,
+                action: "detach_disk",
+                beforeSnapshot: "disk=\(diskId), instance=\(currentInstanceId ?? "unknown"), status=\(currentStatus ?? "unknown")",
+                afterSnapshot: "status=DETACHING",
+                status: "success",
+                message: "region=\(regionId)",
+                createdAt: capturedAt
+            )
+        } catch {
+            try? saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_disk",
+                targetId: diskId,
+                action: "detach_disk",
+                beforeSnapshot: "disk=\(diskId), instance=\(currentInstanceId ?? "unknown"), status=\(currentStatus ?? "unknown")",
+                afterSnapshot: nil,
+                status: "failed",
+                message: error.localizedDescription,
+                createdAt: capturedAt
+            )
+            throw error
+        }
+    }
+
     func syncBillingStates(account: CloudProviderAccount, regionId: String) async throws -> [CloudBillingState] {
         guard account.enabled else {
             throw CloudProviderError.providerFailure("Cloud account is disabled.")
@@ -500,6 +622,37 @@ final class CloudInstanceSyncService: @unchecked Sendable {
             message: message,
             createdAt: createdAt
         ))
+    }
+
+    private func persistDiskTransition(
+        account: CloudProviderAccount,
+        regionId: String,
+        diskId: String,
+        instanceId: String?,
+        status: String,
+        capturedAt: Date
+    ) throws {
+        var disk = try repository.fetchCloudDisks(accountId: account.id, regionId: regionId)
+            .first { $0.diskId == diskId } ?? CloudDisk(
+                id: UUID(),
+                accountId: account.id,
+                providerId: account.providerId,
+                regionId: regionId,
+                diskId: diskId,
+                instanceId: instanceId,
+                name: nil,
+                diskType: nil,
+                sizeGB: nil,
+                status: status,
+                billingType: nil,
+                expiredTime: nil,
+                rawJSON: nil,
+                lastSyncedAt: capturedAt
+            )
+        disk.instanceId = instanceId
+        disk.status = status
+        disk.lastSyncedAt = capturedAt
+        try repository.upsertCloudDisk(disk)
     }
 
     private func credential(for account: CloudProviderAccount) throws -> CloudProviderCredential {
@@ -4469,6 +4622,17 @@ protocol CloudProviderAdapter: Sendable {
         regionId: String,
         snapshotId: String
     ) async throws
+    func attachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String,
+        instanceId: String
+    ) async throws
+    func detachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String
+    ) async throws
 }
 
 enum CloudProviderError: LocalizedError, Equatable {
@@ -4756,6 +4920,7 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudSnapshots,
         .cloudBilling,
         .snapshotActions,
+        .diskAttachmentActions,
     ]
 
     private let transport: TencentCloudHTTPTransport
@@ -5161,6 +5326,47 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         try throwIfNeeded(response.response.error)
     }
 
+    func attachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String,
+        instanceId: String
+    ) async throws {
+        let payload = TencentAttachDisksPayload(diskIds: [diskId], instanceId: instanceId)
+        let response: TencentCloudEnvelope<TencentAttachDisksResponse> = try await request(
+            credential: credential,
+            endpoint: TencentCloudEndpoint(
+                host: "cbs.intl.tencentcloudapi.com",
+                service: "cbs",
+                action: "AttachDisks",
+                version: "2017-03-12",
+                region: regionId
+            ),
+            payload: payload
+        )
+        try throwIfNeeded(response.response.error)
+    }
+
+    func detachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String
+    ) async throws {
+        let payload = TencentDetachDisksPayload(diskIds: [diskId])
+        let response: TencentCloudEnvelope<TencentDetachDisksResponse> = try await request(
+            credential: credential,
+            endpoint: TencentCloudEndpoint(
+                host: "cbs.intl.tencentcloudapi.com",
+                service: "cbs",
+                action: "DetachDisks",
+                version: "2017-03-12",
+                region: regionId
+            ),
+            payload: payload
+        )
+        try throwIfNeeded(response.response.error)
+    }
+
     private func request<Payload: Encodable, Response: Decodable>(
         credential: CloudProviderCredential,
         endpoint: TencentCloudEndpoint,
@@ -5519,6 +5725,23 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
     }
 
+    func attachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+    }
+
+    func detachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+    }
+
     private func request<Response: Decodable>(
         credential: CloudProviderCredential,
         host: String,
@@ -5803,6 +6026,23 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         snapshotId: String
     ) async throws {
         throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+    }
+
+    func attachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+    }
+
+    func detachDisk(
+        credential: CloudProviderCredential,
+        regionId: String,
+        diskId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
     }
 
     private func request<Response: Decodable>(
@@ -6233,6 +6473,24 @@ private struct TencentDeleteSnapshotsPayload: Encodable {
     }
 }
 
+private struct TencentAttachDisksPayload: Encodable {
+    var diskIds: [String]
+    var instanceId: String
+
+    enum CodingKeys: String, CodingKey {
+        case diskIds = "DiskIds"
+        case instanceId = "InstanceId"
+    }
+}
+
+private struct TencentDetachDisksPayload: Encodable {
+    var diskIds: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case diskIds = "DiskIds"
+    }
+}
+
 private struct TencentMonitorInstance: Encodable {
     var dimensions: [TencentMonitorDimension]
 
@@ -6374,6 +6632,22 @@ private struct TencentCreateSnapshotResponse: Decodable {
 }
 
 private struct TencentDeleteSnapshotsResponse: Decodable {
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case error = "Error"
+    }
+}
+
+private struct TencentAttachDisksResponse: Decodable {
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case error = "Error"
+    }
+}
+
+private struct TencentDetachDisksResponse: Decodable {
     var error: TencentCloudAPIError?
 
     enum CodingKeys: String, CodingKey {
