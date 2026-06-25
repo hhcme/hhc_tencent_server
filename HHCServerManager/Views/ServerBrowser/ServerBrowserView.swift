@@ -176,6 +176,7 @@ private struct CloudResourceCenterSheet: View {
     @StateObject private var viewModel = CloudResourceCenterViewModel()
     @State private var pendingSnapshotAction: CloudSnapshotActionRequest?
     @State private var pendingDiskAction: CloudDiskActionRequest?
+    @State private var pendingInstancePowerAction: CloudInstancePowerActionRequest?
     @State private var attachDiskInstanceId = ""
 
     var body: some View {
@@ -300,6 +301,18 @@ private struct CloudResourceCenterSheet: View {
                 secondaryButton: .cancel()
             )
         }
+        .alert(item: $pendingInstancePowerAction) { request in
+            Alert(
+                title: Text(request.risk.title),
+                message: Text(request.risk.confirmationMessage),
+                primaryButton: .destructive(Text(request.confirmTitle)) {
+                    Task {
+                        await viewModel.performInstancePowerAction(request.action, for: request.resource, appState: appState)
+                    }
+                },
+                secondaryButton: .cancel()
+            )
+        }
     }
 
     private var cloudControls: some View {
@@ -398,6 +411,8 @@ private struct CloudResourceCenterSheet: View {
             if let resource = viewModel.selectedResource {
                 VStack(spacing: 0) {
                     CloudResourceDetailView(resource: resource)
+                    cloudInstancePowerActions(for: resource)
+                        .padding(.horizontal, 24)
                     cloudSnapshotActions(for: resource)
                         .padding(.horizontal, 24)
                     cloudDiskAttachmentActions(for: resource)
@@ -409,6 +424,47 @@ private struct CloudResourceCenterSheet: View {
                     systemImage: "cursorarrow.click",
                     description: Text("Choose a synced resource to inspect its cloud metadata.")
                 )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cloudInstancePowerActions(for resource: CloudUnifiedResource) -> some View {
+        let supportsPowerActions = appState.cloudProviderRegistry.supports(.powerActions, providerId: resource.providerId)
+        if supportsPowerActions && resource.kind == .instance {
+            Divider()
+                .padding(.bottom, 12)
+            let normalizedStatus = resource.status?.uppercased()
+            HStack(spacing: 8) {
+                Button {
+                    queueInstancePowerAction(.start, for: resource)
+                } label: {
+                    Label("Start", systemImage: "power")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isWorking || normalizedStatus != "STOPPED")
+
+                Button {
+                    queueInstancePowerAction(.stop, for: resource)
+                } label: {
+                    Label("Stop", systemImage: "stop.circle")
+                }
+                .buttonStyle(.bordered)
+                .foregroundStyle(.red)
+                .disabled(viewModel.isWorking || normalizedStatus != "RUNNING")
+
+                Button {
+                    queueInstancePowerAction(.reboot, for: resource)
+                } label: {
+                    Label("Reboot", systemImage: "arrow.clockwise.circle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isWorking || normalizedStatus != "RUNNING")
+            }
+            if normalizedStatus != "RUNNING" && normalizedStatus != "STOPPED" {
+                Text("Power actions are available for RUNNING or STOPPED instances.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -513,6 +569,15 @@ private struct CloudResourceCenterSheet: View {
             await viewModel.detachDisk(for: request.resource, appState: appState)
         }
     }
+
+    private func queueInstancePowerAction(_ action: CloudInstancePowerAction, for resource: CloudUnifiedResource) {
+        pendingInstancePowerAction = CloudInstancePowerActionRequest(
+            action: action,
+            resource: resource,
+            risk: RemoteOperationRiskFactory.cloudInstancePower(resource: resource, action: action),
+            confirmTitle: action.displayName
+        )
+    }
 }
 
 private struct CloudSnapshotActionRequest: Identifiable {
@@ -543,6 +608,14 @@ private struct CloudDiskActionRequest: Identifiable {
     }
 
     let kind: Kind
+    let resource: CloudUnifiedResource
+    let risk: RemoteOperationRisk
+    let confirmTitle: String
+}
+
+private struct CloudInstancePowerActionRequest: Identifiable {
+    var id: String { risk.id }
+    let action: CloudInstancePowerAction
     let resource: CloudUnifiedResource
     let risk: RemoteOperationRisk
     let confirmTitle: String

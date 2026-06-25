@@ -285,4 +285,28 @@ private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
     ) async throws {
         throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
     }
+
+    func startInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
+
+    func stopInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
+
+    func rebootInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
 }

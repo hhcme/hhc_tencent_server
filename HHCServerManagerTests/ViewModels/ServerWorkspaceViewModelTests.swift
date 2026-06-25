@@ -128,6 +128,30 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(detachDiskRisk.auditTargetType, "cloud_disk")
         XCTAssertEqual(detachDiskRisk.auditAction, "detach_disk")
         XCTAssertTrue(detachDiskRisk.confirmationMessage.contains("DetachDisks DiskIds=[disk-123]"))
+
+        let instanceResource = CloudUnifiedResource(
+            id: "instance:account:ap-guangzhou:ins-123",
+            kind: .instance,
+            accountId: UUID(),
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            resourceId: "ins-123",
+            displayName: "prod-1",
+            status: "RUNNING",
+            primaryAddress: "203.0.113.2",
+            secondaryText: "S5.SMALL1",
+            lastSyncedAt: nil
+        )
+        let stopInstanceRisk = RemoteOperationRiskFactory.cloudInstancePower(resource: instanceResource, action: .stop)
+        XCTAssertEqual(stopInstanceRisk.level, .critical)
+        XCTAssertEqual(stopInstanceRisk.auditTargetType, "cloud_instance")
+        XCTAssertEqual(stopInstanceRisk.auditAction, "stop_instance")
+        XCTAssertTrue(stopInstanceRisk.confirmationMessage.contains("StopInstances InstanceIds=[ins-123]"))
+
+        let startInstanceRisk = RemoteOperationRiskFactory.cloudInstancePower(resource: instanceResource, action: .start)
+        XCTAssertEqual(startInstanceRisk.level, .high)
+        XCTAssertEqual(startInstanceRisk.auditAction, "start_instance")
+        XCTAssertTrue(startInstanceRisk.confirmationMessage.contains("StartInstances InstanceIds=[ins-123]"))
     }
 
     func testCloudSecurityGroupRuleChangePreviewBuildsDiffAndRisk() {
@@ -2431,5 +2455,29 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
         diskId: String
     ) async throws {
         throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+    }
+
+    func startInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
+
+    func stopInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
+
+    func rebootInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
     }
 }

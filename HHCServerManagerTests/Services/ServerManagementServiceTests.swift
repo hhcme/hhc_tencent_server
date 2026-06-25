@@ -2409,6 +2409,88 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(detachLog.status, "success")
     }
 
+    func testCloudInstancePowerActionsPersistCacheAndAuditLogs() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .tencentCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .powerActions]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_500)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        var link = CloudInstanceLink(
+            id: UUID(),
+            serverId: nil,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-power",
+            displayName: "prod",
+            publicIp: "203.0.113.2",
+            privateIp: "10.0.0.9",
+            status: "STOPPED",
+            instanceType: "S5.SMALL1",
+            zoneId: "ap-guangzhou-3",
+            vpcId: "vpc-1",
+            rawJSON: nil,
+            lastSyncedAt: nil
+        )
+        try harness.repository.upsertCloudInstanceLink(link)
+
+        try await harness.cloudInstanceSyncService.startInstance(
+            account: account,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-power",
+            currentStatus: "STOPPED"
+        )
+
+        var storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-power"
+        )
+        XCTAssertEqual(storedLink.status, "STARTING")
+        XCTAssertEqual(storedLink.lastSyncedAt, capturedAt)
+        var logs = try harness.repository.fetchRemoteChangeLogs()
+        XCTAssertEqual(logs.first { $0.action == "start_instance" }?.status, "success")
+
+        link.status = "RUNNING"
+        try harness.repository.upsertCloudInstanceLink(link)
+        try await harness.cloudInstanceSyncService.rebootInstance(
+            account: account,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-power",
+            currentStatus: "RUNNING"
+        )
+        storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-power"
+        )
+        XCTAssertEqual(storedLink.status, "REBOOTING")
+
+        link.status = "RUNNING"
+        try harness.repository.upsertCloudInstanceLink(link)
+        try await harness.cloudInstanceSyncService.stopInstance(
+            account: account,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-power",
+            currentStatus: "RUNNING"
+        )
+        storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-power"
+        )
+        XCTAssertEqual(storedLink.status, "STOPPING")
+        logs = try harness.repository.fetchRemoteChangeLogs()
+        XCTAssertEqual(logs.first { $0.action == "reboot_instance" }?.status, "success")
+        XCTAssertEqual(logs.first { $0.action == "stop_instance" }?.status, "success")
+    }
+
     func testCloudInstanceSyncCreatesServerFromInstanceAndLinksIt() throws {
         let harness = try Harness()
         let account = try harness.cloudAccountService.createAccount(
@@ -2936,6 +3018,39 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].jsonBody?["InstanceId"] as? String, "ins-456")
         XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "X-TC-Action"), "DetachDisks")
         XCTAssertEqual(transport.requests[1].jsonBody?["DiskIds"] as? [String], ["disk-123"])
+    }
+
+    func testTencentCloudAdapterRunsInstancePowerActions() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            #"{"Response":{"RequestId":"request-start"}}"#,
+            #"{"Response":{"RequestId":"request-stop"}}"#,
+            #"{"Response":{"RequestId":"request-reboot"}}"#,
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE")
+
+        try await adapter.startInstance(credential: credential, regionId: "ap-guangzhou", instanceId: "ins-123")
+        try await adapter.stopInstance(credential: credential, regionId: "ap-guangzhou", instanceId: "ins-123")
+        try await adapter.rebootInstance(credential: credential, regionId: "ap-guangzhou", instanceId: "ins-123")
+
+        XCTAssertEqual(transport.requests.map { $0.url?.host }, [
+            "cvm.intl.tencentcloudapi.com",
+            "cvm.intl.tencentcloudapi.com",
+            "cvm.intl.tencentcloudapi.com",
+        ])
+        XCTAssertEqual(transport.requests.map { $0.value(forHTTPHeaderField: "X-TC-Action") }, [
+            "StartInstances",
+            "StopInstances",
+            "RebootInstances",
+        ])
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Region"), "ap-guangzhou")
+        XCTAssertEqual(transport.requests[0].jsonBody?["InstanceIds"] as? [String], ["ins-123"])
+        XCTAssertEqual(transport.requests[1].jsonBody?["InstanceIds"] as? [String], ["ins-123"])
+        XCTAssertEqual(transport.requests[2].jsonBody?["InstanceIds"] as? [String], ["ins-123"])
     }
 
     func testCloudSecurityGroupServiceLoadsLinkedServerGroupsAndPolicies() async throws {
@@ -3496,6 +3611,24 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
         credential: CloudProviderCredential,
         regionId: String,
         diskId: String
+    ) async throws {}
+
+    func startInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {}
+
+    func stopInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {}
+
+    func rebootInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
     ) async throws {}
 }
 

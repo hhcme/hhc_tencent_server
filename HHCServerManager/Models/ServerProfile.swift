@@ -784,6 +784,20 @@ enum RemoteOperationRiskFactory {
             auditAction: "detach_disk"
         )
     }
+
+    static func cloudInstancePower(resource: CloudUnifiedResource, action: CloudInstancePowerAction) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "cloud-instance-\(action.auditAction)-\(resource.id)",
+            level: action == .start ? .high : .critical,
+            title: "\(action.displayName) Cloud Instance",
+            target: "\(resource.displayName) (\(resource.resourceId))",
+            commandPreview: "\(action.tencentAPIAction) InstanceIds=[\(resource.resourceId)]",
+            impact: action.impact,
+            recovery: action.recovery,
+            auditTargetType: "cloud_instance",
+            auditAction: action.auditAction
+        )
+    }
 }
 
 enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -801,6 +815,97 @@ enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
             "Alibaba Cloud"
         case .huaweiCloud:
             "Huawei Cloud"
+        }
+    }
+}
+
+enum CloudInstancePowerAction: String, Codable, CaseIterable, Identifiable, Sendable {
+    case start
+    case stop
+    case reboot
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .start:
+            "Start"
+        case .stop:
+            "Stop"
+        case .reboot:
+            "Reboot"
+        }
+    }
+
+    var auditAction: String {
+        switch self {
+        case .start:
+            "start_instance"
+        case .stop:
+            "stop_instance"
+        case .reboot:
+            "reboot_instance"
+        }
+    }
+
+    var tencentAPIAction: String {
+        switch self {
+        case .start:
+            "StartInstances"
+        case .stop:
+            "StopInstances"
+        case .reboot:
+            "RebootInstances"
+        }
+    }
+
+    var transitionStatus: String {
+        switch self {
+        case .start:
+            "STARTING"
+        case .stop:
+            "STOPPING"
+        case .reboot:
+            "REBOOTING"
+        }
+    }
+
+    var progressTitle: String {
+        switch self {
+        case .start:
+            "Starting instance..."
+        case .stop:
+            "Stopping instance..."
+        case .reboot:
+            "Rebooting instance..."
+        }
+    }
+
+    var impact: [String] {
+        switch self {
+        case .start:
+            ["The cloud instance will begin booting and may start billing or service workloads."]
+        case .stop:
+            [
+                "The cloud instance will be stopped and running services will become unavailable.",
+                "Unsaved in-memory application state may be lost.",
+            ]
+        case .reboot:
+            [
+                "The cloud instance will restart and connected users may be interrupted.",
+                "Services on the instance will be temporarily unavailable.",
+            ]
+        }
+    }
+
+    var recovery: String {
+        switch self {
+        case .start:
+            "Stop the instance again if the start was unintended."
+        case .stop:
+            "Start the instance again after confirming dependent services are safe to resume."
+        case .reboot:
+            "Wait for the instance to return to RUNNING, then inspect service and system logs."
         }
     }
 }

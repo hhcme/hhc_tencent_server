@@ -522,6 +522,66 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         }
     }
 
+    func startInstance(
+        account: CloudProviderAccount,
+        regionId: String,
+        instanceId: String,
+        currentStatus: String?
+    ) async throws {
+        try await performInstancePowerAction(
+            account: account,
+            regionId: regionId,
+            instanceId: instanceId,
+            currentStatus: currentStatus,
+            adapterAction: { adapter, credential in
+                try await adapter.startInstance(credential: credential, regionId: regionId, instanceId: instanceId)
+            },
+            action: "start_instance",
+            allowedStatuses: ["STOPPED"],
+            transitionStatus: "STARTING"
+        )
+    }
+
+    func stopInstance(
+        account: CloudProviderAccount,
+        regionId: String,
+        instanceId: String,
+        currentStatus: String?
+    ) async throws {
+        try await performInstancePowerAction(
+            account: account,
+            regionId: regionId,
+            instanceId: instanceId,
+            currentStatus: currentStatus,
+            adapterAction: { adapter, credential in
+                try await adapter.stopInstance(credential: credential, regionId: regionId, instanceId: instanceId)
+            },
+            action: "stop_instance",
+            allowedStatuses: ["RUNNING"],
+            transitionStatus: "STOPPING"
+        )
+    }
+
+    func rebootInstance(
+        account: CloudProviderAccount,
+        regionId: String,
+        instanceId: String,
+        currentStatus: String?
+    ) async throws {
+        try await performInstancePowerAction(
+            account: account,
+            regionId: regionId,
+            instanceId: instanceId,
+            currentStatus: currentStatus,
+            adapterAction: { adapter, credential in
+                try await adapter.rebootInstance(credential: credential, regionId: regionId, instanceId: instanceId)
+            },
+            action: "reboot_instance",
+            allowedStatuses: ["RUNNING"],
+            transitionStatus: "REBOOTING"
+        )
+    }
+
     func syncBillingStates(account: CloudProviderAccount, regionId: String) async throws -> [CloudBillingState] {
         guard account.enabled else {
             throw CloudProviderError.providerFailure("Cloud account is disabled.")
@@ -653,6 +713,78 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         disk.status = status
         disk.lastSyncedAt = capturedAt
         try repository.upsertCloudDisk(disk)
+    }
+
+    private func performInstancePowerAction(
+        account: CloudProviderAccount,
+        regionId: String,
+        instanceId: String,
+        currentStatus: String?,
+        adapterAction: (any CloudProviderAdapter, CloudProviderCredential) async throws -> Void,
+        action: String,
+        allowedStatuses: Set<String>,
+        transitionStatus: String
+    ) async throws {
+        guard account.enabled else {
+            throw CloudProviderError.providerFailure("Cloud account is disabled.")
+        }
+        if let currentStatus, !allowedStatuses.contains(currentStatus.uppercased()) {
+            throw CloudProviderError.providerFailure("Instance status \(currentStatus) is not valid for \(action).")
+        }
+        try registry.require(.powerActions, providerId: account.providerId)
+        let capturedAt = now()
+        let credential = try credential(for: account)
+        do {
+            try await adapterAction(registry.adapter(for: account.providerId), credential)
+            try persistInstanceTransition(
+                account: account,
+                regionId: regionId,
+                instanceId: instanceId,
+                status: transitionStatus,
+                capturedAt: capturedAt
+            )
+            try saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_instance",
+                targetId: instanceId,
+                action: action,
+                beforeSnapshot: "instance=\(instanceId), status=\(currentStatus ?? "unknown")",
+                afterSnapshot: "status=\(transitionStatus)",
+                status: "success",
+                message: "region=\(regionId)",
+                createdAt: capturedAt
+            )
+        } catch {
+            try? saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_instance",
+                targetId: instanceId,
+                action: action,
+                beforeSnapshot: "instance=\(instanceId), status=\(currentStatus ?? "unknown")",
+                afterSnapshot: nil,
+                status: "failed",
+                message: error.localizedDescription,
+                createdAt: capturedAt
+            )
+            throw error
+        }
+    }
+
+    private func persistInstanceTransition(
+        account: CloudProviderAccount,
+        regionId: String,
+        instanceId: String,
+        status: String,
+        capturedAt: Date
+    ) throws {
+        var link = try repository.fetchCloudInstanceLink(accountId: account.id, regionId: regionId, instanceId: instanceId)
+        link.accountId = account.id
+        link.providerId = account.providerId
+        link.regionId = regionId
+        link.instanceId = instanceId
+        link.status = status
+        link.lastSyncedAt = capturedAt
+        try repository.upsertCloudInstanceLink(link)
     }
 
     private func credential(for account: CloudProviderAccount) throws -> CloudProviderCredential {
@@ -4633,6 +4765,21 @@ protocol CloudProviderAdapter: Sendable {
         regionId: String,
         diskId: String
     ) async throws
+    func startInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws
+    func stopInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws
+    func rebootInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws
 }
 
 enum CloudProviderError: LocalizedError, Equatable {
@@ -4921,6 +5068,7 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudBilling,
         .snapshotActions,
         .diskAttachmentActions,
+        .powerActions,
     ]
 
     private let transport: TencentCloudHTTPTransport
@@ -5367,6 +5515,66 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         try throwIfNeeded(response.response.error)
     }
 
+    func startInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        try await performInstanceAction(
+            credential: credential,
+            regionId: regionId,
+            instanceId: instanceId,
+            action: "StartInstances"
+        )
+    }
+
+    func stopInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        try await performInstanceAction(
+            credential: credential,
+            regionId: regionId,
+            instanceId: instanceId,
+            action: "StopInstances"
+        )
+    }
+
+    func rebootInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        try await performInstanceAction(
+            credential: credential,
+            regionId: regionId,
+            instanceId: instanceId,
+            action: "RebootInstances"
+        )
+    }
+
+    private func performInstanceAction(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String,
+        action: String
+    ) async throws {
+        let payload = TencentInstanceIdsPayload(instanceIds: [instanceId])
+        let response: TencentCloudEnvelope<TencentInstanceActionResponse> = try await request(
+            credential: credential,
+            endpoint: TencentCloudEndpoint(
+                host: "cvm.intl.tencentcloudapi.com",
+                service: "cvm",
+                action: action,
+                version: "2017-03-12",
+                region: regionId
+            ),
+            payload: payload
+        )
+        try throwIfNeeded(response.response.error)
+    }
+
     private func request<Payload: Encodable, Response: Decodable>(
         credential: CloudProviderCredential,
         endpoint: TencentCloudEndpoint,
@@ -5742,6 +5950,30 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
     }
 
+    func startInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
+
+    func stopInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
+
+    func rebootInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
+
     private func request<Response: Decodable>(
         credential: CloudProviderCredential,
         host: String,
@@ -6043,6 +6275,30 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         diskId: String
     ) async throws {
         throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+    }
+
+    func startInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
+
+    func stopInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+    }
+
+    func rebootInstance(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
     }
 
     private func request<Response: Decodable>(
@@ -6409,6 +6665,14 @@ private struct TencentDescribeInstancesPayload: Encodable {
     }
 }
 
+private struct TencentInstanceIdsPayload: Encodable {
+    var instanceIds: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case instanceIds = "InstanceIds"
+    }
+}
+
 private struct TencentPagedPayload: Encodable {
     var offset: Int
     var limit: Int
@@ -6648,6 +6912,14 @@ private struct TencentAttachDisksResponse: Decodable {
 }
 
 private struct TencentDetachDisksResponse: Decodable {
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case error = "Error"
+    }
+}
+
+private struct TencentInstanceActionResponse: Decodable {
     var error: TencentCloudAPIError?
 
     enum CodingKeys: String, CodingKey {

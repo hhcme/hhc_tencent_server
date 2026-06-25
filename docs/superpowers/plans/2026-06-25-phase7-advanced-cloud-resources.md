@@ -11,7 +11,8 @@
 3. 建立跨云资源搜索和高级过滤。
 4. 支持云盘、快照、备份等高级资源查看。
 5. 对快照创建、云盘挂载/卸载等危险操作建立能力和确认框架。
-6. 补齐 provider capability matrix 和兼容测试 harness。
+6. 接入云实例启动、停止、重启等电源操作的能力门禁、确认和审计。
+7. 补齐 provider capability matrix 和兼容测试 harness。
 
 ## 2. 非目标
 
@@ -101,6 +102,7 @@ CREATE TABLE cloud_billing_states (
 - 已泛化 macOS 云导入入口，三家云账号可在同一流程中选择 provider、验证凭据、加载地域/项目、同步实例并导入 SSH profile。
 - 已为腾讯云 CBS 接入快照创建/删除操作，云资源中心会按 `snapshotActions` capability 展示操作、执行风险确认、更新本地缓存，并写入 `remote_change_logs` 云端变更审计。
 - 已为腾讯云 CBS 接入云盘挂载/卸载操作，云资源中心会按 `diskAttachmentActions` capability 展示操作；挂载仅允许 `UNATTACHED`/`DETACHED` 云盘，卸载仅允许 `ATTACHED` 云盘，执行后本地缓存进入 `ATTACHING`/`DETACHING` 并写入云端变更审计。
+- 已为腾讯云 CVM 接入实例启动、停止、重启操作，云资源中心会按 `powerActions` capability 展示操作；启动仅允许 `STOPPED` 实例，停止/重启仅允许 `RUNNING` 实例，执行后本地缓存进入 `STARTING`/`STOPPING`/`REBOOTING` 并写入云端变更审计。
 
 ## 6. UI 范围
 
@@ -109,7 +111,7 @@ CREATE TABLE cloud_billing_states (
 - Provider capability matrix 页面。
 - 云盘详情：挂载实例、容量、类型、状态。
 - 快照列表：状态、创建时间、来源云盘。
-- 危险操作确认：创建快照、删除快照、挂载/卸载云盘。
+- 危险操作确认：创建快照、删除快照、挂载/卸载云盘、启动/停止/重启实例。
 
 ## 7. 实施任务
 
@@ -150,6 +152,8 @@ CREATE TABLE cloud_billing_states (
 - [ ] 阿里云、华为云快照操作按 capability 补齐。
 - [x] 腾讯云云盘挂载/卸载操作。
 - [ ] 阿里云、华为云云盘挂载/卸载按 capability 补齐。
+- [x] 腾讯云实例启动/停止/重启操作。
+- [ ] 阿里云、华为云实例电源操作按 capability 补齐。
 - [x] 已接入的危险云操作写入变更审计日志。
 
 ### Task 6：云资源中心 UI
@@ -160,6 +164,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 三家云账号导入入口。
 - [x] 腾讯云快照操作风险确认。
 - [x] 腾讯云云盘挂载/卸载风险确认。
+- [x] 腾讯云实例电源操作风险确认。
 
 ### Task 7：测试
 
@@ -169,6 +174,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 跨云搜索测试。
 - [x] 腾讯云快照危险操作确认和审计测试。
 - [x] 腾讯云云盘挂载/卸载请求、状态缓存和审计测试。
+- [x] 腾讯云实例电源操作请求、状态缓存和审计测试。
 
 ### Task 8：手动验收
 
@@ -178,6 +184,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 计费/到期状态有来源和刷新时间。
 - [ ] 真实腾讯云账号创建快照需要二次确认并写日志。
 - [ ] 真实腾讯云账号云盘挂载/卸载需要二次确认并写日志。
+- [ ] 真实腾讯云账号实例启动/停止/重启需要二次确认并写日志。
 - [ ] 权限不足时能力自动降级。
 
 ## 8. 完成标志

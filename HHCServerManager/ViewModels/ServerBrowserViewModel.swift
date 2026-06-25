@@ -433,6 +433,43 @@ final class CloudResourceCenterViewModel: ObservableObject {
         }
     }
 
+    func performInstancePowerAction(
+        _ action: CloudInstancePowerAction,
+        for resource: CloudUnifiedResource,
+        appState: AppState
+    ) async {
+        guard let account = account(for: resource, from: appState.cloudProviderAccounts),
+              let regionId = resource.regionId else { return }
+        await run(action.progressTitle) {
+            switch action {
+            case .start:
+                try await appState.cloudInstanceSyncService.startInstance(
+                    account: account,
+                    regionId: regionId,
+                    instanceId: resource.resourceId,
+                    currentStatus: resource.status
+                )
+            case .stop:
+                try await appState.cloudInstanceSyncService.stopInstance(
+                    account: account,
+                    regionId: regionId,
+                    instanceId: resource.resourceId,
+                    currentStatus: resource.status
+                )
+            case .reboot:
+                try await appState.cloudInstanceSyncService.rebootInstance(
+                    account: account,
+                    regionId: regionId,
+                    instanceId: resource.resourceId,
+                    currentStatus: resource.status
+                )
+            }
+            refreshLocalResources(appState: appState)
+            selectedResourceId = resource.id
+            statusMessage = "Instance \(resource.resourceId) is \(action.transitionStatus.lowercased())."
+        }
+    }
+
     func resetFilters(appState: AppState) {
         searchText = ""
         statusFilter = ""
