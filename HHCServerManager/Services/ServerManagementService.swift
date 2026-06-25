@@ -3944,7 +3944,7 @@ final class SystemdServiceManager: @unchecked Sendable {
         let command = """
         command -v systemctl >/dev/null 2>&1 || exit 3; \
         systemctl list-units --type=service --all --no-legend --no-pager --plain | \
-        awk '{unit=$1; load=$2; active=$3; sub=$4; $1=$2=$3=$4=""; sub(/^ +/, ""); print unit "\\t" load "\\t" active "\\t" sub "\\t" $0}'
+        awk '{unit=$1; load=$2; active=$3; substate=$4; $1=$2=$3=$4=""; sub(/^ +/, ""); print unit "\\t" load "\\t" active "\\t" substate "\\t" $0}'
         """
         let result = try await CloudProviderRequestRunner.withTimeout(12) {
             try await sshClient.execute(command, profile: profile)

@@ -43,4 +43,4 @@ jobs:
 
       - name: Run Windows core tests
         shell: pwsh
-        run: scripts/ci-windows-core.ps1
+        run: ./scripts/ci-windows-core.ps1

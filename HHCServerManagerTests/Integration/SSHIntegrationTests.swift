@@ -6,7 +6,7 @@ final class SSHIntegrationTests: XCTestCase {
         let harness = try makeRealSSHHarness()
         defer { try? harness.service.deleteServer(harness.profile) }
 
-        try await trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
         let result = try await harness.sshClient.runSmokeTest(profile: harness.profile)
         XCTAssertEqual(result.exitCode, 0, result.stderr)
         XCTAssertEqual(result.stdout, "hhc-ssh-ok", result.stderr)
@@ -15,7 +15,7 @@ final class SSHIntegrationTests: XCTestCase {
     func testRealSFTPTransferRoundTripWhenEnvironmentIsConfigured() async throws {
         let harness = try makeRealSSHHarness(disableRsync: true, disableSCPFallback: true)
         defer { try? harness.service.deleteServer(harness.profile) }
-        try await trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
 
         let token = "hhc-transfer-\(UUID().uuidString)"
         let remoteBasePath = "/tmp/\(token)"
@@ -81,7 +81,7 @@ final class SSHIntegrationTests: XCTestCase {
 
         let harness = try makeRealSSHHarness()
         defer { try? harness.service.deleteServer(harness.profile) }
-        try await trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
 
         let token = "hhc-deploy-\(UUID().uuidString)"
         let basePath = "/tmp/\(token)"
@@ -174,6 +174,144 @@ final class SSHIntegrationTests: XCTestCase {
         _ = try? await harness.sshClient.execute("rm -rf -- \(Self.shellQuote(basePath))", profile: harness.profile)
     }
 
+    @MainActor
+    func testRealSystemdAndCronWritesAuditAndCleanupWhenExplicitlyEnabled() async throws {
+        guard Self.testEnvironment()["HHC_TEST_SECURITY_REAL"] == "1" else {
+            throw XCTSkip("Set HHC_TEST_SECURITY_REAL=1 with the real SSH environment to run the guarded systemd/Cron write integration test.")
+        }
+
+        let harness = try makeRealSSHHarness()
+        defer { try? harness.service.deleteServer(harness.profile) }
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+
+        let dependencyCheck = try await harness.sshClient.execute(
+            "command -v systemctl >/dev/null && test -w /etc/systemd/system && command -v crontab >/dev/null",
+            profile: harness.profile
+        )
+        guard dependencyCheck.exitCode == 0 else {
+            throw XCTSkip("Real systemd/Cron write test requires systemctl, crontab, and write access to /etc/systemd/system.")
+        }
+
+        let token = "hhc-phase4-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12))"
+        let unitName = "\(token).service"
+        let unitPath = "/etc/systemd/system/\(unitName)"
+        let systemdMarker = "/tmp/\(token).systemd"
+        let cronMarker = "/tmp/\(token).cron"
+        let originalCrontab = try await harness.sshClient.execute("crontab -l 2>/dev/null || true", profile: harness.profile).stdout
+        let cleanup = Self.phase4SecurityCleanupCommand(
+            unitName: unitName,
+            unitPath: unitPath,
+            systemdMarker: systemdMarker,
+            cronMarker: cronMarker,
+            originalCrontab: originalCrontab
+        )
+
+        do {
+            _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+            let installUnit = """
+            cat > \(Self.shellQuote(unitPath)) <<'__HHC_SYSTEMD_UNIT__'
+            [Unit]
+            Description=HHC Server Manager integration smoke
+
+            [Service]
+            Type=oneshot
+            ExecStart=/bin/sh -c 'printf hhc-systemd-ok > \(systemdMarker)'
+            __HHC_SYSTEMD_UNIT__
+            systemctl daemon-reload
+            """
+            let installResult = try await harness.sshClient.execute(installUnit, profile: harness.profile)
+            XCTAssertEqual(installResult.exitCode, 0, installResult.stderr)
+
+            let viewModel = ServerWorkspaceViewModel()
+            let systemdManager = SystemdServiceManager()
+            let cronManager = CronManager()
+
+            viewModel.performSystemdAction(
+                .restart,
+                unitName: unitName,
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                systemdServiceManager: systemdManager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil { viewModel.isPerformingSystemdAction == false }
+            XCTAssertNil(viewModel.systemdErrorMessage)
+            XCTAssertEqual(viewModel.systemdActionMessage, "Restart requested for \(unitName).")
+
+            let marker = try await harness.sshClient.execute("cat -- \(Self.shellQuote(systemdMarker))", profile: harness.profile)
+            XCTAssertEqual(marker.exitCode, 0, marker.stderr)
+            XCTAssertEqual(marker.stdout, "hhc-systemd-ok")
+
+            viewModel.loadCron(profile: harness.profile, sshClient: harness.sshClient, cronManager: cronManager)
+            try await Self.waitUntil { viewModel.isLoadingCron == false }
+            XCTAssertNil(viewModel.cronErrorMessage)
+
+            let cronCommand = "printf hhc-cron-ok > \(cronMarker)"
+            viewModel.addCronEntry(
+                schedule: "0 0 31 2 *",
+                command: cronCommand,
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                cronManager: cronManager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil { viewModel.isMutatingCron == false }
+            XCTAssertNil(viewModel.cronErrorMessage)
+            let addedEntry = try XCTUnwrap(viewModel.cronSnapshot?.entries.first { $0.command == cronCommand })
+
+            viewModel.performCronEntryAction(
+                .disable,
+                entry: addedEntry,
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                cronManager: cronManager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil { viewModel.isMutatingCron == false }
+            XCTAssertNil(viewModel.cronErrorMessage)
+            let disabledEntry = try XCTUnwrap(viewModel.cronSnapshot?.entries.first { $0.command == cronCommand })
+            XCTAssertFalse(disabledEntry.isEnabled)
+
+            viewModel.performCronEntryAction(
+                .enable,
+                entry: disabledEntry,
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                cronManager: cronManager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil { viewModel.isMutatingCron == false }
+            XCTAssertNil(viewModel.cronErrorMessage)
+            let enabledEntry = try XCTUnwrap(viewModel.cronSnapshot?.entries.first { $0.command == cronCommand })
+            XCTAssertTrue(enabledEntry.isEnabled)
+
+            viewModel.performCronEntryAction(
+                .delete,
+                entry: enabledEntry,
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                cronManager: cronManager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil { viewModel.isMutatingCron == false }
+            XCTAssertNil(viewModel.cronErrorMessage)
+            XCTAssertFalse(viewModel.cronSnapshot?.rawText.contains(cronCommand) == true)
+
+            let logs = try harness.repository.fetchRemoteChangeLogs(serverId: harness.profile.id)
+            XCTAssertTrue(logs.contains { $0.targetType == "systemd" && $0.targetId == unitName && $0.action == "restart" && $0.status == "success" })
+            XCTAssertTrue(logs.contains { $0.targetType == "cron" && $0.action == "add" && $0.status == "success" })
+            XCTAssertTrue(logs.contains { $0.targetType == "cron" && $0.action == "disable" && $0.status == "success" })
+            XCTAssertTrue(logs.contains { $0.targetType == "cron" && $0.action == "enable" && $0.status == "success" })
+            XCTAssertTrue(logs.contains { $0.targetType == "cron" && $0.action == "delete" && $0.status == "success" })
+
+            let cleanupResult = try await harness.sshClient.execute(cleanup, profile: harness.profile)
+            XCTAssertEqual(cleanupResult.exitCode, 0, cleanupResult.stderr)
+        } catch {
+            _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+            throw error
+        }
+    }
+
     func testRealVerdaccioLifecycleWhenExplicitlyEnabled() async throws {
         guard ProcessInfo.processInfo.environment["HHC_TEST_VERDACCIO_REAL"] == "1" else {
             throw XCTSkip("Set HHC_TEST_VERDACCIO_REAL=1 with the real SSH environment to run the Verdaccio lifecycle integration test.")
@@ -181,7 +319,7 @@ final class SSHIntegrationTests: XCTestCase {
 
         let harness = try makeRealSSHHarness()
         defer { try? harness.service.deleteServer(harness.profile) }
-        try await trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
 
         let token = UUID().uuidString
             .replacingOccurrences(of: "-", with: "")
@@ -351,7 +489,7 @@ final class SSHIntegrationTests: XCTestCase {
             }
     }
 
-    private func trustHostKeyIfNeeded(_ sshClient: OpenSSHClient, profile: ServerProfile) async throws {
+    private static func trustHostKeyIfNeeded(_ sshClient: OpenSSHClient, profile: ServerProfile) async throws {
         do {
             _ = try await sshClient.runSmokeTest(profile: profile)
         } catch SSHClientError.unknownHostKey(let hostKey) {
@@ -376,6 +514,41 @@ final class SSHIntegrationTests: XCTestCase {
         userdel "$service_name" >/dev/null 2>&1 || true; \
         rm -rf -- "$install_path"
         """
+    }
+
+    private static func phase4SecurityCleanupCommand(
+        unitName: String,
+        unitPath: String,
+        systemdMarker: String,
+        cronMarker: String,
+        originalCrontab: String
+    ) -> String {
+        let crontabData = Data(originalCrontab.utf8).base64EncodedString()
+        return """
+        systemctl reset-failed \(shellQuote(unitName)) >/dev/null 2>&1 || true; \
+        rm -f -- \(shellQuote(unitPath)) \(shellQuote(systemdMarker)) \(shellQuote(cronMarker)); \
+        systemctl daemon-reload >/dev/null 2>&1 || true; \
+        if [ -n \(shellQuote(crontabData)) ]; then \
+          printf '%s' \(shellQuote(crontabData)) | base64 -d | crontab -; \
+        else \
+          crontab -r >/dev/null 2>&1 || true; \
+        fi
+        """
+    }
+
+    @MainActor
+    private static func waitUntil(
+        timeout: TimeInterval = 15,
+        condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline {
+                XCTFail("Timed out waiting for async UI state.")
+                return
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
     }
 }
 
