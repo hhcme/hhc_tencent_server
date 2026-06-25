@@ -24,7 +24,7 @@ xcodebuild \
 scripts/ci.sh
 ```
 
-GitHub Actions workflow 位于 `.github/workflows/ci.yml`，会在 `main` 分支 push 和 pull request 时运行同一套 macOS 构建测试，并在 Windows runner 上运行 Windows 原生版核心层 .NET 测试。
+GitHub Actions workflow 位于 `.github/workflows/ci.yml`，会在 `main` 分支 push 和 pull request 时通过 `macos-26` runner 运行同一套 macOS 构建测试，并在 Windows runner 上运行 Windows 原生版核心层 .NET 测试。
 
 Windows 核心层本地测试使用：
 
