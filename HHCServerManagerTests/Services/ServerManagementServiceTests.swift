@@ -2,6 +2,77 @@ import XCTest
 @testable import HHCServerManager
 
 final class ServerManagementServiceTests: XCTestCase {
+    @MainActor
+    func testAppStateStartsWithEmptyServerListAndNoWorkspaceSelection() throws {
+        let harness = try AppStateHarness()
+
+        XCTAssertTrue(harness.appState.servers.isEmpty)
+        XCTAssertNil(harness.appState.selectedServerId)
+        XCTAssertNil(harness.appState.selectedServer)
+        XCTAssertNil(harness.appState.startupError)
+    }
+
+    @MainActor
+    func testAppStateOpensClosesAndSwitchesWorkspaceSelection() throws {
+        let harness = try AppStateHarness()
+        let primary = try harness.appState.serverManagementService.createServer(
+            name: "Tencent Production",
+            host: "prod.example.internal",
+            port: 22,
+            username: "root",
+            groupName: "prod",
+            authType: .password,
+            credential: .password("secret-1")
+        )
+        let secondary = try harness.appState.serverManagementService.createServer(
+            name: "Tencent Staging",
+            host: "staging.example.internal",
+            port: 22,
+            username: "ubuntu",
+            groupName: "staging",
+            authType: .password,
+            credential: .password("secret-2")
+        )
+
+        harness.appState.reloadServers()
+
+        XCTAssertEqual(Set(harness.appState.servers.map(\.id)), Set([primary.id, secondary.id]))
+
+        harness.appState.openWorkspace(for: primary)
+        XCTAssertEqual(harness.appState.selectedServer?.id, primary.id)
+
+        harness.appState.selectedServerId = secondary.id
+        XCTAssertEqual(harness.appState.selectedServer?.id, secondary.id)
+
+        harness.appState.closeWorkspace()
+        XCTAssertNil(harness.appState.selectedServerId)
+        XCTAssertNil(harness.appState.selectedServer)
+    }
+
+    @MainActor
+    func testAppStateReloadClearsWorkspaceSelectionWhenSelectedServerWasRemoved() throws {
+        let harness = try AppStateHarness()
+        let profile = try harness.appState.serverManagementService.createServer(
+            name: "Removed Elsewhere",
+            host: "removed.example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+
+        harness.appState.reloadServers()
+        harness.appState.openWorkspace(for: profile)
+        try harness.repository.deleteServer(id: profile.id)
+
+        harness.appState.reloadServers()
+
+        XCTAssertTrue(harness.appState.servers.isEmpty)
+        XCTAssertNil(harness.appState.selectedServerId)
+        XCTAssertNil(harness.appState.selectedServer)
+    }
+
     func testCreateServerStoresProfileAndPasswordCredential() throws {
         let harness = try Harness()
         let profile = try harness.service.createServer(
@@ -5803,6 +5874,19 @@ final class ServerManagementServiceTests: XCTestCase {
                 serverManagementService: service,
                 now: now
             )
+        }
+    }
+
+    @MainActor
+    private final class AppStateHarness {
+        let repository: ServerRepository
+        let keychain: KeychainService
+        let appState: AppState
+
+        init() throws {
+            repository = ServerRepository(database: try AppDatabase.inMemory())
+            keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.app-state.\(UUID().uuidString)")
+            appState = AppState(repository: repository, keychain: keychain)
         }
     }
 }
