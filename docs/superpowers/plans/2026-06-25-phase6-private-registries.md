@@ -89,10 +89,10 @@ CREATE TABLE registry_backups (
 ### Task 2：Verdaccio 安装
 
 - [x] 固定 Verdaccio 稳定版本：当前默认固定为 `5.31.1`，并拒绝 `latest`、pre-release 和非 semver 版本。
-- [ ] 创建安装目录和数据目录。
+- [x] 创建安装目录和数据目录：已生成受控安装命令，创建 system user、安装目录和 data 目录；真实服务器写操作仍需谨慎手动验收。
 - [x] 生成配置文件：已生成基础 `config.yaml` 模板，包含 storage、listen、npmjs uplink、package access/publish 和日志配置。
 - [x] 创建 systemd service：已生成 systemd unit 模板，包含固定 Verdaccio 版本、工作目录、重启策略和基础 hardening。
-- [ ] 启动并验证健康检查。
+- [x] 启动并验证健康检查：已生成 `systemctl daemon-reload`、`enable --now`、`restart` 和 `/-/ping` health check 流程，mock/contract 测试已覆盖；真实服务器手动验收仍未执行。
 
 ### Task 3：Verdaccio 管理
 
@@ -128,6 +128,7 @@ CREATE TABLE registry_backups (
 - [x] 安装前检查解析测试。
 - [x] 配置生成测试。
 - [x] systemd service 模板测试。
+- [x] Verdaccio 安装命令和 health check 状态机测试。
 - [ ] 备份恢复状态机测试。
 - [ ] 日志脱敏测试。
 

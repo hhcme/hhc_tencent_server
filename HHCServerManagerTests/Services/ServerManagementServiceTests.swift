@@ -721,6 +721,76 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(report.checks.first { $0.id == "disk" }?.status, .warning)
     }
 
+    func testVerdaccioInstallerBuildsSafeInstallCommand() throws {
+        let command = try VerdaccioInstaller.installCommand(for: VerdaccioInstallDraft())
+
+        XCTAssertTrue(command.contains("useradd --system --home-dir \"$install_path\""))
+        XCTAssertTrue(command.contains("install -d -m 0755 -o \"$service_name\" -g \"$service_name\" \"$install_path\" \"$data_path\""))
+        XCTAssertTrue(command.contains("base64 -d > \"$install_path/config.yaml\""))
+        XCTAssertTrue(command.contains("base64 -d > '/etc/systemd/system/verdaccio.service'"))
+        XCTAssertTrue(command.contains("systemctl daemon-reload"))
+        XCTAssertTrue(command.contains("systemctl enable --now 'verdaccio.service'"))
+        XCTAssertTrue(command.contains("systemctl restart 'verdaccio.service'"))
+        XCTAssertFalse(command.contains("latest"))
+    }
+
+    func testVerdaccioInstallerInstallsAndRunsHealthCheck() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: #"{"ok":"verdaccio"}"#, stderr: "", exitCode: 0, duration: 0),
+        ])
+        let installer = VerdaccioInstaller()
+
+        let result = try await installer.install(
+            draft: VerdaccioInstallDraft(listenHost: "0.0.0.0"),
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(result.configPath, "/srv/verdaccio/config.yaml")
+        XCTAssertEqual(result.servicePath, "/etc/systemd/system/verdaccio.service")
+        XCTAssertEqual(result.healthCheckURL, "http://127.0.0.1:4873/-/ping")
+        XCTAssertEqual(result.healthCheckOutput, #"{"ok":"verdaccio"}"#)
+        XCTAssertEqual(client.commands.count, 2)
+        XCTAssertTrue(client.commands[0].contains("systemctl restart 'verdaccio.service'"))
+        XCTAssertEqual(client.commands[1], "curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'")
+    }
+
+    func testVerdaccioInstallerStopsWhenInstallCommandFails() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "token=secret-value", stderr: "install failed", exitCode: 1, duration: 0),
+        ])
+        let installer = VerdaccioInstaller()
+
+        do {
+            _ = try await installer.install(draft: VerdaccioInstallDraft(), profile: profile, sshClient: client)
+            XCTFail("Expected install failure.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("install failed"))
+            XCTAssertFalse(error.localizedDescription.contains("secret-value"))
+            XCTAssertEqual(client.commands.count, 1)
+        }
+    }
+
+    func testVerdaccioInstallerFailsWhenHealthCheckFails() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: "", stderr: "connection refused", exitCode: 7, duration: 0),
+        ])
+        let installer = VerdaccioInstaller()
+
+        do {
+            _ = try await installer.install(draft: VerdaccioInstallDraft(), profile: profile, sshClient: client)
+            XCTFail("Expected health check failure.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("connection refused"))
+            XCTAssertEqual(client.commands.count, 2)
+        }
+    }
+
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
         let os = DashboardService.parseOSRelease("""
         NAME="Ubuntu"

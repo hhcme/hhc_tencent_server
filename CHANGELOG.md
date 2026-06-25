@@ -73,6 +73,7 @@ All notable changes to this project will be documented in this file.
 - Added workspace-level deployment acceptance coverage for deploy path allowlist rejection and health-check failure surfacing.
 - Added workspace-level deployment acceptance coverage for build failure stopping later restart and health-check steps.
 - Started Phase 6 private registry foundations with Verdaccio draft validation, SSH preflight reporting, pinned config generation, and systemd service templates.
+- Added a Verdaccio installer command flow for creating registry directories, writing config/systemd units, restarting the service, and checking `/-/ping`.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -141,3 +142,4 @@ All notable changes to this project will be documented in this file.
 - 添加部署工作台验收覆盖，验证部署目录白名单拒绝和 health check 失败状态/日志展示。
 - 添加部署工作台验收覆盖，验证 build 失败后不会继续执行 restart 和 health check 后续步骤。
 - 启动 Phase 6 私有包仓库基础能力，添加 Verdaccio 安装草稿校验、SSH 安装前检查报告、固定版本配置生成和 systemd service 模板。
+- 添加 Verdaccio 安装命令流程，支持创建仓库目录、写入配置/systemd unit、重启服务并检查 `/-/ping`。

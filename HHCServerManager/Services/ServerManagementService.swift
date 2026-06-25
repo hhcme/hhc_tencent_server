@@ -1154,6 +1154,13 @@ struct VerdaccioInstallDraft: Equatable, Sendable {
     }
 }
 
+struct VerdaccioInstallResult: Equatable, Sendable {
+    var configPath: String
+    var servicePath: String
+    var healthCheckURL: String
+    var healthCheckOutput: String
+}
+
 enum RegistryConfigurationError: LocalizedError, Equatable {
     case invalidName
     case invalidPath(String)
@@ -1300,6 +1307,84 @@ enum VerdaccioConfigurationBuilder {
 
     private static func isStablePinnedVersion(_ version: String) -> Bool {
         version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil
+    }
+}
+
+final class VerdaccioInstaller: @unchecked Sendable {
+    func install(
+        draft: VerdaccioInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioInstallResult {
+        let command = try Self.installCommand(for: draft)
+        let installResult = try await CloudProviderRequestRunner.withTimeout(30) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard installResult.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: installResult, fallback: "Verdaccio installation failed."))
+        }
+
+        let healthCheckURL = Self.healthCheckURL(for: draft)
+        let healthResult = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute("curl -fsS --max-time 5 \(Self.shellQuote(healthCheckURL))", profile: profile)
+        }
+        guard healthResult.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: healthResult, fallback: "Verdaccio health check failed."))
+        }
+
+        return VerdaccioInstallResult(
+            configPath: "\(draft.installPath.trimmed)/config.yaml",
+            servicePath: "/etc/systemd/system/\(draft.serviceName.trimmed).service",
+            healthCheckURL: healthCheckURL,
+            healthCheckOutput: DeploymentLogRedactor.redact(healthResult.stdout.trimmed.nilIfEmpty ?? "ok")
+        )
+    }
+
+    static func installCommand(for draft: VerdaccioInstallDraft) throws -> String {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let installPath = draft.installPath.trimmed
+        let dataPath = draft.dataPath.trimmed
+        let serviceName = draft.serviceName.trimmed
+        let configData = Data(try VerdaccioConfigurationBuilder.configurationYAML(for: draft).utf8).base64EncodedString()
+        let serviceData = Data(try VerdaccioConfigurationBuilder.systemdService(for: draft).utf8).base64EncodedString()
+        return """
+        set -e; \
+        install_path=\(shellQuote(installPath)); \
+        data_path=\(shellQuote(dataPath)); \
+        service_name=\(shellQuote(serviceName)); \
+        if ! id -u "$service_name" >/dev/null 2>&1; then useradd --system --home-dir "$install_path" --shell /usr/sbin/nologin "$service_name"; fi; \
+        install -d -m 0755 -o "$service_name" -g "$service_name" "$install_path" "$data_path"; \
+        base64 -d > "$install_path/config.yaml" <<'__HHC_VERDACCIO_CONFIG__'
+        \(configData)
+        __HHC_VERDACCIO_CONFIG__
+        chown "$service_name:$service_name" "$install_path/config.yaml"; \
+        chmod 0640 "$install_path/config.yaml"; \
+        base64 -d > \(shellQuote("/etc/systemd/system/\(serviceName).service")) <<'__HHC_VERDACCIO_SERVICE__'
+        \(serviceData)
+        __HHC_VERDACCIO_SERVICE__
+        chmod 0644 \(shellQuote("/etc/systemd/system/\(serviceName).service")); \
+        systemctl daemon-reload; \
+        systemctl enable --now \(shellQuote("\(serviceName).service")); \
+        systemctl restart \(shellQuote("\(serviceName).service"))
+        """
+    }
+
+    private static func healthCheckURL(for draft: VerdaccioInstallDraft) -> String {
+        let host = draft.listenHost.trimmed == "0.0.0.0" ? "127.0.0.1" : draft.listenHost.trimmed
+        return "http://\(host):\(draft.listenPort)/-/ping"
+    }
+
+    private static func redactedOutput(from result: CommandResult, fallback: String) -> String {
+        DeploymentLogRedactor.redact(
+            [result.stderr.trimmed, result.stdout.trimmed]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+                .nilIfEmpty ?? fallback
+        )
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
 
