@@ -23,6 +23,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingVerdaccioInstall = false
     @State private var pendingVerdaccioUserDelete = false
     @State private var pendingVerdaccioRestore = false
+    @State private var pendingVerdaccioProxyReload = false
     @State private var securityGroupDraftDirection: CloudSecurityGroupRuleDirection = .ingress
     @State private var securityGroupDraftProtocol = "TCP"
     @State private var securityGroupDraftPort = "22"
@@ -226,6 +227,19 @@ struct ServerWorkspaceView: View {
             }
         } message: {
             Text(verdaccioRestoreConfirmationMessage)
+        }
+        .alert("Reload Nginx?", isPresented: $pendingVerdaccioProxyReload) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reload", role: .destructive) {
+                viewModel.reloadVerdaccioNginxProxy(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    nginxConfigManager: appState.nginxConfigManager,
+                    repository: appState.repository
+                )
+            }
+        } message: {
+            Text(verdaccioProxyReloadConfirmationMessage)
         }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
@@ -788,6 +802,7 @@ struct ServerWorkspaceView: View {
                 verdaccioStatusSection
                 verdaccioUsersSection
                 verdaccioBackupSection
+                verdaccioProxySection
                 verdaccioPackagesSection
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -853,6 +868,92 @@ struct ServerWorkspaceView: View {
                     .frame(maxWidth: .infinity, minHeight: 140)
             }
         }
+    }
+
+    private var verdaccioProxySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Nginx Proxy")
+                .font(.headline)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Server Name")
+                        .foregroundStyle(.secondary)
+                    TextField("_", text: $viewModel.verdaccioProxyDraft.serverName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 280)
+                }
+                GridRow {
+                    Text("Config Path")
+                        .foregroundStyle(.secondary)
+                    TextField("/etc/nginx/conf.d/verdaccio.conf", text: $viewModel.verdaccioProxyDraft.configPath)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 560)
+                }
+                GridRow {
+                    Text("Body Size")
+                        .foregroundStyle(.secondary)
+                    TextField("100m", text: $viewModel.verdaccioProxyDraft.clientMaxBodySize)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 120)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.writeVerdaccioNginxProxy(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        nginxConfigManager: appState.nginxConfigManager,
+                        repository: appState.repository
+                    )
+                } label: {
+                    if viewModel.isWritingVerdaccioProxy {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Write Proxy", systemImage: "network")
+                    }
+                }
+                .disabled(isRegistryBusy)
+
+                Button(role: .destructive) {
+                    pendingVerdaccioProxyReload = true
+                } label: {
+                    if viewModel.isReloadingVerdaccioProxy {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Reload Nginx", systemImage: "arrow.clockwise")
+                    }
+                }
+                .disabled(isRegistryBusy || viewModel.verdaccioProxyUpsertResult?.testResult.succeeded != true)
+            }
+
+            if let result = viewModel.verdaccioProxyUpsertResult {
+                if result.testResult.succeeded {
+                    Label("nginx -t passed for \(result.file.path)", systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                } else {
+                    Label("nginx -t failed and the proxy config was rolled back", systemImage: "xmark.octagon")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
+                }
+
+                if !result.testResult.output.isEmpty {
+                    Text(result.testResult.output)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+        }
+        .padding(12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var verdaccioBackupSection: some View {
@@ -2944,7 +3045,9 @@ struct ServerWorkspaceView: View {
             viewModel.isLoadingVerdaccioPackages ||
             viewModel.isCreatingVerdaccioBackup ||
             viewModel.isRestoringVerdaccioBackup ||
-            viewModel.isMutatingVerdaccioUser
+            viewModel.isMutatingVerdaccioUser ||
+            viewModel.isWritingVerdaccioProxy ||
+            viewModel.isReloadingVerdaccioProxy
     }
 
     private var isRegistryPreflightReady: Bool {
@@ -2980,6 +3083,12 @@ struct ServerWorkspaceView: View {
     private var verdaccioRestoreConfirmationMessage: String {
         """
         This will stop \(viewModel.registryDraft.serviceName).service, restore config.yaml and storage from \(viewModel.verdaccioRestorePathDraft.trimmingCharacters(in: .whitespacesAndNewlines)), create a rollback archive first, restart the service, and run a health check. If restore or health check fails, the command will attempt rollback.
+        """
+    }
+
+    private var verdaccioProxyReloadConfirmationMessage: String {
+        """
+        This will run nginx -t and reload Nginx if the test passes. Existing connections should stay open, but the active Nginx configuration will change for all served sites.
         """
     }
 

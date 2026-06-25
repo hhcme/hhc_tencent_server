@@ -1253,6 +1253,45 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertFalse(client.commands.joined(separator: "\n").contains("Correct-Horse-Secret"))
     }
 
+    func testPrivateRegistriesWorkspaceWritesAndReloadsVerdaccioNginxProxy() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = RegistryViewModelMockSSHClient()
+        let manager = NginxConfigManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.verdaccioProxyDraft = VerdaccioNginxProxyDraft(
+            serverName: "registry.example.com",
+            configPath: "/www/server/nginx/conf/vhost/verdaccio.conf",
+            clientMaxBodySize: "200m"
+        )
+        viewModel.writeVerdaccioNginxProxy(
+            profile: profile,
+            sshClient: client,
+            nginxConfigManager: manager,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isWritingVerdaccioProxy == false && viewModel.verdaccioProxyUpsertResult != nil }
+
+        XCTAssertEqual(viewModel.verdaccioProxyUpsertResult?.file.path, "/www/server/nginx/conf/vhost/verdaccio.conf")
+        XCTAssertTrue(viewModel.verdaccioProxyUpsertResult?.testResult.succeeded == true)
+        XCTAssertTrue(viewModel.registryActionMessage?.contains("Wrote Verdaccio Nginx proxy") == true)
+        XCTAssertTrue(client.commands.contains { $0.contains("__HHC_NGINX_CONFIG_EOF__") && $0.contains("/www/server/nginx/conf/vhost/verdaccio.conf") })
+
+        viewModel.reloadVerdaccioNginxProxy(
+            profile: profile,
+            sshClient: client,
+            nginxConfigManager: manager,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isReloadingVerdaccioProxy == false && viewModel.registryActionMessage == "Reloaded Nginx for Verdaccio proxy." }
+
+        XCTAssertTrue(client.commands.contains("nginx -t"))
+        XCTAssertTrue(client.commands.contains("systemctl reload nginx 2>/dev/null || nginx -s reload"))
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id, limit: 5)
+        XCTAssertEqual(logs.filter { $0.action.contains("verdaccio-proxy") }.map(\.status), ["success", "success"])
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -2011,6 +2050,32 @@ private final class RegistryViewModelMockSSHClient: SSHClient, @unchecked Sendab
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
         commands.append(command)
         if command.contains("systemctl enable --now 'verdaccio.service'") {
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("__HHC_NGINX_CONFIG_EOF__") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                __HHC_NGINX_CREATED__1
+                __HHC_NGINX_BACKUP__
+                nginx: the configuration file /www/server/nginx/conf/nginx.conf syntax is ok
+                nginx: configuration file /www/server/nginx/conf/nginx.conf test is successful
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command == "nginx -t" {
+            return CommandResult(
+                command: command,
+                stdout: "nginx: configuration file /www/server/nginx/conf/nginx.conf test is successful\n",
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command == "systemctl reload nginx 2>/dev/null || nginx -s reload" {
             return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
         }
         if command.contains("htpasswd -B -i") || command.contains("htpasswd -D") {

@@ -95,6 +95,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var verdaccioBackupResult: VerdaccioRegistryBackupResult?
     @Published var verdaccioRestoreResult: VerdaccioRegistryRestoreResult?
     @Published var verdaccioUserMutationResult: VerdaccioUserMutationResult?
+    @Published var verdaccioProxyDraft = VerdaccioNginxProxyDraft(serverName: "_")
+    @Published var verdaccioProxyUpsertResult: NginxConfigUpsertResult?
     @Published var verdaccioUsernameDraft = ""
     @Published var verdaccioPasswordDraft = ""
     @Published var verdaccioRestorePathDraft = ""
@@ -105,6 +107,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isCreatingVerdaccioBackup = false
     @Published var isRestoringVerdaccioBackup = false
     @Published var isMutatingVerdaccioUser = false
+    @Published var isWritingVerdaccioProxy = false
+    @Published var isReloadingVerdaccioProxy = false
     @Published var registryErrorMessage: String?
     @Published var registryActionMessage: String?
     @Published var commandResult: CommandResult?
@@ -1920,6 +1924,121 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isRestoringVerdaccioBackup = false
+                }
+            }
+        }
+    }
+
+    func writeVerdaccioNginxProxy(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        nginxConfigManager: NginxConfigManager,
+        repository: ServerRepository
+    ) {
+        guard !isWritingVerdaccioProxy else { return }
+        isWritingVerdaccioProxy = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+        let proxyDraft = verdaccioProxyDraft
+
+        Task {
+            do {
+                let content = try VerdaccioConfigurationBuilder.nginxProxyConfig(
+                    for: registryDraft,
+                    proxy: proxyDraft
+                )
+                let file = try VerdaccioConfigurationBuilder.nginxProxyConfigFile(for: proxyDraft)
+                let result = try await nginxConfigManager.upsertConfig(
+                    path: file.path,
+                    content: content,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: file.path,
+                    action: "upsert-verdaccio-proxy",
+                    beforeSnapshot: nil,
+                    afterSnapshot: result.rolledBack ? nil : content,
+                    status: result.rolledBack ? "failed" : "success",
+                    message: result.rolledBack
+                        ? "Verdaccio proxy failed nginx -t and was rolled back."
+                        : "Wrote Verdaccio proxy after successful nginx -t."
+                )
+                await MainActor.run {
+                    self.verdaccioProxyUpsertResult = result
+                    self.registryActionMessage = result.rolledBack
+                        ? "Nginx test failed. Verdaccio proxy was rolled back."
+                        : "Wrote Verdaccio Nginx proxy to \(result.file.path). Run reload after review."
+                    self.isWritingVerdaccioProxy = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: proxyDraft.configPath,
+                    action: "upsert-verdaccio-proxy",
+                    beforeSnapshot: nil,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isWritingVerdaccioProxy = false
+                }
+            }
+        }
+    }
+
+    func reloadVerdaccioNginxProxy(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        nginxConfigManager: NginxConfigManager,
+        repository: ServerRepository
+    ) {
+        guard !isReloadingVerdaccioProxy else { return }
+        isReloadingVerdaccioProxy = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+        let target = verdaccioProxyDraft.configPath
+
+        Task {
+            do {
+                let result = try await nginxConfigManager.reload(profile: profile, sshClient: sshClient)
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: target,
+                    action: "reload-verdaccio-proxy",
+                    beforeSnapshot: verdaccioProxyUpsertResult?.testResult.output,
+                    afterSnapshot: result.output,
+                    status: "success",
+                    message: "Reloaded Nginx after Verdaccio proxy configuration."
+                )
+                await MainActor.run {
+                    self.registryActionMessage = "Reloaded Nginx for Verdaccio proxy."
+                    self.isReloadingVerdaccioProxy = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: target,
+                    action: "reload-verdaccio-proxy",
+                    beforeSnapshot: verdaccioProxyUpsertResult?.testResult.output,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isReloadingVerdaccioProxy = false
                 }
             }
         }

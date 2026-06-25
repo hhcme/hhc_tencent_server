@@ -70,7 +70,7 @@ CREATE TABLE registry_backups (
 
 ## 6. UI 范围
 
-- 工作台新增“包仓库”页：已接入 macOS Registries section，支持 Verdaccio preflight、安装、状态、用户管理、包列表和备份/恢复入口。
+- 工作台新增“包仓库”页：已接入 macOS Registries section，支持 Verdaccio preflight、安装、状态、用户管理、包列表、备份/恢复入口和 Nginx proxy 写入/reload 入口。
 - 安装向导：类型、路径、端口、访问范围、服务名；当前 UI 先接入默认 Verdaccio 草稿和安装确认，后续再开放高级表单编辑。
 - Verdaccio 状态卡：版本、运行状态、端口、storage 占用、最近日志。
 - 用户和权限配置入口：已接入 htpasswd 用户创建、改密和确认删除；包权限策略仍由配置生成层控制，后续再开放高级 UI。
@@ -107,7 +107,7 @@ CREATE TABLE registry_backups (
 
 ### Task 4：反向代理
 
-- [x] 复用 Phase 4 Nginx 配置能力：已通过 `NginxConfigManager.upsertConfig` 支持新建/更新 `.conf`，保存后执行 `nginx -t`，失败时恢复已有文件或删除新文件。
+- [x] 复用 Phase 4 Nginx 配置能力：已通过 `NginxConfigManager.upsertConfig` 支持新建/更新 `.conf`，保存后执行 `nginx -t`，失败时恢复已有文件或删除新文件；macOS Registries 工作台已接入 Verdaccio proxy 写入、测试结果展示和确认 reload。
 - [x] 生成 Verdaccio proxy 配置：已支持生成独立 Nginx vhost，包含 `proxy_pass`、Host/IP/Forwarded headers、Upgrade header 和 body size。
 - [x] 执行 `nginx -t` 后 reload：proxy 配置写入复用 Nginx 测试流程，reload 复用既有 `NginxConfigManager.reload`；真实服务器写入/reload 仍待手动验收。
 - [x] HTTPS 只提供配置协助，不自动申请证书：生成配置中只保留 TLS/ACME 提示注释，不申请或写入证书。
@@ -135,7 +135,7 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 状态、日志脱敏和配置保存前备份测试。
 - [x] Verdaccio 上游 registry 和权限策略配置生成/保存测试。
 - [x] Verdaccio 用户创建、改密、删除命令层测试，覆盖 htpasswd 依赖、备份、重启和明文密码不进入命令字符串。
-- [x] macOS Registries 工作台 ViewModel 测试，覆盖 preflight、安装、状态、用户管理、包列表和备份/恢复入口。
+- [x] macOS Registries 工作台 ViewModel 测试，覆盖 preflight、安装、状态、用户管理、包列表、备份/恢复入口和 Nginx proxy 写入/reload。
 - [x] Verdaccio Nginx proxy 生成、写入、`nginx -t` 和 reload contract 测试。
 - [x] 备份归档命令测试。
 - [x] 恢复状态机测试：已覆盖恢复成功、health check 失败回滚、恢复命令失败回滚和非法备份路径拒绝。
@@ -147,7 +147,7 @@ CREATE TABLE registry_backups (
 - [ ] npm publish/install 走私有 registry 成功。
 - [ ] 服务重启后仍可用。
 - [ ] 修改配置前有备份。
-- [ ] Nginx proxy 配置测试通过后 reload。
+- [x] Nginx proxy 配置测试通过后 reload：proxy 写入会先执行 `nginx -t`，reload 需单独危险确认并再次测试通过后执行。真实服务器写入/reload 仍需谨慎手动验收。
 - [x] 备份和恢复可用：底层已覆盖成功、失败回滚和非法路径拒绝；macOS 工作台已接入备份创建、恢复路径回填、危险确认和恢复后状态刷新。真实服务器恢复仍需谨慎手动验收。
 - [x] Dart/Flutter pub 方案有明确验证结论：暂不做自托管 installer，保留外部 Hosted Pub Repository 配置辅助方向。
 
