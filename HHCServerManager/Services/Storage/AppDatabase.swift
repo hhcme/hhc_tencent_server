@@ -162,6 +162,20 @@ final class AppDatabase: @unchecked Sendable {
             ON command_history(server_id, created_at DESC)
         """)
         try execute("""
+            CREATE TABLE IF NOT EXISTS dashboard_snapshots (
+                id TEXT PRIMARY KEY NOT NULL,
+                server_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
+                capabilities_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                captured_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_dashboard_snapshots_server_captured_at
+            ON dashboard_snapshots(server_id, captured_at DESC)
+        """)
+        try execute("""
             CREATE TABLE IF NOT EXISTS operation_logs (
                 id TEXT PRIMARY KEY NOT NULL,
                 scope TEXT NOT NULL,

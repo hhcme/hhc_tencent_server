@@ -585,12 +585,15 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
     func testRefreshDashboardLoadsCapabilitiesAndMetrics() async throws {
         let profile = makeProfile()
         let client = DashboardMockSSHClient()
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
         let viewModel = ServerWorkspaceViewModel()
 
         viewModel.refreshDashboard(
             profile: profile,
             sshClient: client,
-            dashboardService: DashboardService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+            dashboardService: DashboardService(now: { Date(timeIntervalSince1970: 1_700_000_000) }),
+            repository: repository
         )
         try await waitUntil { viewModel.isRefreshingDashboard == false && viewModel.dashboardSnapshot != nil }
 
@@ -602,6 +605,38 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.hasSFTP)
         XCTAssertEqual(snapshot.metrics.map(\.name), ["Load Average", "Memory", "Root Disk", "CPU Cores", "Network", "Processes"])
         XCTAssertTrue(snapshot.warnings.isEmpty)
+        XCTAssertNil(viewModel.dashboardErrorMessage)
+        XCTAssertEqual(try repository.fetchLatestDashboardSnapshot(serverId: profile.id), snapshot)
+    }
+
+    func testLoadCachedDashboardSnapshotRestoresPreviousSnapshot() throws {
+        let profile = makeProfile()
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        let snapshot = ServerDashboardSnapshot(
+            capabilities: ServerCapabilities(
+                osName: "Ubuntu",
+                osVersion: "24.04",
+                kernelVersion: "6.8.0",
+                hasProc: true,
+                hasSystemd: true,
+                hasSFTP: true,
+                detectedAt: Date(timeIntervalSince1970: 1_700_000_000)
+            ),
+            metrics: [
+                DashboardMetric(name: "CPU Cores", value: "4", unit: "online", source: "SSH"),
+            ],
+            warnings: [
+                DashboardWarning(source: "Cloud API", message: "permission denied"),
+            ],
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_010)
+        )
+        try repository.saveDashboardSnapshot(snapshot, serverId: profile.id)
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.loadCachedDashboardSnapshot(profile: profile, repository: repository)
+
+        XCTAssertEqual(viewModel.dashboardSnapshot, snapshot)
         XCTAssertNil(viewModel.dashboardErrorMessage)
     }
 

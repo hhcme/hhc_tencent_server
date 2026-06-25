@@ -60,7 +60,7 @@ struct CommandResult: Equatable, Hashable {
     var duration: TimeInterval
 }
 
-struct ServerCapabilities: Equatable, Hashable, Sendable {
+struct ServerCapabilities: Codable, Equatable, Hashable, Sendable {
     var osName: String?
     var osVersion: String?
     var kernelVersion: String?
@@ -70,7 +70,7 @@ struct ServerCapabilities: Equatable, Hashable, Sendable {
     var detectedAt: Date
 }
 
-struct DashboardMetric: Identifiable, Equatable, Hashable, Sendable {
+struct DashboardMetric: Identifiable, Codable, Equatable, Hashable, Sendable {
     var id: String { name }
     var name: String
     var value: String
@@ -97,13 +97,13 @@ struct CloudMetricSeries: Equatable, Hashable, Sendable {
     var timestamps: [Date]
 }
 
-struct DashboardWarning: Identifiable, Equatable, Hashable, Sendable {
+struct DashboardWarning: Identifiable, Codable, Equatable, Hashable, Sendable {
     var id: String { source }
     var source: String
     var message: String
 }
 
-struct ServerDashboardSnapshot: Equatable, Hashable, Sendable {
+struct ServerDashboardSnapshot: Codable, Equatable, Hashable, Sendable {
     var capabilities: ServerCapabilities
     var metrics: [DashboardMetric]
     var warnings: [DashboardWarning]

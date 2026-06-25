@@ -121,6 +121,38 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func saveDashboardSnapshot(_ snapshot: ServerDashboardSnapshot, serverId: UUID) throws {
+        let capabilitiesJSON = try encodeJSON(snapshot.capabilities)
+        let metricsJSON = try encodeJSON(snapshot.metrics)
+        let warningsJSON = try encodeJSON(snapshot.warnings)
+        try database.execute("""
+            INSERT INTO dashboard_snapshots (
+                id, server_id, capabilities_json, metrics_json, warnings_json, captured_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        """, bindings: [
+            .text(UUID().uuidString),
+            .text(serverId.uuidString),
+            .text(capabilitiesJSON),
+            .text(metricsJSON),
+            .text(warningsJSON),
+            .text(AppDatabase.string(from: snapshot.capturedAt)),
+        ])
+    }
+
+    func fetchLatestDashboardSnapshot(serverId: UUID) throws -> ServerDashboardSnapshot? {
+        try database.query("""
+            SELECT capabilities_json, metrics_json, warnings_json, captured_at
+            FROM dashboard_snapshots
+            WHERE server_id = ?
+            ORDER BY captured_at DESC
+            LIMIT 1
+        """, bindings: [
+            .text(serverId.uuidString),
+        ]) { statement in
+            try self.mapDashboardSnapshot(statement)
+        }.first
+    }
+
     func saveOperationLog(_ entry: OperationLogEntry) throws {
         try database.execute("""
             INSERT INTO operation_logs (
@@ -809,6 +841,30 @@ final class ServerRepository: @unchecked Sendable {
             status: string(statement, 4),
             message: optionalString(statement, 5),
             createdAt: date(statement, 6)
+        )
+    }
+
+    private func encodeJSON<T: Encodable>(_ value: T) throws -> String {
+        let jsonEncoder = JSONEncoder()
+        jsonEncoder.dateEncodingStrategy = .iso8601
+        let data = try jsonEncoder.encode(value)
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw DatabaseError.bindFailed("Could not encode dashboard snapshot JSON.")
+        }
+        return text
+    }
+
+    private func mapDashboardSnapshot(_ statement: OpaquePointer) throws -> ServerDashboardSnapshot {
+        let capabilitiesData = Data(Self.string(statement, 0).utf8)
+        let metricsData = Data(Self.string(statement, 1).utf8)
+        let warningsData = Data(Self.string(statement, 2).utf8)
+        let jsonDecoder = JSONDecoder()
+        jsonDecoder.dateDecodingStrategy = .iso8601
+        return ServerDashboardSnapshot(
+            capabilities: try jsonDecoder.decode(ServerCapabilities.self, from: capabilitiesData),
+            metrics: try jsonDecoder.decode([DashboardMetric].self, from: metricsData),
+            warnings: try jsonDecoder.decode([DashboardWarning].self, from: warningsData),
+            capturedAt: Self.date(statement, 3)
         )
     }
 

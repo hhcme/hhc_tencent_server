@@ -168,11 +168,20 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    func loadCachedDashboardSnapshot(profile: ServerProfile, repository: ServerRepository) {
+        do {
+            dashboardSnapshot = try repository.fetchLatestDashboardSnapshot(serverId: profile.id)
+        } catch {
+            dashboardErrorMessage = error.localizedDescription
+        }
+    }
+
     func refreshDashboard(
         profile: ServerProfile,
         sshClient: SSHClient,
         dashboardService: DashboardService,
-        cloudMetricService: CloudMetricService? = nil
+        cloudMetricService: CloudMetricService? = nil,
+        repository: ServerRepository? = nil
     ) {
         guard !isRefreshingDashboard else { return }
         isRefreshingDashboard = true
@@ -185,6 +194,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     sshClient: sshClient,
                     cloudMetricService: cloudMetricService
                 )
+                try repository?.saveDashboardSnapshot(snapshot, serverId: profile.id)
                 await MainActor.run {
                     self.dashboardSnapshot = snapshot
                     self.isRefreshingDashboard = false
@@ -204,6 +214,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         sshClient: SSHClient,
         dashboardService: DashboardService,
         cloudMetricService: CloudMetricService? = nil,
+        repository: ServerRepository? = nil,
         interval: Duration = .seconds(30)
     ) {
         guard isDashboardAutoRefreshEnabled != enabled else { return }
@@ -214,6 +225,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 sshClient: sshClient,
                 dashboardService: dashboardService,
                 cloudMetricService: cloudMetricService,
+                repository: repository,
                 interval: interval
             )
         } else {
@@ -232,6 +244,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         sshClient: SSHClient,
         dashboardService: DashboardService,
         cloudMetricService: CloudMetricService?,
+        repository: ServerRepository?,
         interval: Duration
     ) {
         dashboardAutoRefreshTask?.cancel()
@@ -239,7 +252,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
             profile: profile,
             sshClient: sshClient,
             dashboardService: dashboardService,
-            cloudMetricService: cloudMetricService
+            cloudMetricService: cloudMetricService,
+            repository: repository
         )
         dashboardAutoRefreshTask = Task {
             while !Task.isCancelled {
@@ -254,7 +268,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
                         profile: profile,
                         sshClient: sshClient,
                         dashboardService: dashboardService,
-                        cloudMetricService: cloudMetricService
+                        cloudMetricService: cloudMetricService,
+                        repository: repository
                     )
                 }
             }

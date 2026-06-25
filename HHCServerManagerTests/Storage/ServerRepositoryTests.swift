@@ -100,6 +100,55 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertTrue(try repository.fetchCommandHistory(serverId: server.id).isEmpty)
     }
 
+    func testDashboardSnapshotsPersistLatestAndCascadeWithServer() throws {
+        let repository = try makeRepository()
+        let server = makeServer()
+        try repository.upsert(server)
+        let older = ServerDashboardSnapshot(
+            capabilities: ServerCapabilities(
+                osName: "Ubuntu",
+                osVersion: "22.04",
+                kernelVersion: "5.15",
+                hasProc: true,
+                hasSystemd: true,
+                hasSFTP: true,
+                detectedAt: Date(timeIntervalSince1970: 1_700_000_000)
+            ),
+            metrics: [
+                DashboardMetric(name: "Load Average", value: "0.10 / 0.20 / 0.30", unit: "1m 5m 15m", source: "SSH"),
+            ],
+            warnings: [],
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let newer = ServerDashboardSnapshot(
+            capabilities: ServerCapabilities(
+                osName: "Ubuntu",
+                osVersion: "24.04",
+                kernelVersion: "6.8",
+                hasProc: true,
+                hasSystemd: true,
+                hasSFTP: false,
+                detectedAt: Date(timeIntervalSince1970: 1_700_000_010)
+            ),
+            metrics: [
+                DashboardMetric(name: "Memory", value: "512 MiB / 1 GiB", unit: nil, source: "SSH"),
+            ],
+            warnings: [
+                DashboardWarning(source: "Network", message: "unavailable"),
+            ],
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_010)
+        )
+
+        try repository.saveDashboardSnapshot(older, serverId: server.id)
+        try repository.saveDashboardSnapshot(newer, serverId: server.id)
+
+        let latest = try XCTUnwrap(repository.fetchLatestDashboardSnapshot(serverId: server.id))
+        XCTAssertEqual(latest, newer)
+
+        try repository.deleteServer(id: server.id)
+        XCTAssertNil(try repository.fetchLatestDashboardSnapshot(serverId: server.id))
+    }
+
     func testOperationLogsPersistInReverseChronologicalOrder() throws {
         let repository = try makeRepository()
         try repository.saveOperationLog(OperationLogEntry(

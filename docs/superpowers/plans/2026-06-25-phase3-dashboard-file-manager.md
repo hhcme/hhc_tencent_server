@@ -50,11 +50,9 @@ CREATE TABLE server_capabilities (
 CREATE TABLE dashboard_snapshots (
     id TEXT PRIMARY KEY NOT NULL,
     server_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
-    source TEXT NOT NULL,
-    metric_name TEXT NOT NULL,
-    metric_value REAL,
-    unit TEXT,
-    raw_json TEXT,
+    capabilities_json TEXT NOT NULL,
+    metrics_json TEXT NOT NULL,
+    warnings_json TEXT NOT NULL,
     captured_at DATETIME NOT NULL
 );
 
@@ -97,7 +95,7 @@ CREATE TABLE file_transfer_jobs (
 ### Task 1：能力探测
 
 - [x] 实现 OS 和能力探测命令。
-- [ ] 缓存探测结果。
+- [x] 缓存探测结果：Dashboard 刷新成功后写入 `dashboard_snapshots`，重新进入工作台会恢复最近快照。
 - [ ] 支持手动重新探测。
 - [ ] 测试 Ubuntu/Debian/CentOS/AlmaLinux 常见输出解析。
 
@@ -120,6 +118,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 实现指标卡片、系统信息、刷新状态。
 - [x] 实现错误和能力缺失基础提示。
 - [x] 支持手动刷新和自动刷新开关。
+- [x] 支持最近 Dashboard 快照持久化和工作台恢复。
 
 ### Task 5：SFTP 技术验证
 
@@ -150,6 +149,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 能力探测基础测试。
 - [x] Dashboard ViewModel 测试。
 - [x] Dashboard 自动刷新 ViewModel 测试。
+- [x] Dashboard 快照 repository 持久化和 ViewModel 恢复测试。
 - [x] RemoteFileService 目录列表解析测试。
 - [x] 文件浏览 ViewModel 测试。
 - [x] 文件重命名和可恢复删除测试。

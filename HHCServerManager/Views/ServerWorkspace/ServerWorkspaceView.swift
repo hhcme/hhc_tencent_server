@@ -310,6 +310,7 @@ struct ServerWorkspaceView: View {
         .onAppear {
             viewModel.configure(initialState: appState.connectionState(for: profile))
             viewModel.loadCommandHistory(profile: profile, repository: appState.repository)
+            viewModel.loadCachedDashboardSnapshot(profile: profile, repository: appState.repository)
         }
         .onDisappear {
             viewModel.stopDashboardAutoRefresh()
@@ -416,7 +417,8 @@ struct ServerWorkspaceView: View {
                             profile: profile,
                             sshClient: appState.sshClient,
                             dashboardService: appState.dashboardService,
-                            cloudMetricService: appState.cloudMetricService
+                            cloudMetricService: appState.cloudMetricService,
+                            repository: appState.repository
                         )
                     } label: {
                         if viewModel.isRefreshingDashboard {
@@ -2953,7 +2955,8 @@ struct ServerWorkspaceView: View {
                     profile: profile,
                     sshClient: appState.sshClient,
                     dashboardService: appState.dashboardService,
-                    cloudMetricService: appState.cloudMetricService
+                    cloudMetricService: appState.cloudMetricService,
+                    repository: appState.repository
                 )
             }
         )

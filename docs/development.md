@@ -57,6 +57,7 @@ xcodebuild \
 - Cloud snapshot actions：腾讯云 CBS `CreateSnapshot` / `DeleteSnapshots` 已接入云资源中心，磁盘可创建快照，`NORMAL` 快照可删除；所有操作需要风险确认，并写入 `remote_change_logs` 云端变更审计。
 - Cloud disk attachment actions：腾讯云 CBS `AttachDisks` / `DetachDisks` 已接入云资源中心，`UNATTACHED`/`DETACHED` 云盘可输入目标实例 ID 后挂载，`ATTACHED` 云盘可卸载；所有操作需要风险确认，执行后本地缓存进入 `ATTACHING`/`DETACHING`，并写入 `remote_change_logs` 云端变更审计。
 - Cloud power actions：腾讯云 CVM `StartInstances` / `StopInstances` / `RebootInstances` 已接入云资源中心，`STOPPED` 实例可启动，`RUNNING` 实例可停止或重启；所有操作需要风险确认，执行后本地缓存进入 `STARTING`/`STOPPING`/`REBOOTING`，并写入 `remote_change_logs` 云端变更审计。
+- Dashboard snapshots：Dashboard 成功刷新后会把 capabilities、metrics、warnings 和 captured time 写入 `dashboard_snapshots`；重新进入服务器工作台时会恢复最近一次快照，删除服务器会级联清理对应快照。
 - DashboardService：通过 SSH 探测 OS、kernel、`/proc`、systemd、sftp，并采集负载、内存、根磁盘、CPU 核心数、网络收发总量和进程摘要基础指标；单项指标失败会返回 warning，不阻断整个快照。
 - RemoteFileService：通过 SSH/OpenSSH 工具链进行文件管理 bootstrap，支持目录列表、单文件上传/下载、重命名、chmod 权限修改、可恢复移入远端回收目录、轻量 UTF-8 文本读写、保存前备份和另存为，并解析文件类型、大小、权限、修改时间和路径。
 - SystemdServiceManager：通过 SSH/systemctl 读取 systemd service 列表，解析 load/active/sub/description，支持严格 `.service` unit 名校验后的 start/stop/restart/reload，以及 journalctl 最近日志读取。
@@ -117,7 +118,7 @@ export HHC_TEST_SSH_PASSPHRASE=""
 
 - 当前 SSH 适配层是 bootstrap OpenSSH adapter，用于先打通真实服务器、主机指纹信任、smoke test、单条命令执行和取消；取消运行中命令时会 terminate 对应 OpenSSH 子进程。
 - 命令面板只持久化 command、exit code、duration 和 created at；stdout/stderr 默认只保留在本次工作台会话中，分开展示但不写入 SQLite，避免把敏感输出落盘。
-- Dashboard 当前为 Phase 3 bootstrap：指标通过 SSH 即时采集，支持手动刷新和自动刷新；已关联腾讯云 CVM 时会通过 Cloud Monitor `GetMonitorData` 拉取 Cloud CPU 指标并标记来源为 Cloud API；单项可选指标失败会以 warning 降级展示，尚未写入 `dashboard_snapshots` 缓存表，更多云监控指标仍待扩展。
+- Dashboard 当前为 Phase 3 bootstrap：指标通过 SSH 即时采集，支持手动刷新和自动刷新；已关联腾讯云 CVM 时会通过 Cloud Monitor `GetMonitorData` 拉取 Cloud CPU 指标并标记来源为 Cloud API；单项可选指标失败会以 warning 降级展示；成功刷新会写入 `dashboard_snapshots` 缓存表并在重新进入工作台时恢复最近快照。更多云监控指标仍待扩展。
 - 文件管理当前为 bootstrap：目录浏览通过 SSH `find` 命令实现，上传/下载通过本机 OpenSSH `scp` 实现排队单文件传输，并在 UI 中记录最近传输任务的 pending/running/succeeded/failed/cancelled 状态；当前运行中的传输可取消，待传队列可清空。重命名使用 `mv -n`，权限修改使用经过八进制校验的 `chmod`，删除入口会二次确认并移动到 `~/.hhc-server-manager-trash`；小型 UTF-8 文本文件可通过 SSH/base64 读取和保存，限制 256 KiB，保存前会生成 `*.hhc-backup-*` 备份，另存为默认不覆盖已有文件，并通过临时文件替换。已在真实 Linux 服务器上验证 `sftp` 命令存在以及 scp 上传/下载往返可用；尚未完成 SwiftNIO SSH/libssh2 正式 SFTP 替换、进度百分比、批量/并发传输和队列持久化。
 - Services 当前为 Phase 4 bootstrap：systemd 服务列表和日志通过 SSH 即时读取，start/stop/restart/reload 操作需要 UI 确认，unit 名限制为简单 `.service` 名称，并会写入 `remote_change_logs` 审计表；真实服务器已完成只读服务列表验证，真实重启/停止等写操作仍需手动验收。
 - 危险操作确认当前为 Phase 4 bootstrap：`RemoteOperationRisk` 已为远程文件删除/权限修改、systemd、Cron、Nginx、Environment 生成统一风险级别、目标、命令预览、影响和恢复说明；现有确认弹窗已接入风险文案，chmod sheet 会展示风险预览。后续安全组、防火墙写操作和 GitLab 部署需要复用同一模型。
