@@ -1,4 +1,6 @@
 using HHCServerManager.Windows.Application.Shell;
+using HHCServerManager.Windows.Domain.Servers;
+using HHCServerManager.Windows.Domain.Ssh;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.ApplicationModel.DataTransfer;
@@ -18,34 +20,105 @@ public sealed partial class MainWindow : Window
 
     private async void AddServer_Click(object sender, RoutedEventArgs e)
     {
-        var nameBox = new TextBox { PlaceholderText = "Production API" };
-        var hostBox = new TextBox { PlaceholderText = "server.example.com" };
-        var portBox = new NumberBox { Value = 22, Minimum = 1, Maximum = 65535 };
-        var usernameBox = new TextBox { PlaceholderText = "root" };
-        var authBox = new ComboBox { SelectedIndex = 0 };
+        var form = CreateServerForm(null);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Add server",
+            Content = form.Content,
+            PrimaryButtonText = "Add",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            if (form.AuthType == SshAuthType.PrivateKey)
+            {
+                await ViewModel.AddPrivateKeyServerAsync(
+                    form.Name,
+                    form.Host,
+                    form.Port,
+                    form.Username,
+                    form.PrivateKey,
+                    form.Passphrase,
+                    form.GroupName);
+            }
+            else
+            {
+                await ViewModel.AddPasswordServerAsync(
+                    form.Name,
+                    form.Host,
+                    form.Port,
+                    form.Username,
+                    form.Password,
+                    form.GroupName);
+            }
+        }
+    }
+
+    private async void EditServer_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedServer is null)
+        {
+            return;
+        }
+
+        var form = CreateServerForm(ViewModel.SelectedServer);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Edit server",
+            Content = form.Content,
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            var replacement = form.ReplacementCredential(ViewModel.SelectedServer.AuthType);
+            await ViewModel.UpdateSelectedServerAsync(
+                form.Name,
+                form.Host,
+                form.Port,
+                form.Username,
+                form.AuthType,
+                form.GroupName,
+                replacement);
+        }
+    }
+
+    private ServerForm CreateServerForm(ServerProfile? profile)
+    {
+        var nameBox = new TextBox { PlaceholderText = "Production API", Text = profile?.Name ?? "" };
+        var hostBox = new TextBox { PlaceholderText = "server.example.com", Text = profile?.Host ?? "" };
+        var portBox = new NumberBox { Value = profile?.Port ?? 22, Minimum = 1, Maximum = 65535 };
+        var usernameBox = new TextBox { PlaceholderText = "root", Text = profile?.Username ?? "" };
+        var groupBox = new TextBox { PlaceholderText = "ops", Text = profile?.GroupName ?? "" };
+        var authBox = new ComboBox { SelectedIndex = profile?.AuthType == SshAuthType.PrivateKey ? 1 : 0 };
         authBox.Items.Add("Password");
         authBox.Items.Add("Private key");
-        var passwordBox = new PasswordBox { PlaceholderText = "Password" };
+        var passwordBox = new PasswordBox { PlaceholderText = profile is null ? "Password" : "Leave blank to keep existing credential" };
         var privateKeyBox = new TextBox
         {
-            PlaceholderText = "-----BEGIN OPENSSH PRIVATE KEY-----",
+            PlaceholderText = profile is null ? "-----BEGIN OPENSSH PRIVATE KEY-----" : "Leave blank to keep existing private key",
             AcceptsReturn = true,
             MinHeight = 140,
-            TextWrapping = TextWrapping.NoWrap,
-            Visibility = Visibility.Collapsed
+            TextWrapping = TextWrapping.NoWrap
         };
-        var passphraseBox = new PasswordBox
-        {
-            PlaceholderText = "Passphrase (optional)",
-            Visibility = Visibility.Collapsed
-        };
-        authBox.SelectionChanged += (_, _) =>
+        var passphraseBox = new PasswordBox { PlaceholderText = "Passphrase (optional)" };
+
+        void UpdateCredentialVisibility()
         {
             var usePrivateKey = authBox.SelectedIndex == 1;
             passwordBox.Visibility = usePrivateKey ? Visibility.Collapsed : Visibility.Visible;
             privateKeyBox.Visibility = usePrivateKey ? Visibility.Visible : Visibility.Collapsed;
             passphraseBox.Visibility = usePrivateKey ? Visibility.Visible : Visibility.Collapsed;
-        };
+        }
+        authBox.SelectionChanged += (_, _) => UpdateCredentialVisibility();
+        UpdateCredentialVisibility();
+
         var content = new StackPanel { Spacing = 10 };
         content.Children.Add(new TextBlock { Text = "Name" });
         content.Children.Add(nameBox);
@@ -55,45 +128,15 @@ public sealed partial class MainWindow : Window
         content.Children.Add(portBox);
         content.Children.Add(new TextBlock { Text = "Username" });
         content.Children.Add(usernameBox);
+        content.Children.Add(new TextBlock { Text = "Group" });
+        content.Children.Add(groupBox);
         content.Children.Add(new TextBlock { Text = "Authentication" });
         content.Children.Add(authBox);
         content.Children.Add(new TextBlock { Text = "Password or private key" });
         content.Children.Add(passwordBox);
         content.Children.Add(privateKeyBox);
         content.Children.Add(passphraseBox);
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Content.XamlRoot,
-            Title = "Add server",
-            Content = content,
-            PrimaryButtonText = "Add",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary
-        };
-
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-        {
-            if (authBox.SelectedIndex == 1)
-            {
-                await ViewModel.AddPrivateKeyServerAsync(
-                    nameBox.Text,
-                    hostBox.Text,
-                    double.IsNaN(portBox.Value) ? 22 : (int)portBox.Value,
-                    usernameBox.Text,
-                    privateKeyBox.Text,
-                    passphraseBox.Password);
-            }
-            else
-            {
-                await ViewModel.AddPasswordServerAsync(
-                    nameBox.Text,
-                    hostBox.Text,
-                    double.IsNaN(portBox.Value) ? 22 : (int)portBox.Value,
-                    usernameBox.Text,
-                    passwordBox.Password);
-            }
-        }
+        return new ServerForm(content, nameBox, hostBox, portBox, usernameBox, groupBox, authBox, passwordBox, privateKeyBox, passphraseBox);
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await ViewModel.LoadServersAsync();
@@ -159,5 +202,42 @@ public sealed partial class MainWindow : Window
         {
             ViewModel.RejectPendingHostKey();
         }
+    }
+}
+
+internal sealed record ServerForm(
+    StackPanel Content,
+    TextBox NameBox,
+    TextBox HostBox,
+    NumberBox PortBox,
+    TextBox UsernameBox,
+    TextBox GroupBox,
+    ComboBox AuthBox,
+    PasswordBox PasswordBox,
+    TextBox PrivateKeyBox,
+    PasswordBox PassphraseBox)
+{
+    public string Name => NameBox.Text;
+    public string Host => HostBox.Text;
+    public int Port => double.IsNaN(PortBox.Value) ? 22 : (int)PortBox.Value;
+    public string Username => UsernameBox.Text;
+    public string? GroupName => string.IsNullOrWhiteSpace(GroupBox.Text) ? null : GroupBox.Text;
+    public SshAuthType AuthType => AuthBox.SelectedIndex == 1 ? SshAuthType.PrivateKey : SshAuthType.Password;
+    public string Password => PasswordBox.Password;
+    public string PrivateKey => PrivateKeyBox.Text;
+    public string? Passphrase => string.IsNullOrWhiteSpace(PassphraseBox.Password) ? null : PassphraseBox.Password;
+
+    public CredentialInput? ReplacementCredential(SshAuthType previousAuthType)
+    {
+        if (AuthType == SshAuthType.Password)
+        {
+            return string.IsNullOrEmpty(Password) && previousAuthType == SshAuthType.Password
+                ? null
+                : new CredentialInput.Password(Password);
+        }
+
+        return string.IsNullOrWhiteSpace(PrivateKey) && previousAuthType == SshAuthType.PrivateKey
+            ? null
+            : new CredentialInput.PrivateKey(System.Text.Encoding.UTF8.GetBytes(PrivateKey.Trim()), Passphrase);
     }
 }

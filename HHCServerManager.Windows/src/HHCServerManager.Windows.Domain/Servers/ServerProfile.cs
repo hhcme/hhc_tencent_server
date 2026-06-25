@@ -49,6 +49,25 @@ public sealed record ServerProfile(
             UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow()
         };
 
+    public ServerProfile Update(
+        string name,
+        string host,
+        int port,
+        string username,
+        SshAuthType authType,
+        string? groupName,
+        TimeProvider? timeProvider = null) =>
+        this with
+        {
+            Name = Required(name, nameof(name)),
+            Host = Required(host, nameof(host)),
+            Port = ValidatePort(port),
+            Username = Required(username, nameof(username)),
+            AuthType = authType,
+            GroupName = BlankToNull(groupName),
+            UpdatedAt = (timeProvider ?? TimeProvider.System).GetUtcNow()
+        };
+
     public ServerEndpoint Endpoint => new(Host, Port);
 
     private static string Required(string value, string name)

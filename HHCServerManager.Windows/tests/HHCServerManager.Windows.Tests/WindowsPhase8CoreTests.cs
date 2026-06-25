@@ -140,6 +140,85 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task ServerUpdateKeepsCredentialAndClearsTrustedHostKeyWhenEndpointChanges()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var profile = await service.AddServerAsync(
+            "Prod",
+            "example.internal",
+            22,
+            "root",
+            SshAuthType.Password,
+            "ops",
+            new CredentialInput.Password("secret"));
+        await service.TrustHostKeyAsync(profile, new SshHostKey("ssh-ed25519", "SHA256:trusted", "ssh-ed25519 AAAA"));
+
+        var updated = await service.UpdateServerAsync(
+            profile.Id,
+            "Prod API",
+            "api.example.internal",
+            2222,
+            "deploy",
+            SshAuthType.Password,
+            "prod");
+
+        Assert.Equal(profile.Id, updated.Id);
+        Assert.Equal("Prod API", updated.Name);
+        Assert.Equal("api.example.internal", updated.Host);
+        Assert.Equal(2222, updated.Port);
+        Assert.Equal("deploy", updated.Username);
+        Assert.Equal("prod", updated.GroupName);
+        Assert.Null(await hostKeys.FindAsync(profile.Id, profile.Endpoint));
+        var credential = Assert.IsType<CredentialInput.Password>(await credentials.ReadAsync(profile.CredentialRef));
+        Assert.Equal("secret", credential.Value);
+    }
+
+    [Fact]
+    public async Task ServerUpdateReplacesCredentialAndRequiresCredentialWhenChangingAuthType()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var profile = await service.AddServerAsync(
+            "Prod",
+            "example.internal",
+            22,
+            "root",
+            SshAuthType.Password,
+            null,
+            new CredentialInput.Password("secret"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateServerAsync(
+            profile.Id,
+            "Prod",
+            "example.internal",
+            22,
+            "root",
+            SshAuthType.PrivateKey,
+            null));
+
+        var keyData = System.Text.Encoding.UTF8.GetBytes("private-key-data");
+        var updated = await service.UpdateServerAsync(
+            profile.Id,
+            "Prod",
+            "example.internal",
+            22,
+            "root",
+            SshAuthType.PrivateKey,
+            null,
+            new CredentialInput.PrivateKey(keyData, "passphrase"));
+
+        Assert.Equal(SshAuthType.PrivateKey, updated.AuthType);
+        var credential = Assert.IsType<CredentialInput.PrivateKey>(await credentials.ReadAsync(profile.CredentialRef));
+        Assert.Equal("private-key-data", System.Text.Encoding.UTF8.GetString(credential.Data));
+        Assert.Equal("passphrase", credential.Passphrase);
+    }
+
+    [Fact]
     public async Task WindowsCredentialStoreIsExplicitlyWindowsOnly()
     {
         if (OperatingSystem.IsWindows())
@@ -254,6 +333,42 @@ public sealed class WindowsPhase8CoreTests
         Assert.Empty(viewModel.Servers);
         Assert.Equal("Could not add server.", viewModel.StatusMessage);
         Assert.Contains("Private key data is required", viewModel.ErrorMessage ?? "");
+    }
+
+    [Fact]
+    public async Task MainWindowViewModelUpdatesSelectedServerAndKeepsCredentialWhenBlankReplacement()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.AddPasswordServerAsync("Prod", "example.internal", 22, "root", "secret", "ops");
+        var original = viewModel.SelectedServer!;
+
+        await viewModel.UpdateSelectedServerAsync(
+            "Prod API",
+            "api.example.internal",
+            2222,
+            "deploy",
+            SshAuthType.Password,
+            "prod");
+
+        var updated = Assert.Single(viewModel.Servers);
+        Assert.Equal(original.Id, updated.Id);
+        Assert.Same(updated, viewModel.SelectedServer);
+        Assert.Equal("Prod API", updated.Name);
+        Assert.Equal("api.example.internal", updated.Host);
+        Assert.Equal(2222, updated.Port);
+        Assert.Equal("deploy", updated.Username);
+        Assert.Equal("prod", updated.GroupName);
+        Assert.Equal("Updated Prod API.", viewModel.StatusMessage);
+        Assert.Null(viewModel.ErrorMessage);
+        var credential = Assert.IsType<CredentialInput.Password>(await credentials.ReadAsync(updated.CredentialRef));
+        Assert.Equal("secret", credential.Value);
     }
 
     [Fact]

@@ -16,6 +16,7 @@
 
         <CommandBar Grid.Row="0" DefaultLabelPosition="Right">
             <AppBarButton Icon="Add" Label="Add server" Click="AddServer_Click" />
+            <AppBarButton Icon="Edit" Label="Edit server" Click="EditServer_Click" />
             <AppBarButton Icon="Refresh" Label="Refresh" Click="Refresh_Click" />
             <CommandBar.SecondaryCommands>
                 <AppBarButton Icon="Delete" Label="Delete selected server" Click="DeleteServer_Click" />
@@ -85,7 +86,10 @@
                         <TextBlock Text="{x:Bind ViewModel.SelectedServerTitle, Mode=OneWay}" Style="{StaticResource TitleTextBlockStyle}" />
                         <TextBlock Text="{x:Bind ViewModel.SelectedServerSubtitle, Mode=OneWay}" Style="{StaticResource BodyTextBlockStyle}" />
                     </StackPanel>
-                    <Button Grid.Column="1" Content="Delete" Click="DeleteServer_Click" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <Button Content="Edit" Click="EditServer_Click" />
+                        <Button Content="Delete" Click="DeleteServer_Click" />
+                    </StackPanel>
                 </Grid>
 
                 <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,20,0,16">

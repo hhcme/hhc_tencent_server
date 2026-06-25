@@ -241,6 +241,50 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    public async Task UpdateSelectedServerAsync(
+        string name,
+        string host,
+        int port,
+        string username,
+        SshAuthType authType,
+        string? groupName = null,
+        CredentialInput? replacementCredential = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (SelectedServer is null)
+        {
+            ErrorMessage = "Select a server before editing.";
+            return;
+        }
+
+        ErrorMessage = null;
+        var previous = SelectedServer;
+        try
+        {
+            var updated = await _serverManagement.UpdateServerAsync(
+                previous.Id,
+                name,
+                host,
+                port,
+                username,
+                authType,
+                groupName,
+                replacementCredential,
+                cancellationToken);
+            ReplaceServer(previous, updated);
+            if (previous.Endpoint != updated.Endpoint)
+            {
+                Disconnect();
+            }
+            StatusMessage = $"Updated {updated.Name}.";
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            ErrorMessage = error.Message;
+            StatusMessage = "Could not update server.";
+        }
+    }
+
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
         if (SelectedServer is null)
@@ -330,6 +374,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         PendingHostKeyTrust = null;
         ConnectionState = WindowsConnectionState.Disconnected;
         ErrorMessage = null;
+    }
+
+    private void ReplaceServer(ServerProfile previous, ServerProfile updated)
+    {
+        var index = Servers.IndexOf(previous);
+        if (index >= 0)
+        {
+            Servers[index] = updated;
+        }
+        SelectedServer = updated;
     }
 
     private async Task RunAsync(

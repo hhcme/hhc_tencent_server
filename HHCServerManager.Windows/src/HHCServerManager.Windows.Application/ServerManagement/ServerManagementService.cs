@@ -50,6 +50,60 @@ public sealed class ServerManagementService(
         await credentials.DeleteAsync(profile.CredentialRef, cancellationToken);
     }
 
+    public async Task<ServerProfile> UpdateServerAsync(
+        Guid serverId,
+        string name,
+        string host,
+        int port,
+        string username,
+        SshAuthType authType,
+        string? groupName,
+        CredentialInput? replacementCredential = null,
+        CancellationToken cancellationToken = default)
+    {
+        var existing = await profiles.FindAsync(serverId, cancellationToken)
+            ?? throw new InvalidOperationException("Server profile was not found.");
+        if (replacementCredential is null && authType != existing.AuthType)
+        {
+            throw new InvalidOperationException("Changing authentication type requires a replacement credential.");
+        }
+
+        var updated = existing.Update(name, host, port, username, authType, groupName, _timeProvider);
+        var endpointChanged = existing.Endpoint != updated.Endpoint;
+        CredentialInput? originalCredential = null;
+
+        if (replacementCredential is not null)
+        {
+            originalCredential = await credentials.ReadAsync(existing.CredentialRef, cancellationToken);
+            await credentials.SaveAsync(existing.CredentialRef, replacementCredential, cancellationToken);
+        }
+
+        try
+        {
+            await profiles.UpsertAsync(updated, cancellationToken);
+            if (endpointChanged)
+            {
+                await hostKeys.DeleteForServerAsync(existing.Id, cancellationToken);
+            }
+            return updated;
+        }
+        catch
+        {
+            if (replacementCredential is not null)
+            {
+                if (originalCredential is null)
+                {
+                    await credentials.DeleteAsync(existing.CredentialRef, cancellationToken);
+                }
+                else
+                {
+                    await credentials.SaveAsync(existing.CredentialRef, originalCredential, cancellationToken);
+                }
+            }
+            throw;
+        }
+    }
+
     public async Task<HostKeyCheckResult> CheckHostKeyAsync(
         ServerProfile profile,
         SshHostKey presentedKey,
