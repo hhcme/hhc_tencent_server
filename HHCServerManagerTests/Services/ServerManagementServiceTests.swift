@@ -222,6 +222,39 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(disk, "10.0 GiB / 20.0 GiB")
     }
 
+    func testSystemdServiceManagerParsesUnitListAndValidatesUnitNames() throws {
+        let units = SystemdServiceManager.parseUnitList("""
+        nginx.service\tloaded\tactive\trunning\tA high performance web server
+        ssh.service\tloaded\tactive\trunning\tOpenBSD Secure Shell server
+        apt-daily.service\tloaded\tinactive\tdead\tDaily apt download activities
+        """)
+
+        XCTAssertEqual(units.map(\.name), ["nginx.service", "ssh.service", "apt-daily.service"])
+        XCTAssertTrue(units[0].isRunning)
+        XCTAssertEqual(units[2].description, "Daily apt download activities")
+        XCTAssertEqual(try SystemdServiceManager.validatedUnitName("nginx.service"), "nginx.service")
+        XCTAssertEqual(try SystemdServiceManager.validatedUnitName("foo@bar.service"), "foo@bar.service")
+        XCTAssertThrowsError(try SystemdServiceManager.validatedUnitName("nginx.service; reboot"))
+        XCTAssertThrowsError(try SystemdServiceManager.validatedUnitName("nginx.socket"))
+    }
+
+    func testSystemdServiceManagerListsActsAndReadsJournal() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSystemdSSHClient()
+        let manager = SystemdServiceManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let list = try await manager.listUnits(profile: profile, sshClient: client)
+        XCTAssertEqual(list.units.map(\.name), ["nginx.service", "ssh.service"])
+
+        try await manager.perform(.restart, unitName: "nginx.service", profile: profile, sshClient: client)
+        XCTAssertTrue(client.commands.contains("systemctl restart -- 'nginx.service'"))
+
+        let log = try await manager.readJournal(unitName: "nginx.service", limit: 42, profile: profile, sshClient: client)
+        XCTAssertEqual(log.unitName, "nginx.service")
+        XCTAssertTrue(log.text.contains("Started nginx.service"))
+        XCTAssertTrue(client.commands.contains("journalctl -u 'nginx.service' -n 42 --no-pager --output=short-iso"))
+    }
+
     func testDashboardServiceAppendsCloudMetricsWhenLinked() async throws {
         let harness = try Harness(adapters: [
             MockCloudProviderAdapter(
@@ -1004,6 +1037,45 @@ private final class DashboardServiceMockSSHClient: SSHClient, @unchecked Sendabl
             stdout = ""
         }
         return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class RecordingSystemdSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("systemctl list-units") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                nginx.service\tloaded\tactive\trunning\tA high performance web server
+                ssh.service\tloaded\tactive\trunning\tOpenBSD Secure Shell server
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.hasPrefix("systemctl restart") {
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.hasPrefix("journalctl") {
+            return CommandResult(
+                command: command,
+                stdout: "2026-06-25T16:30:00+08:00 host systemd[1]: Started nginx.service.\n",
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}

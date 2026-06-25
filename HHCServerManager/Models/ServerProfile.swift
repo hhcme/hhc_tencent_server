@@ -110,6 +110,52 @@ struct ServerDashboardSnapshot: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+struct SystemdUnit: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { name }
+    var name: String
+    var loadState: String
+    var activeState: String
+    var subState: String
+    var description: String
+
+    var isRunning: Bool {
+        activeState == "active"
+    }
+}
+
+struct SystemdUnitList: Equatable, Hashable, Sendable {
+    var units: [SystemdUnit]
+    var capturedAt: Date
+}
+
+enum SystemdUnitAction: String, CaseIterable, Identifiable, Sendable {
+    case start
+    case stop
+    case restart
+    case reload
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .start:
+            "Start"
+        case .stop:
+            "Stop"
+        case .restart:
+            "Restart"
+        case .reload:
+            "Reload"
+        }
+    }
+}
+
+struct SystemdJournalLog: Equatable, Hashable, Sendable {
+    var unitName: String
+    var text: String
+    var capturedAt: Date
+}
+
 enum RemoteFileKind: String, Equatable, Hashable {
     case directory
     case file

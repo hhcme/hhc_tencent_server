@@ -533,6 +533,98 @@ final class CloudMetricService: @unchecked Sendable {
     }
 }
 
+final class SystemdServiceManager: @unchecked Sendable {
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func listUnits(profile: ServerProfile, sshClient: SSHClient) async throws -> SystemdUnitList {
+        let command = """
+        command -v systemctl >/dev/null 2>&1 || exit 3; \
+        systemctl list-units --type=service --all --no-legend --no-pager --plain | \
+        awk '{unit=$1; load=$2; active=$3; sub=$4; $1=$2=$3=$4=""; sub(/^ +/, ""); print unit "\\t" load "\\t" active "\\t" sub "\\t" $0}'
+        """
+        let result = try await CloudProviderRequestRunner.withTimeout(12) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            if result.exitCode == 3 {
+                throw SSHClientError.processFailed("systemd is not available on this server.")
+            }
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not list systemd services.")
+        }
+        return SystemdUnitList(units: Self.parseUnitList(result.stdout), capturedAt: now())
+    }
+
+    func perform(
+        _ action: SystemdUnitAction,
+        unitName: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws {
+        let unit = try Self.validatedUnitName(unitName)
+        let command = "systemctl \(action.rawValue) -- \(Self.shellQuote(unit))"
+        let result = try await CloudProviderRequestRunner.withTimeout(20) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not \(action.rawValue) \(unit).")
+        }
+    }
+
+    func readJournal(
+        unitName: String,
+        limit: Int = 120,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> SystemdJournalLog {
+        let unit = try Self.validatedUnitName(unitName)
+        let clampedLimit = min(max(limit, 20), 500)
+        let command = "journalctl -u \(Self.shellQuote(unit)) -n \(clampedLimit) --no-pager --output=short-iso"
+        let result = try await CloudProviderRequestRunner.withTimeout(12) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not read journal for \(unit).")
+        }
+        return SystemdJournalLog(unitName: unit, text: result.stdout, capturedAt: now())
+    }
+
+    static func parseUnitList(_ text: String) -> [SystemdUnit] {
+        text.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 5 else { return nil }
+            return SystemdUnit(
+                name: parts[0],
+                loadState: parts[1],
+                activeState: parts[2],
+                subState: parts[3],
+                description: parts[4].trimmed
+            )
+        }
+        .sorted { left, right in
+            if left.isRunning, !right.isRunning { return true }
+            if !left.isRunning, right.isRunning { return false }
+            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+        }
+    }
+
+    static func validatedUnitName(_ unitName: String) throws -> String {
+        let trimmed = unitName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = #"^[A-Za-z0-9:_.@-]+\.service$"#
+        guard trimmed.range(of: pattern, options: .regularExpression) != nil else {
+            throw SSHClientError.processFailed("Only simple .service unit names are supported.")
+        }
+        return trimmed
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 final class RemoteFileService: @unchecked Sendable {
     static let maxEditableTextBytes = 256 * 1024
 

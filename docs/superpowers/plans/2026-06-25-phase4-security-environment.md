@@ -99,11 +99,11 @@ CREATE TABLE environment_profiles (
 
 ### Task 3：systemd
 
-- [ ] 探测 systemd 可用性。
-- [ ] 服务列表和状态解析。
-- [ ] start/stop/restart/reload 操作。
-- [ ] journal 日志读取。
-- [ ] 非 systemd 系统隐藏或降级。
+- [x] 探测 systemd 可用性：`systemctl` 不存在时返回明确错误，Dashboard 也会探测 systemd capability。
+- [x] 服务列表和状态解析：解析 unit、load、active、sub 和 description，并优先显示 active 服务。
+- [x] start/stop/restart/reload 操作：限制为简单 `.service` unit 名，UI 操作前弹出确认。
+- [x] journal 日志读取：支持读取选中 service 的最近 journal。
+- [x] 非 systemd 系统隐藏或降级：当前以错误状态降级展示，不影响 SSH 其他功能。
 
 ### Task 4：Nginx
 
@@ -129,7 +129,7 @@ CREATE TABLE environment_profiles (
 
 ### Task 7：测试
 
-- [ ] 命令解析 fixture 测试。
+- [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验和命令构建。
 - [ ] 风险确认 ViewModel 测试。
 - [ ] Nginx 配置测试/回滚逻辑测试。
 - [ ] Firewall adapter 能力探测测试。
@@ -140,7 +140,7 @@ CREATE TABLE environment_profiles (
 - [ ] 无云账号时安全组页不可用但 SSH 功能正常。
 - [ ] 腾讯云安全组可读取。
 - [ ] 新增安全组规则前显示预览和确认。
-- [ ] systemd 服务可以查看和重启。
+- [ ] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，重启操作由 mock/contract 测试覆盖，真实写操作待谨慎手动验收。
 - [ ] Nginx 配置测试失败时不 reload。
 - [ ] Cron 任务可禁用并恢复。
 - [ ] 所有写操作可在操作日志中查到。

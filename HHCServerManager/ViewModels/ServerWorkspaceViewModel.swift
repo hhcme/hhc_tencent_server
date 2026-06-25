@@ -21,6 +21,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isSavingRemoteText = false
     @Published var isTransferringRemoteFile = false
     @Published var remoteFileTransferJobs: [RemoteFileTransferJob] = []
+    @Published var systemdUnitList: SystemdUnitList?
+    @Published var selectedSystemdUnit: SystemdUnit?
+    @Published var systemdJournalLog: SystemdJournalLog?
+    @Published var isLoadingSystemdUnits = false
+    @Published var isPerformingSystemdAction = false
+    @Published var isLoadingSystemdJournal = false
+    @Published var systemdErrorMessage: String?
+    @Published var systemdActionMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -525,6 +533,122 @@ final class ServerWorkspaceViewModel: ObservableObject {
         transferQueue.removeAll()
         for id in pendingIds {
             finishRemoteFileTransferJob(id, status: .cancelled, message: "Transfer cancelled.")
+        }
+    }
+
+    func loadSystemdUnits(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        systemdServiceManager: SystemdServiceManager
+    ) {
+        isLoadingSystemdUnits = true
+        systemdErrorMessage = nil
+        systemdActionMessage = nil
+
+        Task {
+            do {
+                let list = try await systemdServiceManager.listUnits(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.systemdUnitList = list
+                    if let selected = self.selectedSystemdUnit,
+                       let refreshed = list.units.first(where: { $0.id == selected.id }) {
+                        self.selectedSystemdUnit = refreshed
+                    } else {
+                        self.selectedSystemdUnit = list.units.first
+                    }
+                    self.isLoadingSystemdUnits = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.systemdErrorMessage = error.localizedDescription
+                    self.isLoadingSystemdUnits = false
+                }
+            }
+        }
+    }
+
+    func selectSystemdUnit(
+        _ unit: SystemdUnit,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        systemdServiceManager: SystemdServiceManager
+    ) {
+        selectedSystemdUnit = unit
+        loadSystemdJournal(
+            unitName: unit.name,
+            profile: profile,
+            sshClient: sshClient,
+            systemdServiceManager: systemdServiceManager
+        )
+    }
+
+    func performSystemdAction(
+        _ action: SystemdUnitAction,
+        unitName: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        systemdServiceManager: SystemdServiceManager
+    ) {
+        isPerformingSystemdAction = true
+        systemdErrorMessage = nil
+        systemdActionMessage = nil
+
+        Task {
+            do {
+                try await systemdServiceManager.perform(
+                    action,
+                    unitName: unitName,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let list = try await systemdServiceManager.listUnits(profile: profile, sshClient: sshClient)
+                let journal = try? await systemdServiceManager.readJournal(
+                    unitName: unitName,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.systemdUnitList = list
+                    self.selectedSystemdUnit = list.units.first(where: { $0.name == unitName })
+                    self.systemdJournalLog = journal ?? self.systemdJournalLog
+                    self.systemdActionMessage = "\(action.displayName) requested for \(unitName)."
+                    self.isPerformingSystemdAction = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.systemdErrorMessage = error.localizedDescription
+                    self.isPerformingSystemdAction = false
+                }
+            }
+        }
+    }
+
+    func loadSystemdJournal(
+        unitName: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        systemdServiceManager: SystemdServiceManager
+    ) {
+        isLoadingSystemdJournal = true
+        systemdErrorMessage = nil
+
+        Task {
+            do {
+                let log = try await systemdServiceManager.readJournal(
+                    unitName: unitName,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.systemdJournalLog = log
+                    self.isLoadingSystemdJournal = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.systemdErrorMessage = error.localizedDescription
+                    self.isLoadingSystemdJournal = false
+                }
+            }
         }
     }
 

@@ -603,6 +603,32 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(client.uploads.map(\.remotePath), ["~/running.env"])
     }
 
+    func testSystemdUnitsLoadSelectAndPerformAction() async throws {
+        let profile = makeProfile()
+        let client = SystemdViewModelMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let manager = SystemdServiceManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadSystemdUnits(profile: profile, sshClient: client, systemdServiceManager: manager)
+        try await waitUntil { viewModel.isLoadingSystemdUnits == false && viewModel.systemdUnitList != nil }
+
+        XCTAssertEqual(viewModel.systemdUnitList?.units.map(\.name), ["nginx.service", "ssh.service"])
+        XCTAssertEqual(viewModel.selectedSystemdUnit?.name, "nginx.service")
+        XCTAssertNil(viewModel.systemdErrorMessage)
+
+        let sshUnit = try XCTUnwrap(viewModel.systemdUnitList?.units.first { $0.name == "ssh.service" })
+        viewModel.selectSystemdUnit(sshUnit, profile: profile, sshClient: client, systemdServiceManager: manager)
+        try await waitUntil { viewModel.systemdJournalLog?.unitName == "ssh.service" }
+        XCTAssertTrue(viewModel.systemdJournalLog?.text.contains("ssh ready") == true)
+
+        viewModel.performSystemdAction(.restart, unitName: "ssh.service", profile: profile, sshClient: client, systemdServiceManager: manager)
+        try await waitUntil { viewModel.isPerformingSystemdAction == false && viewModel.systemdActionMessage != nil }
+
+        XCTAssertEqual(viewModel.systemdActionMessage, "Restart requested for ssh.service.")
+        XCTAssertTrue(client.commands.contains("systemctl restart -- 'ssh.service'"))
+        XCTAssertEqual(viewModel.selectedSystemdUnit?.name, "ssh.service")
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -1018,6 +1044,45 @@ private final class QueuedRemoteFileTransferMockSSHClient: SSHClient, RemoteFile
             byteCount: 8,
             duration: 0
         )
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class SystemdViewModelMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("systemctl list-units") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                nginx.service\tloaded\tactive\trunning\tA high performance web server
+                ssh.service\tloaded\tactive\trunning\tOpenSSH server
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.hasPrefix("journalctl -u 'ssh.service'") {
+            return CommandResult(
+                command: command,
+                stdout: "2026-06-25T16:30:00+08:00 host sshd[1]: ssh ready\n",
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.hasPrefix("systemctl restart") {
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}

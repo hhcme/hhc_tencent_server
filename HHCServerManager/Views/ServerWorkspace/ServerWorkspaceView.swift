@@ -12,6 +12,7 @@ struct ServerWorkspaceView: View {
     @State private var remoteFileTrashEntry: RemoteFileEntry?
     @State private var remoteFilePermissionsEntry: RemoteFileEntry?
     @State private var remoteFilePermissionsText = ""
+    @State private var pendingSystemdAction: SystemdActionRequest?
 
     let profile: ServerProfile
 
@@ -26,7 +27,6 @@ struct ServerWorkspaceView: View {
                     .tag("files")
                 Label("Services", systemImage: "gearshape.2")
                     .tag("services")
-                    .foregroundStyle(.secondary)
                 Label("Cloud", systemImage: "cloud")
                     .tag("cloud")
                     .foregroundStyle(.secondary)
@@ -74,6 +74,22 @@ struct ServerWorkspaceView: View {
             }
         } message: {
             Text(remoteFileTrashEntry.map { "Move \($0.name) to ~/.hhc-server-manager-trash on the remote server." } ?? "")
+        }
+        .alert(item: $pendingSystemdAction) { request in
+            Alert(
+                title: Text("\(request.action.displayName) \(request.unit.name)?"),
+                message: Text("This will run systemctl \(request.action.rawValue) for \(request.unit.name) on the remote server."),
+                primaryButton: .destructive(Text(request.action.displayName)) {
+                    viewModel.performSystemdAction(
+                        request.action,
+                        unitName: request.unit.name,
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        systemdServiceManager: appState.systemdServiceManager
+                    )
+                },
+                secondaryButton: .cancel()
+            )
         }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
@@ -160,6 +176,8 @@ struct ServerWorkspaceView: View {
             commandPanel
         case "files":
             filesPanel
+        case "services":
+            servicesPanel
         default:
             overview
         }
@@ -611,6 +629,183 @@ struct ServerWorkspaceView: View {
         }
     }
 
+    private var servicesPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Services")
+                        .font(.title2.weight(.semibold))
+                    Spacer()
+                    Button {
+                        viewModel.loadSystemdUnits(
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            systemdServiceManager: appState.systemdServiceManager
+                        )
+                    } label: {
+                        if viewModel.isLoadingSystemdUnits {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isSystemdBusy)
+                }
+
+                if let capturedAt = viewModel.systemdUnitList?.capturedAt {
+                    Text("Last updated \(capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = viewModel.systemdErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+
+                if let message = viewModel.systemdActionMessage {
+                    Label(message, systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
+                }
+            }
+            .padding(20)
+
+            Divider()
+
+            Group {
+                if let units = viewModel.systemdUnitList?.units {
+                    HSplitView {
+                        systemdUnitList(units)
+                            .frame(minWidth: 340, idealWidth: 420)
+                        systemdDetailPanel
+                            .frame(minWidth: 360)
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Services Loaded",
+                        systemImage: "gearshape.2",
+                        description: Text("Refresh to list systemd services on the remote server.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .onAppear {
+            if viewModel.systemdUnitList == nil && !viewModel.isLoadingSystemdUnits {
+                viewModel.loadSystemdUnits(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    systemdServiceManager: appState.systemdServiceManager
+                )
+            }
+        }
+    }
+
+    private func systemdUnitList(_ units: [SystemdUnit]) -> some View {
+        List(units, selection: systemdSelectionBinding) { unit in
+            SystemdUnitRow(unit: unit)
+                .tag(unit.id)
+        }
+        .overlay {
+            if units.isEmpty {
+                ContentUnavailableView("No Services", systemImage: "gearshape.2")
+            }
+        }
+    }
+
+    private var systemdDetailPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let unit = viewModel.selectedSystemdUnit {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(unit.name)
+                            .font(.title3.weight(.semibold))
+                            .textSelection(.enabled)
+                        Text(unit.description.isEmpty ? "No description" : unit.description)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    SystemdStateBadge(unit: unit)
+                }
+
+                HStack(spacing: 8) {
+                    systemdActionButton(.start, unit: unit)
+                    systemdActionButton(.stop, unit: unit)
+                    systemdActionButton(.restart, unit: unit)
+                    systemdActionButton(.reload, unit: unit)
+                    Spacer()
+                    Button {
+                        viewModel.loadSystemdJournal(
+                            unitName: unit.name,
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            systemdServiceManager: appState.systemdServiceManager
+                        )
+                    } label: {
+                        if viewModel.isLoadingSystemdJournal {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Logs", systemImage: "doc.text.magnifyingglass")
+                        }
+                    }
+                    .disabled(isSystemdBusy)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Journal")
+                        .font(.headline)
+                    ScrollView {
+                        Text(systemdJournalText(for: unit))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    }
+                    .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+                }
+            } else {
+                ContentUnavailableView("Select a Service", systemImage: "gearshape.2")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .padding(20)
+    }
+
+    private func systemdActionButton(_ action: SystemdUnitAction, unit: SystemdUnit) -> some View {
+        Button {
+            pendingSystemdAction = SystemdActionRequest(unit: unit, action: action)
+        } label: {
+            Label(action.displayName, systemImage: systemdActionIcon(action))
+        }
+        .disabled(isSystemdBusy)
+    }
+
+    private func systemdActionIcon(_ action: SystemdUnitAction) -> String {
+        switch action {
+        case .start:
+            "play.fill"
+        case .stop:
+            "stop.fill"
+        case .restart:
+            "arrow.clockwise"
+        case .reload:
+            "arrow.triangle.2.circlepath"
+        }
+    }
+
+    private func systemdJournalText(for unit: SystemdUnit) -> String {
+        guard viewModel.systemdJournalLog?.unitName == unit.name else {
+            return "Select Logs to load recent journal entries."
+        }
+        let text = viewModel.systemdJournalLog?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return text.isEmpty ? "No recent logs." : text
+    }
+
     private func loadRemoteFilesFromPathField() {
         viewModel.loadRemoteFiles(
             path: filePathText,
@@ -793,6 +988,23 @@ struct ServerWorkspaceView: View {
         )
     }
 
+    private var systemdSelectionBinding: Binding<String?> {
+        Binding(
+            get: { viewModel.selectedSystemdUnit?.id },
+            set: { unitId in
+                guard let unitId,
+                      let unit = viewModel.systemdUnitList?.units.first(where: { $0.id == unitId })
+                else { return }
+                viewModel.selectSystemdUnit(
+                    unit,
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    systemdServiceManager: appState.systemdServiceManager
+                )
+            }
+        )
+    }
+
     private var connectionBadge: some View {
         Label {
             Text(viewModel.connectionState.displayName)
@@ -854,6 +1066,21 @@ struct ServerWorkspaceView: View {
             viewModel.isMutatingRemoteFile ||
             viewModel.isLoadingRemoteText ||
             viewModel.isSavingRemoteText
+    }
+
+    private var isSystemdBusy: Bool {
+        viewModel.isLoadingSystemdUnits ||
+            viewModel.isPerformingSystemdAction ||
+            viewModel.isLoadingSystemdJournal
+    }
+}
+
+private struct SystemdActionRequest: Identifiable {
+    var unit: SystemdUnit
+    var action: SystemdUnitAction
+
+    var id: String {
+        "\(unit.id)-\(action.id)"
     }
 }
 
@@ -927,6 +1154,55 @@ private struct CapabilityBadge: View {
         Label(title, systemImage: enabled ? "checkmark.circle" : "minus.circle")
             .font(.caption)
             .foregroundStyle(enabled ? .green : .secondary)
+    }
+}
+
+private struct SystemdUnitRow: View {
+    let unit: SystemdUnit
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: unit.isRunning ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(unit.isRunning ? .green : .secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(unit.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(unit.description.isEmpty ? "\(unit.activeState) / \(unit.subState)" : unit.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Text(unit.activeState)
+                .font(.caption)
+                .foregroundStyle(unit.isRunning ? .green : .secondary)
+                .monospacedDigit()
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct SystemdStateBadge: View {
+    let unit: SystemdUnit
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text(unit.activeState)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(unit.isRunning ? .green : .secondary)
+            Text("\(unit.loadState) / \(unit.subState)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.10), in: Capsule())
     }
 }
 

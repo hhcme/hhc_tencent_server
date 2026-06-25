@@ -51,6 +51,7 @@ All notable changes to this project will be documented in this file.
 - Added remote text Save As and chmod-based permission changes with validation, refreshed listings, UI sheets, and tests.
 - Added Dashboard auto-refresh toggle with immediate refresh, periodic refresh, cancellation on disable/disappear, and ViewModel coverage.
 - Added Tencent Cloud Monitor `GetMonitorData` support for linked CVM Cloud CPU metrics, with Cloud API source labeling and dashboard aggregation tests.
+- Started Phase 4 Services with systemd unit listing, strict `.service` unit validation, journal reading, confirmed start/stop/restart/reload actions, UI wiring, tests, and read-only real-server validation.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -97,3 +98,4 @@ All notable changes to this project will be documented in this file.
 - 添加远程文本另存为和基于 chmod 的权限修改，包含校验、列表刷新、UI sheet 和测试。
 - 添加 Dashboard 自动刷新开关，支持立即刷新、周期刷新、关闭/离开时取消，并补充 ViewModel 覆盖。
 - 添加腾讯云云监控 `GetMonitorData` 支持，可为已关联 CVM 展示 Cloud CPU 指标，并补充 Cloud API 来源标记和 Dashboard 聚合测试。
+- 启动 Phase 4 Services，加入 systemd 服务列表、严格 `.service` 单元校验、journal 读取、带确认的 start/stop/restart/reload 操作、UI 接入、测试和真实服务器只读验证。
