@@ -98,7 +98,7 @@ CREATE TABLE registry_backups (
 
 - [x] 查看运行状态和日志：已通过 systemd state、Verdaccio version、storage size 和 journal tail 生成状态快照，日志会脱敏。
 - [ ] 管理用户和权限配置。
-- [ ] 列出私有包。
+- [x] 列出私有包：已基于 Verdaccio storage 下 package metadata 生成包名、版本数量、latest version、大小和更新时间摘要。
 - [ ] 修改上游 registry 配置。
 - [x] 保存配置前备份：已支持读取/保存 `config.yaml`，保存前创建 `.hhc-backup-*` 备份并重启服务；真实服务器写操作仍需谨慎验收。
 
@@ -111,10 +111,10 @@ CREATE TABLE registry_backups (
 
 ### Task 5：备份与恢复
 
-- [ ] 备份 storage 和配置。
+- [x] 备份 storage 和配置：已生成受控 tar.gz 备份命令，包含 `config.yaml` 和 storage 内容，并返回备份文件大小；真实服务器手动验收仍未执行。
 - [ ] 恢复前停止服务并二次确认。
 - [ ] 恢复失败时尝试回滚。
-- [ ] 记录备份历史。
+- [ ] 记录备份历史：当前返回备份路径和大小，持久化历史仍待接入。
 
 ### Task 6：Dart/Flutter pub 方案验证
 
@@ -130,7 +130,8 @@ CREATE TABLE registry_backups (
 - [x] systemd service 模板测试。
 - [x] Verdaccio 安装命令和 health check 状态机测试。
 - [x] Verdaccio 状态、日志脱敏和配置保存前备份测试。
-- [ ] 备份恢复状态机测试。
+- [x] 备份归档命令测试。
+- [ ] 恢复状态机测试。
 - [x] 日志脱敏测试：当前已覆盖 Verdaccio journal status 日志脱敏和安装失败输出脱敏。
 
 ### Task 8：手动验收

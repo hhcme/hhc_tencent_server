@@ -891,6 +891,68 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testVerdaccioManagerParsesPackageList() {
+        let packages = VerdaccioManager.parsePackageList("""
+        @team/ui\t2\t1.1.0\t2048\t1700000002
+        api-client\t3\t2.0.0\t4096\t1700000001
+        malformed
+        """)
+
+        XCTAssertEqual(packages.map(\.name), ["@team/ui", "api-client"])
+        XCTAssertEqual(packages[0].versionCount, 2)
+        XCTAssertEqual(packages[0].latestVersion, "1.1.0")
+        XCTAssertEqual(packages[0].sizeBytes, 2048)
+        XCTAssertEqual(packages[0].modifiedAt, Date(timeIntervalSince1970: 1_700_000_002))
+    }
+
+    func testVerdaccioManagerListsPackagesFromStorage() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(
+                command: "",
+                stdout: """
+                api-client\t1\t1.0.0\t1024\t1700000000
+                @team/ui\t2\t1.1.0\t2048\t1700000002
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            ),
+        ])
+        let manager = VerdaccioManager()
+
+        let packages = try await manager.listPackages(
+            draft: VerdaccioInstallDraft(),
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(packages.map(\.name), ["@team/ui", "api-client"])
+        XCTAssertTrue(client.commands[0].contains("find \"$data_path\" -mindepth 1 -maxdepth 3 -type f -name package.json"))
+        XCTAssertTrue(client.commands[0].contains("printf '%s\\t%s\\t%s\\t%s\\t%s\\n'"))
+    }
+
+    func testVerdaccioManagerCreatesRegistryBackupArchive() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "8192\n", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await manager.createBackup(
+            draft: VerdaccioInstallDraft(),
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertTrue(result.backupPath.hasPrefix("/srv/verdaccio/backups/verdaccio-"))
+        XCTAssertTrue(result.backupPath.hasSuffix(".tar.gz"))
+        XCTAssertEqual(result.sizeBytes, 8192)
+        XCTAssertTrue(client.commands[0].contains("install -d -m 0750 \"$backup_dir\""))
+        XCTAssertTrue(client.commands[0].contains("tar -czf \"$backup_path\" -C \"$install_path\" config.yaml -C \"$data_path\" ."))
+        XCTAssertTrue(client.commands[0].contains("stat -c %s \"$backup_path\""))
+    }
+
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
         let os = DashboardService.parseOSRelease("""
         NAME="Ubuntu"

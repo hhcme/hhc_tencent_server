@@ -1186,6 +1186,20 @@ struct VerdaccioConfigSaveResult: Equatable, Sendable {
     var backupPath: String
 }
 
+struct VerdaccioPackageSummary: Identifiable, Equatable, Sendable {
+    var id: String { name }
+    var name: String
+    var versionCount: Int
+    var latestVersion: String?
+    var sizeBytes: Int64?
+    var modifiedAt: Date?
+}
+
+struct VerdaccioRegistryBackupResult: Equatable, Sendable {
+    var backupPath: String
+    var sizeBytes: Int64?
+}
+
 enum RegistryConfigurationError: LocalizedError, Equatable {
     case invalidName
     case invalidPath(String)
@@ -1490,6 +1504,40 @@ final class VerdaccioManager: @unchecked Sendable {
         return VerdaccioConfigSaveResult(path: path, backupPath: backupPath)
     }
 
+    func listPackages(
+        draft: VerdaccioInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> [VerdaccioPackageSummary] {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(Self.packageListCommand(for: draft), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not list Verdaccio packages."))
+        }
+        return Self.parsePackageList(result.stdout)
+    }
+
+    func createBackup(
+        draft: VerdaccioInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioRegistryBackupResult {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let backupPath = "\(draft.installPath.trimmed)/backups/verdaccio-\(Self.timestamp(for: now())).tar.gz"
+        let result = try await CloudProviderRequestRunner.withTimeout(30) {
+            try await sshClient.execute(Self.backupCommand(for: draft, backupPath: backupPath), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not create Verdaccio backup."))
+        }
+        return VerdaccioRegistryBackupResult(
+            backupPath: backupPath,
+            sizeBytes: Int64(result.stdout.trimmed.nilIfEmpty ?? "")
+        )
+    }
+
     static func parseStatus(
         _ output: String,
         serviceName: String,
@@ -1507,6 +1555,29 @@ final class VerdaccioManager: @unchecked Sendable {
         )
     }
 
+    static func parsePackageList(_ output: String) -> [VerdaccioPackageSummary] {
+        output
+            .components(separatedBy: .newlines)
+            .compactMap { line -> VerdaccioPackageSummary? in
+                let parts = line.components(separatedBy: "\t")
+                guard parts.count >= 5 else { return nil }
+                let name = parts[0].trimmed
+                guard !name.isEmpty else { return nil }
+                let versionCount = Int(parts[1]) ?? 0
+                let latestVersion = parts[2].trimmed.nilIfEmpty
+                let sizeBytes = Int64(parts[3])
+                let modifiedAt = TimeInterval(parts[4]).map(Date.init(timeIntervalSince1970:))
+                return VerdaccioPackageSummary(
+                    name: name,
+                    versionCount: versionCount,
+                    latestVersion: latestVersion,
+                    sizeBytes: sizeBytes,
+                    modifiedAt: modifiedAt
+                )
+            }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
     static func statusCommand(for draft: VerdaccioInstallDraft) -> String {
         let service = shellQuote("\(draft.serviceName.trimmed).service")
         let dataPath = shellQuote(draft.dataPath.trimmed)
@@ -1517,6 +1588,37 @@ final class VerdaccioManager: @unchecked Sendable {
         printf '__HHC_VERDACCIO_VERSION__%s\\n' "$(npx --yes verdaccio@\(draft.version.trimmed) --version 2>/dev/null || true)"; \
         printf '__HHC_VERDACCIO_STORAGE_BYTES__%s\\n' "$(du -sb "$data_path" 2>/dev/null | awk '{print $1}' || echo 0)"; \
         printf '__HHC_VERDACCIO_LOGS__'; journalctl -u "$service" -n 80 --no-pager 2>/dev/null | tail -n 80 | base64 | tr -d '\\n'; printf '\\n'
+        """
+    }
+
+    static func packageListCommand(for draft: VerdaccioInstallDraft) -> String {
+        let dataPath = shellQuote(draft.dataPath.trimmed)
+        return """
+        data_path=\(dataPath); \
+        find "$data_path" -mindepth 1 -maxdepth 3 -type f -name package.json -print 2>/dev/null | while IFS= read -r package_json; do \
+          package_dir=$(dirname -- "$package_json"); \
+          rel=${package_dir#"$data_path"/}; \
+          case "$rel" in _*|*/_*) continue ;; esac; \
+          versions=$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d ! -name '.*' 2>/dev/null | wc -l | tr -d '[:space:]'); \
+          latest=$(find "$package_dir" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%f\\n' 2>/dev/null | sort -V | tail -n 1); \
+          size=$(du -sb "$package_dir" 2>/dev/null | awk '{print $1}'); \
+          modified=$(stat -c %Y "$package_dir" 2>/dev/null || echo 0); \
+          printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$rel" "$versions" "$latest" "$size" "$modified"; \
+        done
+        """
+    }
+
+    static func backupCommand(for draft: VerdaccioInstallDraft, backupPath: String) -> String {
+        let installPath = shellQuote(draft.installPath.trimmed)
+        let dataPath = shellQuote(draft.dataPath.trimmed)
+        let backupPath = shellQuote(backupPath)
+        return """
+        set -e; \
+        install_path=\(installPath); data_path=\(dataPath); backup_path=\(backupPath); \
+        backup_dir=$(dirname -- "$backup_path"); \
+        install -d -m 0750 "$backup_dir"; \
+        tar -czf "$backup_path" -C "$install_path" config.yaml -C "$data_path" .; \
+        stat -c %s "$backup_path"
         """
     }
 
