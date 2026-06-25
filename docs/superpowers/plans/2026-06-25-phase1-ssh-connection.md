@@ -406,7 +406,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 
 - [x] `xcodebuild`/`scripts/ci.sh` 能构建并运行 app-hosted test host。
 - [x] target entitlements 中能看到 outgoing network 和 sandbox 配置。
-- [ ] 手工 `Cmd + R` 启动应用并观察首屏。
+- [x] 手工 `Cmd + R` 启动应用并观察首屏：已用 `xcodebuild ... ENABLE_DEBUG_DYLIB=NO build` 构建后通过 LaunchServices 启动，并用 CoreGraphics 窗口列表确认主窗口 `kCGWindowIsOnscreen = 1`。
 
 ### Task 2: 模型与数据库
 
