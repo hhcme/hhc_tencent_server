@@ -6518,6 +6518,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudSnapshots,
         .securityGroups,
         .snapshotActions,
+        .diskAttachmentActions,
     ]
 
     private let transport: HuaweiCloudHTTPTransport
@@ -6858,7 +6859,18 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         diskId: String,
         instanceId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+        let region = Self.decodeRegionId(regionId)
+        let payload = HuaweiVolumeAttachPayload(
+            attach: HuaweiVolumeAttachPayload.Attach(instanceUUID: instanceId)
+        )
+        try await requestWithoutResponse(
+            credential: credential,
+            host: "evs.\(region.regionName).myhuaweicloud.com",
+            path: "/v2/\(CloudSignature.percentEncode(region.projectId))/volumes/\(CloudSignature.percentEncode(diskId))/action",
+            queryItems: [],
+            method: "POST",
+            body: try encoder.encode(payload)
+        )
     }
 
     func detachDisk(
@@ -6866,7 +6878,16 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         diskId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+        let region = Self.decodeRegionId(regionId)
+        let payload = HuaweiVolumeDetachPayload(detach: HuaweiVolumeDetachPayload.Detach())
+        try await requestWithoutResponse(
+            credential: credential,
+            host: "evs.\(region.regionName).myhuaweicloud.com",
+            path: "/v2/\(CloudSignature.percentEncode(region.projectId))/volumes/\(CloudSignature.percentEncode(diskId))/action",
+            queryItems: [],
+            method: "POST",
+            body: try encoder.encode(payload)
+        )
     }
 
     func startInstance(
@@ -6912,6 +6933,23 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             return try decoder.decode(Response.self, from: data)
         } catch {
             throw CloudProviderError.providerFailure("Could not decode Huawei Cloud response: \(error.localizedDescription)")
+        }
+    }
+
+    private func requestWithoutResponse(
+        credential: CloudProviderCredential,
+        host: String,
+        path: String,
+        queryItems: [URLQueryItem],
+        method: String = "GET",
+        body: Data = Data()
+    ) async throws {
+        let request = try signedRequest(credential: credential, host: host, path: path, queryItems: queryItems, method: method, body: body)
+        let (_, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
+            try await self.transport.send(request)
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw CloudProviderError.networkFailure("HTTP \(httpResponse.statusCode)")
         }
     }
 
@@ -7459,6 +7497,42 @@ private struct HuaweiDeleteSnapshotResponse: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case jobId = "job_id"
+    }
+}
+
+private struct HuaweiVolumeAttachPayload: Encodable {
+    var attach: Attach
+
+    enum CodingKeys: String, CodingKey {
+        case attach = "os-attach"
+    }
+
+    struct Attach: Encodable {
+        var instanceUUID: String
+        var mountpoint: String?
+        var mode: String?
+
+        enum CodingKeys: String, CodingKey {
+            case instanceUUID = "instance_uuid"
+            case mountpoint
+            case mode
+        }
+    }
+}
+
+private struct HuaweiVolumeDetachPayload: Encodable {
+    var detach: Detach
+
+    enum CodingKeys: String, CodingKey {
+        case detach = "os-detach"
+    }
+
+    struct Detach: Encodable {
+        var attachmentId: String?
+
+        enum CodingKeys: String, CodingKey {
+            case attachmentId = "attachment_id"
+        }
     }
 }
 

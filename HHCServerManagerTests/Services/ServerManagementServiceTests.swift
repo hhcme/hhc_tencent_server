@@ -2604,6 +2604,72 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(detachLog.status, "success")
     }
 
+    func testCloudDiskAttachmentActionsAllowHuaweiStatuses() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .huaweiCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudDisks, .diskAttachmentActions]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_470)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .huaweiCloud,
+            displayName: "Huawei",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        try harness.repository.upsertCloudDisk(CloudDisk(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .huaweiCloud,
+            regionId: "ap-southeast-1|project-1",
+            diskId: "vol-attach",
+            instanceId: nil,
+            name: "data",
+            diskType: "SSD",
+            sizeGB: 100,
+            status: "available",
+            billingType: "postPaid",
+            expiredTime: nil,
+            rawJSON: nil,
+            lastSyncedAt: nil
+        ))
+
+        try await harness.cloudInstanceSyncService.attachDisk(
+            account: account,
+            regionId: "ap-southeast-1|project-1",
+            diskId: "vol-attach",
+            instanceId: "server-target",
+            currentStatus: "available"
+        )
+
+        var disk = try XCTUnwrap(harness.repository.fetchCloudDisks(accountId: account.id).first { $0.diskId == "vol-attach" })
+        XCTAssertEqual(disk.instanceId, "server-target")
+        XCTAssertEqual(disk.status, "ATTACHING")
+        var logs = try harness.repository.fetchRemoteChangeLogs()
+        let attachLog = try XCTUnwrap(logs.first { $0.action == "attach_disk" })
+        XCTAssertEqual(attachLog.providerId, .huaweiCloud)
+        XCTAssertEqual(attachLog.targetId, "vol-attach")
+        XCTAssertEqual(attachLog.status, "success")
+
+        disk.status = "in-use"
+        try harness.repository.upsertCloudDisk(disk)
+        try await harness.cloudInstanceSyncService.detachDisk(
+            account: account,
+            regionId: "ap-southeast-1|project-1",
+            diskId: "vol-attach",
+            currentInstanceId: "server-target",
+            currentStatus: "in-use"
+        )
+
+        let detachingDisk = try XCTUnwrap(harness.repository.fetchCloudDisks(accountId: account.id).first { $0.diskId == "vol-attach" })
+        XCTAssertEqual(detachingDisk.instanceId, "server-target")
+        XCTAssertEqual(detachingDisk.status, "DETACHING")
+        logs = try harness.repository.fetchRemoteChangeLogs()
+        let detachLog = try XCTUnwrap(logs.first { $0.action == "detach_disk" })
+        XCTAssertEqual(detachLog.providerId, .huaweiCloud)
+        XCTAssertEqual(detachLog.targetId, "vol-attach")
+        XCTAssertEqual(detachLog.status, "success")
+    }
+
     func testCloudInstancePowerActionsPersistCacheAndAuditLogs() async throws {
         let adapter = MockCloudProviderAdapter(
             providerId: .tencentCloud,
@@ -4233,6 +4299,47 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].url?.host, "evs.ap-southeast-1.myhuaweicloud.com")
         XCTAssertEqual(transport.requests[1].url?.path, "/v2/project-1/cloudsnapshots/snap-created")
         XCTAssertNil(transport.requests[1].httpBody)
+    }
+
+    func testHuaweiCloudAdapterAttachesAndDetachesDisksUsesSignedEVSAPI() async throws {
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockHuaweiCloudTransport(responses: ["{}", ""])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        try await adapter.attachDisk(
+            credential: credential,
+            regionId: "ap-southeast-1|project-1",
+            diskId: "vol-1",
+            instanceId: "server-1"
+        )
+        try await adapter.detachDisk(
+            credential: credential,
+            regionId: "ap-southeast-1|project-1",
+            diskId: "vol-1"
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.diskAttachmentActions))
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].httpMethod, "POST")
+        XCTAssertEqual(transport.requests[0].url?.host, "evs.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[0].url?.path, "/v2/project-1/volumes/vol-1/action")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-Sdk-Date"), "20231114T221320Z")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("SDK-HMAC-SHA256 Access=HUAWEIAK") == true)
+        let attachBody = try XCTUnwrap(transport.requests[0].jsonBody?["os-attach"] as? [String: Any])
+        XCTAssertEqual(attachBody["instance_uuid"] as? String, "server-1")
+        XCTAssertNil(attachBody["mountpoint"])
+        XCTAssertNil(attachBody["mode"])
+        XCTAssertEqual(transport.requests[1].httpMethod, "POST")
+        XCTAssertEqual(transport.requests[1].url?.host, "evs.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[1].url?.path, "/v2/project-1/volumes/vol-1/action")
+        let detachBody = try XCTUnwrap(transport.requests[1].jsonBody?["os-detach"] as? [String: Any])
+        XCTAssertNil(detachBody["attachment_id"])
     }
 
     func testHuaweiCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedVPCAPI() async throws {
