@@ -12,6 +12,68 @@ final class SSHIntegrationTests: XCTestCase {
         XCTAssertEqual(result.stdout, "hhc-ssh-ok", result.stderr)
     }
 
+    func testRealSFTPTransferRoundTripWhenEnvironmentIsConfigured() async throws {
+        let harness = try makeRealSSHHarness(disableRsync: true, disableSCPFallback: true)
+        defer { try? harness.service.deleteServer(harness.profile) }
+        try await trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+
+        let token = "hhc-transfer-\(UUID().uuidString)"
+        let remoteBasePath = "/tmp/\(token)"
+        let remoteUploadPath = "\(remoteBasePath)/uploaded.txt"
+        defer {
+            Task {
+                _ = try? await harness.sshClient.execute("rm -rf -- \(Self.shellQuote(remoteBasePath))", profile: harness.profile)
+            }
+        }
+
+        let mkdir = try await harness.sshClient.execute("mkdir -p -- \(Self.shellQuote(remoteBasePath))", profile: harness.profile)
+        XCTAssertEqual(mkdir.exitCode, 0, mkdir.stderr)
+        guard mkdir.exitCode == 0 else {
+            return
+        }
+
+        let localDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(token, isDirectory: true)
+        try FileManager.default.createDirectory(at: localDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: localDirectory) }
+
+        let uploadURL = localDirectory.appendingPathComponent("upload.txt")
+        let downloadURL = localDirectory.appendingPathComponent("download.txt")
+        let content = "hhc-sftp-ok-\(UUID().uuidString)\n"
+        try content.write(to: uploadURL, atomically: true, encoding: .utf8)
+
+        let uploadProgress = ProgressRecorder()
+        let upload = try await harness.sshClient.uploadFile(
+            localURL: uploadURL,
+            remotePath: remoteUploadPath,
+            profile: harness.profile
+        ) { progress in
+            uploadProgress.append(progress)
+        }
+        XCTAssertEqual(upload.remotePath, remoteUploadPath)
+        XCTAssertEqual(upload.byteCount, Int64(Data(content.utf8).count))
+        XCTAssertEqual(uploadProgress.last?.fraction, 1)
+
+        let verify = try await harness.sshClient.execute("cat -- \(Self.shellQuote(remoteUploadPath))", profile: harness.profile)
+        XCTAssertEqual(verify.exitCode, 0, verify.stderr)
+        XCTAssertEqual(verify.stdout, content)
+
+        let downloadProgress = ProgressRecorder()
+        let download = try await harness.sshClient.downloadFile(
+            remotePath: remoteUploadPath,
+            localURL: downloadURL,
+            profile: harness.profile
+        ) { progress in
+            downloadProgress.append(progress)
+        }
+        XCTAssertEqual(download.localPath, downloadURL.path)
+        XCTAssertEqual(download.byteCount, Int64(Data(content.utf8).count))
+        XCTAssertEqual(downloadProgress.last?.fraction, 1)
+        XCTAssertEqual(try String(contentsOf: downloadURL, encoding: .utf8), content)
+
+        _ = try? await harness.sshClient.execute("rm -rf -- \(Self.shellQuote(remoteBasePath))", profile: harness.profile)
+    }
+
     func testRealDeploymentRunnerDeploysTemporaryRepositoryWhenEnvironmentIsConfigured() async throws {
         guard Self.testEnvironment()["HHC_TEST_DEPLOYMENT_REAL"] == "1" else {
             throw XCTSkip("Set HHC_TEST_DEPLOYMENT_REAL=1 with the real SSH environment to run the deployment integration test.")
@@ -220,7 +282,7 @@ final class SSHIntegrationTests: XCTestCase {
         _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
     }
 
-    private func makeRealSSHHarness() throws -> RealSSHHarness {
+    private func makeRealSSHHarness(disableRsync: Bool = false, disableSCPFallback: Bool = false) throws -> RealSSHHarness {
         let environment = Self.testEnvironment()
         guard
             let host = environment["HHC_TEST_SSH_HOST"], !host.isEmpty,
@@ -245,7 +307,12 @@ final class SSHIntegrationTests: XCTestCase {
             authType: .privateKey,
             credential: .privateKey(data: keyData, passphrase: environment["HHC_TEST_SSH_PASSPHRASE"])
         )
-        let sshClient = OpenSSHClient(repository: repository, keychain: keychain)
+        let sshClient = OpenSSHClient(
+            repository: repository,
+            keychain: keychain,
+            isRsyncEnabled: !disableRsync,
+            isSCPFallbackEnabled: !disableSCPFallback
+        )
         return RealSSHHarness(
             repository: repository,
             keychain: keychain,
@@ -318,4 +385,21 @@ private struct RealSSHHarness {
     let service: ServerManagementService
     let profile: ServerProfile
     let sshClient: OpenSSHClient
+}
+
+private final class ProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [RemoteFileTransferProgress] = []
+
+    var last: RemoteFileTransferProgress? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values.last
+    }
+
+    func append(_ progress: RemoteFileTransferProgress) {
+        lock.lock()
+        values.append(progress)
+        lock.unlock()
+    }
 }

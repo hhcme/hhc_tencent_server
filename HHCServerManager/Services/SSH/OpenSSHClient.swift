@@ -34,17 +34,23 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
     private let keychain: KeychainService
     private let hostKeyTrustStore: HostKeyTrustStore
     private let fileManager: FileManager
+    private let isRsyncEnabled: Bool
+    private let isSCPFallbackEnabled: Bool
 
     init(
         repository: ServerRepository,
         keychain: KeychainService,
         hostKeyTrustStore: HostKeyTrustStore? = nil,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        isRsyncEnabled: Bool = true,
+        isSCPFallbackEnabled: Bool = true
     ) {
         self.repository = repository
         self.keychain = keychain
         self.hostKeyTrustStore = hostKeyTrustStore ?? HostKeyTrustStore(repository: repository)
         self.fileManager = fileManager
+        self.isRsyncEnabled = isRsyncEnabled
+        self.isSCPFallbackEnabled = isSCPFallbackEnabled
     }
 
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
@@ -84,7 +90,7 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         try await transferFile(
             direction: .upload,
             source: localURL.path,
-            remoteSourceOrDestination: "\(profile.username)@\(profile.host):\(Self.remoteShellQuote(remotePath))",
+            remoteSourceOrDestination: "\(profile.username)@\(profile.host):\(remotePath)",
             remotePath: remotePath,
             localURL: localURL,
             profile: profile,
@@ -101,7 +107,7 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         try await transferFile(
             direction: .download,
             source: localURL.path,
-            remoteSourceOrDestination: "\(profile.username)@\(profile.host):\(Self.remoteShellQuote(remotePath))",
+            remoteSourceOrDestination: "\(profile.username)@\(profile.host):\(remotePath)",
             remotePath: remotePath,
             localURL: localURL,
             profile: profile,
@@ -162,6 +168,10 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             return result
         }
 
+        guard isSCPFallbackEnabled else {
+            throw SSHClientError.processFailed("SFTP transfer failed and SCP fallback is disabled.")
+        }
+
         let scpSource: String
         let scpDestination: String
         switch direction {
@@ -218,7 +228,7 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             .cleanup()
         }
 
-        let batchCommand = Self.sftpResumeBatchCommand(
+        let batchCommand = Self.sftpBatchCommand(
             direction: direction,
             localPath: localURL.path,
             remotePath: remotePath
@@ -230,6 +240,10 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         arguments.append(contentsOf: ["-b", batchURL.path, "\(profile.username)@\(profile.host)"])
         let processResult = try await runProcess("/usr/bin/sftp", arguments: arguments, environment: authContext.environment)
         guard processResult.exitCode == 0 else {
+            if !isSCPFallbackEnabled {
+                let message = processResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                throw SSHClientError.processFailed(message.isEmpty ? "SFTP transfer failed." : message)
+            }
             return nil
         }
 
@@ -254,7 +268,7 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?,
         start: Date
     ) async throws -> RemoteFileTransferResult? {
-        guard fileManager.isExecutableFile(atPath: "/usr/bin/rsync") else {
+        guard isRsyncEnabled, fileManager.isExecutableFile(atPath: "/usr/bin/rsync") else {
             return nil
         }
         let authContext = try makeAuthContext(profile: profile, knownHostsURL: knownHostsURL, portFlag: "-p")
@@ -381,18 +395,29 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
     }
 
     private func scanHostKey(profile: ServerProfile) async throws -> HostKeyInfo {
-        let result = try await runProcess("/usr/bin/ssh-keyscan", arguments: [
-            "-T", "5",
-            "-p", "\(profile.port)",
-            profile.host,
-        ])
-        let lines = result.stdout
+        for keyType in ["ed25519", "ecdsa", "rsa"] {
+            let result = try await runProcess("/usr/bin/ssh-keyscan", arguments: [
+                "-T", "5",
+                "-t", keyType,
+                "-p", "\(profile.port)",
+                profile.host,
+            ])
+            if let hostKeyInfo = try await parseScannedHostKey(result.stdout, profile: profile) {
+                return hostKeyInfo
+            }
+        }
+        throw SSHClientError.invalidHostKeyScan
+    }
+
+    private func parseScannedHostKey(_ output: String, profile: ServerProfile) async throws -> HostKeyInfo? {
+        guard let rawPublicKey = output
             .split(separator: "\n")
             .map(String.init)
-            .filter { !$0.hasPrefix("#") && !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        guard let rawPublicKey = lines.first(where: { $0.contains(" ssh-ed25519 ") }) ?? lines.first else {
-            throw SSHClientError.invalidHostKeyScan
+            .first(where: { !$0.hasPrefix("#") && !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+        else {
+            return nil
         }
+
         let parts = rawPublicKey.split(separator: " ").map(String.init)
         guard parts.count >= 3 else {
             throw SSHClientError.invalidHostKeyScan
@@ -451,10 +476,6 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         return url
     }
 
-    private static func remoteShellQuote(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
-    }
-
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
@@ -465,16 +486,16 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             .replacingOccurrences(of: " ", with: "\\ ")
     }
 
-    static func sftpResumeBatchCommand(
+    static func sftpBatchCommand(
         direction: RemoteFileTransferDirection,
         localPath: String,
         remotePath: String
     ) -> String {
         switch direction {
         case .upload:
-            "reput \(sftpBatchQuote(localPath)) \(sftpBatchQuote(remotePath))\n"
+            "put \(sftpBatchQuote(localPath)) \(sftpBatchQuote(remotePath))\n"
         case .download:
-            "reget \(sftpBatchQuote(remotePath)) \(sftpBatchQuote(localPath))\n"
+            "get \(sftpBatchQuote(remotePath)) \(sftpBatchQuote(localPath))\n"
         }
     }
 
