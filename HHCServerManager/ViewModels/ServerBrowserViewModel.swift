@@ -284,6 +284,15 @@ final class CloudResourceCenterViewModel: ObservableObject {
         return resources.first { $0.id == selectedResourceId }
     }
 
+    var selectedSnapshotName: String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return "hhc-\(formatter.string(from: Date()))"
+    }
+
     var canLoadRegions: Bool {
         selectedAccountId != nil && !isWorking
     }
@@ -358,6 +367,38 @@ final class CloudResourceCenterViewModel: ObservableObject {
         }
     }
 
+    func createSnapshot(for resource: CloudUnifiedResource, appState: AppState) async {
+        guard let account = account(for: resource, from: appState.cloudProviderAccounts),
+              let regionId = resource.regionId else { return }
+        let snapshotName = selectedSnapshotName
+        await run("Creating snapshot...") {
+            let snapshot = try await appState.cloudInstanceSyncService.createSnapshot(
+                account: account,
+                regionId: regionId,
+                diskId: resource.resourceId,
+                snapshotName: snapshotName
+            )
+            refreshLocalResources(appState: appState)
+            selectedResourceId = "snapshot:\(snapshot.accountId.uuidString):\(snapshot.regionId):\(snapshot.snapshotId)"
+            statusMessage = "Snapshot \(snapshot.snapshotId) is being created."
+        }
+    }
+
+    func deleteSnapshot(for resource: CloudUnifiedResource, appState: AppState) async {
+        guard let account = account(for: resource, from: appState.cloudProviderAccounts),
+              let regionId = resource.regionId else { return }
+        await run("Deleting snapshot...") {
+            try await appState.cloudInstanceSyncService.deleteSnapshot(
+                account: account,
+                regionId: regionId,
+                snapshotId: resource.resourceId,
+                currentStatus: resource.status
+            )
+            refreshLocalResources(appState: appState)
+            statusMessage = "Snapshot \(resource.resourceId) deleted."
+        }
+    }
+
     func resetFilters(appState: AppState) {
         searchText = ""
         statusFilter = ""
@@ -368,6 +409,10 @@ final class CloudResourceCenterViewModel: ObservableObject {
     private func selectedAccount(from accounts: [CloudProviderAccount]) -> CloudProviderAccount? {
         guard let selectedAccountId else { return nil }
         return accounts.first { $0.id == selectedAccountId }
+    }
+
+    private func account(for resource: CloudUnifiedResource, from accounts: [CloudProviderAccount]) -> CloudProviderAccount? {
+        accounts.first { $0.id == resource.accountId && $0.providerId == resource.providerId }
     }
 
     private func run(_ status: String, operation: () async throws -> Void) async {

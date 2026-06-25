@@ -249,4 +249,23 @@ private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
         regionId: String,
         capturedAt: Date
     ) async throws -> [CloudBillingState] { [] }
+
+    func createSnapshot(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        diskId: String,
+        snapshotName: String,
+        capturedAt: Date
+    ) async throws -> CloudSnapshot {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+    }
+
+    func deleteSnapshot(
+        credential: CloudProviderCredential,
+        regionId: String,
+        snapshotId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+    }
 }

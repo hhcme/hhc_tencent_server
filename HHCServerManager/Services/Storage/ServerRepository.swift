@@ -436,6 +436,17 @@ final class ServerRepository: @unchecked Sendable {
         ])
     }
 
+    func deleteCloudSnapshot(accountId: UUID, regionId: String, snapshotId: String) throws {
+        try database.execute("""
+            DELETE FROM cloud_snapshots
+            WHERE account_id = ? AND region_id = ? AND snapshot_id = ?
+        """, bindings: [
+            .text(accountId.uuidString),
+            .text(regionId),
+            .text(snapshotId),
+        ])
+    }
+
     func fetchCloudBillingStates(accountId: UUID? = nil) throws -> [CloudBillingState] {
         let whereClause = accountId.map { _ in "WHERE account_id = ?" } ?? ""
         let bindings: [SQLiteValue] = accountId.map { [.text($0.uuidString)] } ?? []

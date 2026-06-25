@@ -174,6 +174,7 @@ private struct CloudResourceCenterSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = CloudResourceCenterViewModel()
+    @State private var pendingSnapshotAction: CloudSnapshotActionRequest?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -263,6 +264,23 @@ private struct CloudResourceCenterSheet: View {
         }
         .onChange(of: viewModel.selectedRegionId) {
             viewModel.refreshLocalResources(appState: appState)
+        }
+        .alert(item: $pendingSnapshotAction) { request in
+            Alert(
+                title: Text(request.risk.title),
+                message: Text(request.risk.confirmationMessage),
+                primaryButton: .destructive(Text(request.confirmTitle)) {
+                    Task {
+                        switch request.kind {
+                        case .create:
+                            await viewModel.createSnapshot(for: request.resource, appState: appState)
+                        case .delete:
+                            await viewModel.deleteSnapshot(for: request.resource, appState: appState)
+                        }
+                    }
+                },
+                secondaryButton: .cancel()
+            )
         }
     }
 
@@ -360,7 +378,11 @@ private struct CloudResourceCenterSheet: View {
     private var resourceDetail: some View {
         Group {
             if let resource = viewModel.selectedResource {
-                CloudResourceDetailView(resource: resource)
+                VStack(spacing: 0) {
+                    CloudResourceDetailView(resource: resource)
+                    cloudSnapshotActions(for: resource)
+                        .padding([.horizontal, .bottom], 24)
+                }
             } else {
                 ContentUnavailableView(
                     "Select a Resource",
@@ -370,6 +392,62 @@ private struct CloudResourceCenterSheet: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func cloudSnapshotActions(for resource: CloudUnifiedResource) -> some View {
+        let supportsSnapshots = appState.cloudProviderRegistry.supports(.snapshotActions, providerId: resource.providerId)
+        if supportsSnapshots && resource.kind == .disk {
+            Divider()
+                .padding(.bottom, 12)
+            Button {
+                let name = viewModel.selectedSnapshotName
+                pendingSnapshotAction = CloudSnapshotActionRequest(
+                    kind: .create,
+                    resource: resource,
+                    risk: RemoteOperationRiskFactory.createCloudSnapshot(resource: resource, snapshotName: name),
+                    confirmTitle: "Create Snapshot"
+                )
+            } label: {
+                Label("Create Snapshot", systemImage: "camera.badge.clock")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(viewModel.isWorking)
+        } else if supportsSnapshots && resource.kind == .snapshot {
+            Divider()
+                .padding(.bottom, 12)
+            Button {
+                pendingSnapshotAction = CloudSnapshotActionRequest(
+                    kind: .delete,
+                    resource: resource,
+                    risk: RemoteOperationRiskFactory.deleteCloudSnapshot(resource: resource),
+                    confirmTitle: "Delete Snapshot"
+                )
+            } label: {
+                Label("Delete Snapshot", systemImage: "trash")
+            }
+            .buttonStyle(.bordered)
+            .foregroundStyle(.red)
+            .disabled(viewModel.isWorking || resource.status?.uppercased() != "NORMAL")
+            if resource.status?.uppercased() != "NORMAL" {
+                Text("Only NORMAL snapshots can be deleted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct CloudSnapshotActionRequest: Identifiable {
+    enum Kind {
+        case create
+        case delete
+    }
+
+    var id: String { risk.id }
+    let kind: Kind
+    let resource: CloudUnifiedResource
+    let risk: RemoteOperationRisk
+    let confirmTitle: String
 }
 
 private struct CapabilityMatrixView: View {

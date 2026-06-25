@@ -80,6 +80,42 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(rollbackRisk.auditTargetType, "deployment")
         XCTAssertEqual(rollbackRisk.auditAction, "rollback")
         XCTAssertTrue(rollbackRisk.confirmationMessage.contains("git reset --hard abc1234"))
+
+        let diskResource = CloudUnifiedResource(
+            id: "disk:account:ap-guangzhou:disk-123",
+            kind: .disk,
+            accountId: UUID(),
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            resourceId: "disk-123",
+            displayName: "prod-data",
+            status: "ATTACHED",
+            primaryAddress: nil,
+            secondaryText: nil,
+            lastSyncedAt: nil
+        )
+        let createSnapshotRisk = RemoteOperationRiskFactory.createCloudSnapshot(resource: diskResource, snapshotName: "before-upgrade")
+        XCTAssertEqual(createSnapshotRisk.level, .high)
+        XCTAssertEqual(createSnapshotRisk.auditAction, "create_snapshot")
+        XCTAssertTrue(createSnapshotRisk.confirmationMessage.contains("CreateSnapshot DiskId=disk-123"))
+
+        let snapshotResource = CloudUnifiedResource(
+            id: "snapshot:account:ap-guangzhou:snap-123",
+            kind: .snapshot,
+            accountId: UUID(),
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            resourceId: "snap-123",
+            displayName: "before-upgrade",
+            status: "NORMAL",
+            primaryAddress: nil,
+            secondaryText: nil,
+            lastSyncedAt: nil
+        )
+        let deleteSnapshotRisk = RemoteOperationRiskFactory.deleteCloudSnapshot(resource: snapshotResource)
+        XCTAssertEqual(deleteSnapshotRisk.level, .critical)
+        XCTAssertEqual(deleteSnapshotRisk.auditAction, "delete_snapshot")
+        XCTAssertTrue(deleteSnapshotRisk.confirmationMessage.contains("DeleteSnapshots SnapshotIds=[snap-123]"))
     }
 
     func testCloudSecurityGroupRuleChangePreviewBuildsDiffAndRisk() {
@@ -2347,5 +2383,24 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
         capturedAt: Date
     ) async throws -> [CloudBillingState] {
         []
+    }
+
+    func createSnapshot(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        diskId: String,
+        snapshotName: String,
+        capturedAt: Date
+    ) async throws -> CloudSnapshot {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+    }
+
+    func deleteSnapshot(
+        credential: CloudProviderCredential,
+        regionId: String,
+        snapshotId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
     }
 }

@@ -2304,6 +2304,47 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(Set(searchResults.map(\.resourceId)), ["disk-123", "snap-123"])
     }
 
+    func testCloudSnapshotActionsPersistCacheAndAuditLogs() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .tencentCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudSnapshots, .snapshotActions]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_300)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+
+        let snapshot = try await harness.cloudInstanceSyncService.createSnapshot(
+            account: account,
+            regionId: "ap-guangzhou",
+            diskId: "disk-123",
+            snapshotName: "before-upgrade"
+        )
+
+        XCTAssertEqual(snapshot.snapshotId, "snap-created")
+        XCTAssertEqual(try harness.repository.fetchCloudSnapshots(accountId: account.id).map(\.snapshotId), ["snap-created"])
+        var logs = try harness.repository.fetchRemoteChangeLogs()
+        let createLog = try XCTUnwrap(logs.first { $0.action == "create_snapshot" })
+        XCTAssertEqual(createLog.providerId, .tencentCloud)
+        XCTAssertEqual(createLog.status, "success")
+
+        try await harness.cloudInstanceSyncService.deleteSnapshot(
+            account: account,
+            regionId: "ap-guangzhou",
+            snapshotId: snapshot.snapshotId,
+            currentStatus: "NORMAL"
+        )
+
+        XCTAssertTrue(try harness.repository.fetchCloudSnapshots(accountId: account.id).isEmpty)
+        logs = try harness.repository.fetchRemoteChangeLogs()
+        let deleteLog = try XCTUnwrap(logs.first { $0.action == "delete_snapshot" })
+        XCTAssertEqual(deleteLog.targetId, "snap-created")
+        XCTAssertEqual(deleteLog.status, "success")
+    }
+
     func testCloudInstanceSyncCreatesServerFromInstanceAndLinksIt() throws {
         let harness = try Harness()
         let account = try harness.cloudAccountService.createAccount(
@@ -2734,6 +2775,58 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "X-TC-Action"), "DescribeSnapshots")
         XCTAssertEqual(transport.requests[2].value(forHTTPHeaderField: "X-TC-Action"), "DescribeInstances")
         XCTAssertEqual(transport.requests[3].value(forHTTPHeaderField: "X-TC-Action"), "DescribeDisks")
+    }
+
+    func testTencentCloudAdapterCreatesAndDeletesSnapshots() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "SnapshotId": "snap-created",
+                "RequestId": "request-create"
+              }
+            }
+            """,
+            """
+            {
+              "Response": {
+                "RequestId": "request-delete"
+              }
+            }
+            """,
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let credential = CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE")
+
+        let snapshot = try await adapter.createSnapshot(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-guangzhou",
+            diskId: "disk-123",
+            snapshotName: "before-upgrade",
+            capturedAt: capturedAt
+        )
+        try await adapter.deleteSnapshot(
+            credential: credential,
+            regionId: "ap-guangzhou",
+            snapshotId: "snap-created"
+        )
+
+        XCTAssertEqual(snapshot.snapshotId, "snap-created")
+        XCTAssertEqual(snapshot.diskId, "disk-123")
+        XCTAssertEqual(snapshot.status, "CREATING")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Action"), "CreateSnapshot")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Region"), "ap-guangzhou")
+        XCTAssertEqual(transport.requests[0].jsonBody?["DiskId"] as? String, "disk-123")
+        XCTAssertEqual(transport.requests[0].jsonBody?["SnapshotName"] as? String, "before-upgrade")
+        XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "X-TC-Action"), "DeleteSnapshots")
+        XCTAssertEqual(transport.requests[1].jsonBody?["SnapshotIds"] as? [String], ["snap-created"])
     }
 
     func testCloudSecurityGroupServiceLoadsLinkedServerGroupsAndPolicies() async throws {
@@ -3252,6 +3345,36 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
             ),
         ]
     }
+
+    func createSnapshot(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        diskId: String,
+        snapshotName: String,
+        capturedAt: Date
+    ) async throws -> CloudSnapshot {
+        CloudSnapshot(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000999")!,
+            accountId: accountId,
+            providerId: providerId,
+            regionId: regionId,
+            snapshotId: "snap-created",
+            diskId: diskId,
+            name: snapshotName,
+            status: "CREATING",
+            sizeGB: nil,
+            createdAtProvider: capturedAt,
+            rawJSON: nil,
+            lastSyncedAt: capturedAt
+        )
+    }
+
+    func deleteSnapshot(
+        credential: CloudProviderCredential,
+        regionId: String,
+        snapshotId: String
+    ) async throws {}
 }
 
 private func makeServiceTestProfile() -> ServerProfile {

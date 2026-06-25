@@ -716,6 +716,40 @@ enum RemoteOperationRiskFactory {
             auditAction: preview.action.rawValue
         )
     }
+
+    static func createCloudSnapshot(resource: CloudUnifiedResource, snapshotName: String) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "cloud-snapshot-create-\(resource.id)-\(snapshotName)",
+            level: .high,
+            title: "Create Cloud Snapshot",
+            target: "\(resource.displayName) (\(resource.resourceId))",
+            commandPreview: "CreateSnapshot DiskId=\(resource.resourceId) SnapshotName=\(snapshotName)",
+            impact: [
+                "The cloud provider will create a new disk snapshot.",
+                "Snapshot creation may incur storage cost and can take time to become usable.",
+            ],
+            recovery: "Delete the new snapshot from the Cloud Resources center or provider console if it is not needed.",
+            auditTargetType: "cloud_snapshot",
+            auditAction: "create_snapshot"
+        )
+    }
+
+    static func deleteCloudSnapshot(resource: CloudUnifiedResource) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "cloud-snapshot-delete-\(resource.id)",
+            level: .critical,
+            title: "Delete Cloud Snapshot",
+            target: "\(resource.displayName) (\(resource.resourceId))",
+            commandPreview: "DeleteSnapshots SnapshotIds=[\(resource.resourceId)]",
+            impact: [
+                "The selected cloud snapshot will be deleted from the provider account.",
+                "Deleted snapshots cannot be used for future disk recovery.",
+            ],
+            recovery: "Create a replacement snapshot before deletion if this is still needed for rollback.",
+            auditTargetType: "cloud_snapshot",
+            auditAction: "delete_snapshot"
+        )
+    }
 }
 
 enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {

@@ -297,6 +297,109 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         return snapshots
     }
 
+    func createSnapshot(
+        account: CloudProviderAccount,
+        regionId: String,
+        diskId: String,
+        snapshotName: String
+    ) async throws -> CloudSnapshot {
+        guard account.enabled else {
+            throw CloudProviderError.providerFailure("Cloud account is disabled.")
+        }
+        let trimmedName = snapshotName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            throw CloudProviderError.providerFailure("Snapshot name is required.")
+        }
+        try registry.require(.snapshotActions, providerId: account.providerId)
+        let capturedAt = now()
+        let credential = try credential(for: account)
+        do {
+            let snapshot = try await registry.adapter(for: account.providerId).createSnapshot(
+                credential: credential,
+                accountId: account.id,
+                regionId: regionId,
+                diskId: diskId,
+                snapshotName: trimmedName,
+                capturedAt: capturedAt
+            )
+            try repository.upsertCloudSnapshot(snapshot)
+            try saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_snapshot",
+                targetId: snapshot.snapshotId,
+                action: "create_snapshot",
+                beforeSnapshot: "disk=\(diskId)",
+                afterSnapshot: "snapshot=\(snapshot.snapshotId), name=\(trimmedName)",
+                status: "success",
+                message: "region=\(regionId)",
+                createdAt: capturedAt
+            )
+            return snapshot
+        } catch {
+            try? saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_snapshot",
+                targetId: diskId,
+                action: "create_snapshot",
+                beforeSnapshot: "disk=\(diskId)",
+                afterSnapshot: nil,
+                status: "failed",
+                message: error.localizedDescription,
+                createdAt: capturedAt
+            )
+            throw error
+        }
+    }
+
+    func deleteSnapshot(
+        account: CloudProviderAccount,
+        regionId: String,
+        snapshotId: String,
+        currentStatus: String?
+    ) async throws {
+        guard account.enabled else {
+            throw CloudProviderError.providerFailure("Cloud account is disabled.")
+        }
+        if let currentStatus, currentStatus.uppercased() != "NORMAL" {
+            throw CloudProviderError.providerFailure("Only NORMAL snapshots can be deleted safely. Current status: \(currentStatus).")
+        }
+        try registry.require(.snapshotActions, providerId: account.providerId)
+        let capturedAt = now()
+        let credential = try credential(for: account)
+        do {
+            try await registry.adapter(for: account.providerId).deleteSnapshot(
+                credential: credential,
+                regionId: regionId,
+                snapshotId: snapshotId
+            )
+            try repository.deleteCloudSnapshot(accountId: account.id, regionId: regionId, snapshotId: snapshotId)
+            try saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_snapshot",
+                targetId: snapshotId,
+                action: "delete_snapshot",
+                beforeSnapshot: "snapshot=\(snapshotId), status=\(currentStatus ?? "unknown")",
+                afterSnapshot: nil,
+                status: "success",
+                message: "region=\(regionId)",
+                createdAt: capturedAt
+            )
+        } catch {
+            try? saveCloudChangeLog(
+                providerId: account.providerId,
+                targetType: "cloud_snapshot",
+                targetId: snapshotId,
+                action: "delete_snapshot",
+                beforeSnapshot: "snapshot=\(snapshotId), status=\(currentStatus ?? "unknown")",
+                afterSnapshot: nil,
+                status: "failed",
+                message: error.localizedDescription,
+                createdAt: capturedAt
+            )
+            throw error
+        }
+    }
+
     func syncBillingStates(account: CloudProviderAccount, regionId: String) async throws -> [CloudBillingState] {
         guard account.enabled else {
             throw CloudProviderError.providerFailure("Cloud account is disabled.")
@@ -371,6 +474,32 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         )
         _ = try linkInstance(link, to: profile)
         return profile
+    }
+
+    private func saveCloudChangeLog(
+        providerId: CloudProviderID,
+        targetType: String,
+        targetId: String?,
+        action: String,
+        beforeSnapshot: String?,
+        afterSnapshot: String?,
+        status: String,
+        message: String?,
+        createdAt: Date
+    ) throws {
+        try repository.saveRemoteChangeLog(RemoteChangeLogEntry(
+            id: UUID(),
+            serverId: nil,
+            providerId: providerId,
+            targetType: targetType,
+            targetId: targetId,
+            action: action,
+            beforeSnapshot: beforeSnapshot,
+            afterSnapshot: afterSnapshot,
+            status: status,
+            message: message,
+            createdAt: createdAt
+        ))
     }
 
     private func credential(for account: CloudProviderAccount) throws -> CloudProviderCredential {
@@ -4327,6 +4456,19 @@ protocol CloudProviderAdapter: Sendable {
         regionId: String,
         capturedAt: Date
     ) async throws -> [CloudBillingState]
+    func createSnapshot(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        diskId: String,
+        snapshotName: String,
+        capturedAt: Date
+    ) async throws -> CloudSnapshot
+    func deleteSnapshot(
+        credential: CloudProviderCredential,
+        regionId: String,
+        snapshotId: String
+    ) async throws
 }
 
 enum CloudProviderError: LocalizedError, Equatable {
@@ -4613,6 +4755,7 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudDisks,
         .cloudSnapshots,
         .cloudBilling,
+        .snapshotActions,
     ]
 
     private let transport: TencentCloudHTTPTransport
@@ -4958,6 +5101,66 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         return states
     }
 
+    func createSnapshot(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        diskId: String,
+        snapshotName: String,
+        capturedAt: Date
+    ) async throws -> CloudSnapshot {
+        let payload = TencentCreateSnapshotPayload(diskId: diskId, snapshotName: snapshotName)
+        let response: TencentCloudEnvelope<TencentCreateSnapshotResponse> = try await request(
+            credential: credential,
+            endpoint: TencentCloudEndpoint(
+                host: "cbs.intl.tencentcloudapi.com",
+                service: "cbs",
+                action: "CreateSnapshot",
+                version: "2017-03-12",
+                region: regionId
+            ),
+            payload: payload
+        )
+        try throwIfNeeded(response.response.error)
+        guard let snapshotId = response.response.snapshotId, !snapshotId.isEmpty else {
+            throw CloudProviderError.providerFailure("Tencent Cloud did not return a snapshot id.")
+        }
+        return CloudSnapshot(
+            id: UUID(),
+            accountId: accountId,
+            providerId: .tencentCloud,
+            regionId: regionId,
+            snapshotId: snapshotId,
+            diskId: diskId,
+            name: snapshotName,
+            status: "CREATING",
+            sizeGB: nil,
+            createdAtProvider: capturedAt,
+            rawJSON: nil,
+            lastSyncedAt: capturedAt
+        )
+    }
+
+    func deleteSnapshot(
+        credential: CloudProviderCredential,
+        regionId: String,
+        snapshotId: String
+    ) async throws {
+        let payload = TencentDeleteSnapshotsPayload(snapshotIds: [snapshotId])
+        let response: TencentCloudEnvelope<TencentDeleteSnapshotsResponse> = try await request(
+            credential: credential,
+            endpoint: TencentCloudEndpoint(
+                host: "cbs.intl.tencentcloudapi.com",
+                service: "cbs",
+                action: "DeleteSnapshots",
+                version: "2017-03-12",
+                region: regionId
+            ),
+            payload: payload
+        )
+        try throwIfNeeded(response.response.error)
+    }
+
     private func request<Payload: Encodable, Response: Decodable>(
         credential: CloudProviderCredential,
         endpoint: TencentCloudEndpoint,
@@ -5297,6 +5500,25 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         }
     }
 
+    func createSnapshot(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        diskId: String,
+        snapshotName: String,
+        capturedAt: Date
+    ) async throws -> CloudSnapshot {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+    }
+
+    func deleteSnapshot(
+        credential: CloudProviderCredential,
+        regionId: String,
+        snapshotId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+    }
+
     private func request<Response: Decodable>(
         credential: CloudProviderCredential,
         host: String,
@@ -5562,6 +5784,25 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         capturedAt: Date
     ) async throws -> [CloudBillingState] {
         throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudBilling)
+    }
+
+    func createSnapshot(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        diskId: String,
+        snapshotName: String,
+        capturedAt: Date
+    ) async throws -> CloudSnapshot {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
+    }
+
+    func deleteSnapshot(
+        credential: CloudProviderCredential,
+        regionId: String,
+        snapshotId: String
+    ) async throws {
+        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .snapshotActions)
     }
 
     private func request<Response: Decodable>(
@@ -5974,6 +6215,24 @@ private struct TencentGetMonitorDataPayload: Encodable {
     }
 }
 
+private struct TencentCreateSnapshotPayload: Encodable {
+    var diskId: String
+    var snapshotName: String
+
+    enum CodingKeys: String, CodingKey {
+        case diskId = "DiskId"
+        case snapshotName = "SnapshotName"
+    }
+}
+
+private struct TencentDeleteSnapshotsPayload: Encodable {
+    var snapshotIds: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case snapshotIds = "SnapshotIds"
+    }
+}
+
 private struct TencentMonitorInstance: Encodable {
     var dimensions: [TencentMonitorDimension]
 
@@ -6100,6 +6359,24 @@ private struct TencentDescribeSnapshotsResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case totalCount = "TotalCount"
         case snapshotSet = "SnapshotSet"
+        case error = "Error"
+    }
+}
+
+private struct TencentCreateSnapshotResponse: Decodable {
+    var snapshotId: String?
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case snapshotId = "SnapshotId"
+        case error = "Error"
+    }
+}
+
+private struct TencentDeleteSnapshotsResponse: Decodable {
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
         case error = "Error"
     }
 }
