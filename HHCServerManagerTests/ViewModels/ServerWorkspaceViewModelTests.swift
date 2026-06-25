@@ -2888,8 +2888,17 @@ private final class CronViewModelMockSSHClient: SSHClient, @unchecked Sendable {
     }
 
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
-        if command == "crontab -l 2>/dev/null || true" {
-            return CommandResult(command: command, stdout: crontab, stderr: "", exitCode: 0, duration: 0)
+        if command.contains("__HHC_USER_CRONTAB__") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                __HHC_USER_CRONTAB__
+                \(crontab)__HHC_SYSTEM_CRON_D__
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
         }
         if command.contains("crontab -") {
             crontab = Self.decodeCrontab(from: command)

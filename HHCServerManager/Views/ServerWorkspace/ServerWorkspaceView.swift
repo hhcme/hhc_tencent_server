@@ -2797,6 +2797,9 @@ struct ServerWorkspaceView: View {
                     }
                     .disabled(isCronBusy || cronCommandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+                Text("User crontab entries can be changed here. System entries from /etc/cron.d are shown read-only.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if let capturedAt = viewModel.cronSnapshot?.capturedAt {
                     Text("Last updated \(capturedAt.formatted(date: .abbreviated, time: .shortened))")
@@ -2846,45 +2849,51 @@ struct ServerWorkspaceView: View {
         List(entries) { entry in
             CronEntryRow(entry: entry)
                 .contextMenu {
-                    if entry.isEnabled {
-                        Button {
-                            pendingCronAction = CronActionRequest(entry: entry, action: .disable)
+                    if entry.isUserCrontabEntry {
+                        if entry.isEnabled {
+                            Button {
+                                pendingCronAction = CronActionRequest(entry: entry, action: .disable)
+                            } label: {
+                                Label("Disable", systemImage: "pause.fill")
+                            }
+                        } else {
+                            Button {
+                                pendingCronAction = CronActionRequest(entry: entry, action: .enable)
+                            } label: {
+                                Label("Enable", systemImage: "play.fill")
+                            }
+                        }
+                        Button(role: .destructive) {
+                            pendingCronAction = CronActionRequest(entry: entry, action: .delete)
                         } label: {
-                            Label("Disable", systemImage: "pause.fill")
+                            Label("Delete", systemImage: "trash")
                         }
                     } else {
-                        Button {
-                            pendingCronAction = CronActionRequest(entry: entry, action: .enable)
-                        } label: {
-                            Label("Enable", systemImage: "play.fill")
-                        }
-                    }
-                    Button(role: .destructive) {
-                        pendingCronAction = CronActionRequest(entry: entry, action: .delete)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label("Read Only", systemImage: "lock")
                     }
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        pendingCronAction = CronActionRequest(entry: entry, action: .delete)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                    if entry.isEnabled {
-                        Button {
-                            pendingCronAction = CronActionRequest(entry: entry, action: .disable)
+                    if entry.isUserCrontabEntry {
+                        Button(role: .destructive) {
+                            pendingCronAction = CronActionRequest(entry: entry, action: .delete)
                         } label: {
-                            Label("Disable", systemImage: "pause.fill")
+                            Label("Delete", systemImage: "trash")
                         }
-                        .tint(.orange)
-                    } else {
-                        Button {
-                            pendingCronAction = CronActionRequest(entry: entry, action: .enable)
-                        } label: {
-                            Label("Enable", systemImage: "play.fill")
+                        if entry.isEnabled {
+                            Button {
+                                pendingCronAction = CronActionRequest(entry: entry, action: .disable)
+                            } label: {
+                                Label("Disable", systemImage: "pause.fill")
+                            }
+                            .tint(.orange)
+                        } else {
+                            Button {
+                                pendingCronAction = CronActionRequest(entry: entry, action: .enable)
+                            } label: {
+                                Label("Enable", systemImage: "play.fill")
+                            }
+                            .tint(.green)
                         }
-                        .tint(.green)
                     }
                 }
         }
@@ -4090,17 +4099,31 @@ private struct CronEntryRow: View {
                     .font(.system(.body, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(entry.schedule)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospaced()
+                HStack(spacing: 8) {
+                    Text(entry.schedule)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospaced()
+                    if let runAsUser = entry.runAsUser {
+                        Text("as \(runAsUser)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let sourcePath = entry.sourcePath {
+                        Text(sourcePath)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
             }
 
             Spacer()
 
-            Text(entry.isEnabled ? "enabled" : "disabled")
+            Text(entry.isUserCrontabEntry ? (entry.isEnabled ? "enabled" : "disabled") : "system")
                 .font(.caption)
-                .foregroundStyle(entry.isEnabled ? .green : .secondary)
+                .foregroundStyle(entry.isUserCrontabEntry && entry.isEnabled ? .green : .secondary)
         }
         .padding(.vertical, 4)
     }

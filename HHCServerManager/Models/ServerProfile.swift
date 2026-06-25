@@ -176,16 +176,23 @@ struct SystemdJournalLog: Equatable, Hashable, Sendable {
 }
 
 struct CronEntry: Identifiable, Equatable, Hashable, Sendable {
-    var id: String { originalLine }
+    var id: String { "\(sourcePath ?? "user"):\(originalLine)" }
     var schedule: String
     var command: String
     var isEnabled: Bool
     var originalLine: String
+    var sourcePath: String? = nil
+    var runAsUser: String? = nil
+
+    var isUserCrontabEntry: Bool {
+        sourcePath == nil
+    }
 }
 
 struct CronTabSnapshot: Equatable, Hashable, Sendable {
     var entries: [CronEntry]
     var rawText: String
+    var userRawText: String
     var capturedAt: Date
 }
 

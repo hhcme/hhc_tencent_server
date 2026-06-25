@@ -2065,7 +2065,16 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertThrowsError(try CronManager.makeEntryLine(schedule: "* * * * *", command: "bad\nline"))
 
         var snapshot = try await manager.load(profile: profile, sshClient: client)
-        XCTAssertEqual(snapshot.entries.map(\.command), ["/usr/bin/backup"])
+        XCTAssertEqual(snapshot.entries.map(\.command), ["/usr/bin/backup", "/usr/local/bin/system-health"])
+        XCTAssertNil(snapshot.entries[0].sourcePath)
+        XCTAssertEqual(snapshot.entries[1].sourcePath, "/etc/cron.d/hhc-system")
+        XCTAssertEqual(snapshot.entries[1].runAsUser, "root")
+        do {
+            try await manager.perform(.delete, entry: snapshot.entries[1], profile: profile, sshClient: client)
+            XCTFail("Expected system cron entry mutation to fail.")
+        } catch SSHClientError.processFailed(let message) {
+            XCTAssertTrue(message.contains("read-only"))
+        }
 
         try await manager.add(schedule: "*/5 * * * *", command: "/usr/bin/health", profile: profile, sshClient: client)
         XCTAssertTrue(client.installedCrontab.contains("*/5 * * * * /usr/bin/health"))
@@ -6342,6 +6351,8 @@ private final class RecordingSystemdSSHClient: SSHClient, @unchecked Sendable {
 private final class RecordingCronSSHClient: SSHClient, @unchecked Sendable {
     private(set) var commands: [String] = []
     private(set) var installedCrontab = "0 2 * * * /usr/bin/backup\n"
+    private let systemCronPath = "/etc/cron.d/hhc-system"
+    private let systemCrontab = "*/15 * * * * root /usr/local/bin/system-health\n"
 
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
         try await execute("printf hhc-ssh-ok", profile: profile)
@@ -6349,8 +6360,14 @@ private final class RecordingCronSSHClient: SSHClient, @unchecked Sendable {
 
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
         commands.append(command)
-        if command == "crontab -l 2>/dev/null || true" {
-            return CommandResult(command: command, stdout: installedCrontab, stderr: "", exitCode: 0, duration: 0)
+        if command.contains("__HHC_USER_CRONTAB__") {
+            let output = """
+            __HHC_USER_CRONTAB__
+            \(installedCrontab)__HHC_SYSTEM_CRON_D__
+            __HHC_CRON_FILE__ \(systemCronPath)
+            \(systemCrontab)
+            """
+            return CommandResult(command: command, stdout: output, stderr: "", exitCode: 0, duration: 0)
         }
         if command.contains("crontab -") {
             installedCrontab = Self.decodeCrontab(from: command)

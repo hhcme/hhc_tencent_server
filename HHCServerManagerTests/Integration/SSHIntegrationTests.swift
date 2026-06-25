@@ -321,6 +321,10 @@ final class SSHIntegrationTests: XCTestCase {
             viewModel.loadCron(profile: harness.profile, sshClient: harness.sshClient, cronManager: cronManager)
             try await Self.waitUntil { viewModel.isLoadingCron == false }
             XCTAssertNil(viewModel.cronErrorMessage)
+            let initialCronEntries = viewModel.cronSnapshot?.entries ?? []
+            XCTAssertTrue(initialCronEntries.allSatisfy { entry in
+                entry.isUserCrontabEntry || (entry.sourcePath?.hasPrefix("/etc/cron.d/") == true && entry.runAsUser?.isEmpty == false)
+            })
 
             let cronCommand = "printf hhc-cron-ok > \(cronMarker)"
             viewModel.addCronEntry(

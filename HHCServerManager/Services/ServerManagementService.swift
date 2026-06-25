@@ -4165,6 +4165,9 @@ final class SystemdServiceManager: @unchecked Sendable {
 
 final class CronManager: @unchecked Sendable {
     static let disabledPrefix = "# HHC_DISABLED "
+    private static let userSectionMarker = "__HHC_USER_CRONTAB__"
+    private static let systemSectionMarker = "__HHC_SYSTEM_CRON_D__"
+    private static let systemFileMarker = "__HHC_CRON_FILE__ "
 
     private let now: @Sendable () -> Date
 
@@ -4173,13 +4176,32 @@ final class CronManager: @unchecked Sendable {
     }
 
     func load(profile: ServerProfile, sshClient: SSHClient) async throws -> CronTabSnapshot {
+        let command = """
+        printf '\(Self.userSectionMarker)\\n'; \
+        crontab -l 2>/dev/null || true; \
+        printf '\(Self.systemSectionMarker)\\n'; \
+        if [ -d /etc/cron.d ]; then \
+          find /etc/cron.d -maxdepth 1 -type f -print 2>/dev/null | sort | while IFS= read -r file; do \
+            name=$(basename "$file"); \
+            case "$name" in .*|*~|*.dpkg-*|*.rpm*|*.bak|*.old) continue;; esac; \
+            printf '\(Self.systemFileMarker)%s\\n' "$file"; \
+            sed -n '1,200p' "$file" 2>/dev/null || true; \
+          done; \
+        fi
+        """
         let result = try await CloudProviderRequestRunner.withTimeout(10) {
-            try await sshClient.execute("crontab -l 2>/dev/null || true", profile: profile)
+            try await sshClient.execute(command, profile: profile)
         }
         guard result.exitCode == 0 else {
             throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not read crontab.")
         }
-        return CronTabSnapshot(entries: Self.parse(result.stdout), rawText: result.stdout, capturedAt: now())
+        let parsed = Self.parseSnapshot(result.stdout)
+        return CronTabSnapshot(
+            entries: parsed.entries,
+            rawText: result.stdout,
+            userRawText: parsed.userRawText,
+            capturedAt: now()
+        )
     }
 
     func add(
@@ -4190,7 +4212,7 @@ final class CronManager: @unchecked Sendable {
     ) async throws {
         let normalizedLine = try Self.makeEntryLine(schedule: schedule, command: command)
         let snapshot = try await load(profile: profile, sshClient: sshClient)
-        var lines = Self.normalizedLines(snapshot.rawText)
+        var lines = Self.normalizedLines(snapshot.userRawText)
         lines.append(normalizedLine)
         try await install(lines: lines, profile: profile, sshClient: sshClient)
     }
@@ -4202,7 +4224,10 @@ final class CronManager: @unchecked Sendable {
         sshClient: SSHClient
     ) async throws {
         let snapshot = try await load(profile: profile, sshClient: sshClient)
-        let lines = Self.normalizedLines(snapshot.rawText)
+        guard entry.isUserCrontabEntry else {
+            throw SSHClientError.processFailed("System cron entries are read-only in this release.")
+        }
+        let lines = Self.normalizedLines(snapshot.userRawText)
         guard let index = lines.firstIndex(of: entry.originalLine) else {
             throw SSHClientError.processFailed("Cron entry no longer exists.")
         }
@@ -4222,8 +4247,52 @@ final class CronManager: @unchecked Sendable {
 
     static func parse(_ text: String) -> [CronEntry] {
         normalizedLines(text).compactMap { line in
-            parseLine(line)
+            parseUserLine(line)
         }
+    }
+
+    static func parseSnapshot(_ text: String) -> (entries: [CronEntry], userRawText: String) {
+        var userLines: [String] = []
+        var entries: [CronEntry] = []
+        var currentSection: CronSection = .user
+        var currentSystemFile: String?
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            if rawLine == userSectionMarker {
+                currentSection = .user
+                currentSystemFile = nil
+                continue
+            }
+            if rawLine == systemSectionMarker {
+                currentSection = .system
+                currentSystemFile = nil
+                continue
+            }
+            if rawLine.hasPrefix(systemFileMarker) {
+                currentSection = .system
+                currentSystemFile = String(rawLine.dropFirst(systemFileMarker.count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                continue
+            }
+
+            switch currentSection {
+            case .user:
+                userLines.append(rawLine)
+                if let entry = parseUserLine(rawLine.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    entries.append(entry)
+                }
+            case .system:
+                guard let currentSystemFile,
+                      let entry = parseSystemCronLine(
+                        rawLine.trimmingCharacters(in: .whitespacesAndNewlines),
+                        sourcePath: currentSystemFile
+                      )
+                else { continue }
+                entries.append(entry)
+            }
+        }
+
+        return (entries, userLines.joined(separator: "\n").trimmingCharacters(in: .newlines))
     }
 
     static func makeEntryLine(schedule: String, command: String) throws -> String {
@@ -4260,7 +4329,7 @@ final class CronManager: @unchecked Sendable {
         }
     }
 
-    private static func parseLine(_ line: String) -> CronEntry? {
+    private static func parseUserLine(_ line: String) -> CronEntry? {
         let isDisabled = line.hasPrefix(disabledPrefix)
         let activeLine = isDisabled ? String(line.dropFirst(disabledPrefix.count)) : line
         guard !activeLine.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("#") else { return nil }
@@ -4271,8 +4340,30 @@ final class CronManager: @unchecked Sendable {
             schedule: schedule,
             command: parts[5],
             isEnabled: !isDisabled,
-            originalLine: line
+            originalLine: line,
+            sourcePath: nil,
+            runAsUser: nil
         )
+    }
+
+    private static func parseSystemCronLine(_ line: String, sourcePath: String) -> CronEntry? {
+        guard !line.isEmpty, !line.hasPrefix("#") else { return nil }
+        let parts = line.split(maxSplits: 6, whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard parts.count == 7 else { return nil }
+        let schedule = parts.prefix(5).joined(separator: " ")
+        return CronEntry(
+            schedule: schedule,
+            command: parts[6],
+            isEnabled: true,
+            originalLine: line,
+            sourcePath: sourcePath,
+            runAsUser: parts[5]
+        )
+    }
+
+    private enum CronSection {
+        case user
+        case system
     }
 
     private static func normalizedLines(_ text: String) -> [String] {
