@@ -11,6 +11,7 @@ final class AppState: ObservableObject {
 
     @Published var servers: [ServerProfile] = []
     @Published var cloudInstanceLinks: [CloudInstanceLink] = []
+    @Published var cloudProviderAccounts: [CloudProviderAccount] = []
     @Published var selectedServerId: UUID?
     @Published var connectionStates: [UUID: SSHConnectionState] = [:]
     @Published var startupError: String?
@@ -62,6 +63,7 @@ final class AppState: ObservableObject {
         do {
             servers = try repository.fetchServers()
             cloudInstanceLinks = try repository.fetchCloudInstanceLinks()
+            cloudProviderAccounts = try repository.fetchCloudProviderAccounts()
             if let selectedServerId, !servers.contains(where: { $0.id == selectedServerId }) {
                 self.selectedServerId = nil
             }

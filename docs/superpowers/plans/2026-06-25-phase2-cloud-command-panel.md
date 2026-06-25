@@ -147,7 +147,7 @@ CREATE TABLE operation_logs (
 - [x] 支持云实例创建 SSH profile。
 - [x] 支持已有 SSH profile 关联云实例。
 - [x] 解除关联时不删除 SSH profile，除非用户明确删除服务器。
-- [ ] 接入云账号设置和实例导入 UI。
+- [x] 接入云账号设置和实例导入 UI 基础版。
 - [ ] 使用真实腾讯云只读账号完成手动验收。
 
 ### Task 6：简化命令面板

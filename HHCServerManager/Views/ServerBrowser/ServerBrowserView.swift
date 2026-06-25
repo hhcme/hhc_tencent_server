@@ -4,6 +4,7 @@ struct ServerBrowserView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = ServerBrowserViewModel()
     @State private var showingAddServer = false
+    @State private var showingCloudImport = false
     @State private var serverPendingEdit: ServerProfile?
     @State private var serverPendingDeletion: ServerProfile?
 
@@ -31,6 +32,13 @@ struct ServerBrowserView: View {
         .sheet(isPresented: $showingAddServer) {
             AddServerSheet { profile in
                 appState.reloadServers()
+                viewModel.selectedServerId = profile.id
+            }
+        }
+        .sheet(isPresented: $showingCloudImport) {
+            CloudImportSheet { profile in
+                appState.reloadServers()
+                viewModel.sourceFilter = .cloud
                 viewModel.selectedServerId = profile.id
             }
         }
@@ -63,6 +71,12 @@ struct ServerBrowserView: View {
                 .frame(maxWidth: 320)
 
             Spacer()
+
+            Button {
+                showingCloudImport = true
+            } label: {
+                Label("Cloud", systemImage: "cloud")
+            }
 
             Button {
                 showingAddServer = true
@@ -143,6 +157,210 @@ struct ServerBrowserView: View {
                 }
             }
         )
+    }
+}
+
+private struct CloudImportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var viewModel = CloudImportViewModel()
+
+    let onImported: (ServerProfile) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Cloud Instances")
+                .font(.title2.weight(.semibold))
+                .padding([.horizontal, .top], 22)
+
+            HSplitView {
+                Form {
+                    Section("Tencent Cloud Account") {
+                        Picker("Account", selection: $viewModel.selectedAccountId) {
+                            Text("Select an account").tag(Optional<UUID>.none)
+                            ForEach(appState.cloudProviderAccounts) { account in
+                                Text(account.displayName).tag(Optional(account.id))
+                            }
+                        }
+
+                        TextField("Display Name", text: $viewModel.accountDisplayName)
+                        TextField("SecretId", text: $viewModel.secretId)
+                        SecureField("SecretKey", text: $viewModel.secretKey)
+
+                        HStack {
+                            Button {
+                                Task {
+                                    await viewModel.addTencentAccount(appState: appState)
+                                }
+                            } label: {
+                                Label("Add & Verify", systemImage: "checkmark.shield")
+                            }
+                            .disabled(!viewModel.canAddAccount)
+
+                            Button {
+                                Task {
+                                    await viewModel.loadRegions(appState: appState)
+                                }
+                            } label: {
+                                Label("Load Regions", systemImage: "arrow.clockwise")
+                            }
+                            .disabled(viewModel.selectedAccountId == nil || viewModel.isWorking)
+                        }
+                    }
+
+                    Section("Sync") {
+                        Picker("Region", selection: $viewModel.selectedRegionId) {
+                            Text("Select a region").tag("")
+                            ForEach(viewModel.regions) { region in
+                                Text(region.displayName).tag(region.id)
+                            }
+                        }
+
+                        Button {
+                            Task {
+                                await viewModel.syncInstances(appState: appState)
+                            }
+                        } label: {
+                            Label("Sync Instances", systemImage: "icloud.and.arrow.down")
+                        }
+                        .disabled(!viewModel.canSync)
+                    }
+
+                    Section("Import SSH Profile") {
+                        TextField("Username", text: $viewModel.importUsername)
+
+                        Picker("Auth Type", selection: $viewModel.authType) {
+                            ForEach(SSHAuthType.allCases) { authType in
+                                Text(authType.displayName).tag(authType)
+                            }
+                        }
+
+                        if viewModel.authType == .password {
+                            SecureField("Password", text: $viewModel.password)
+                        } else {
+                            HStack {
+                                Text(viewModel.privateKeyFileName.isEmpty ? "No private key selected" : viewModel.privateKeyFileName)
+                                    .foregroundStyle(viewModel.privateKeyFileName.isEmpty ? .secondary : .primary)
+                                Spacer()
+                                Button {
+                                    viewModel.choosePrivateKey()
+                                } label: {
+                                    Label("Choose", systemImage: "key")
+                                }
+                            }
+                            SecureField("Passphrase", text: $viewModel.passphrase)
+                        }
+
+                        Button {
+                            importSelected()
+                        } label: {
+                            Label("Import as Server", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!viewModel.canImport)
+                    }
+                }
+                .formStyle(.grouped)
+                .frame(minWidth: 360, idealWidth: 430)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    if viewModel.instances.isEmpty {
+                        ContentUnavailableView(
+                            "No Instances",
+                            systemImage: "cloud",
+                            description: Text("Add an account, load regions, then sync CVM instances.")
+                        )
+                    } else {
+                        List(viewModel.instances, selection: $viewModel.selectedInstanceId) { instance in
+                            CloudInstanceRow(link: instance)
+                                .tag(instance.id)
+                        }
+                        .listStyle(.inset)
+                    }
+                }
+                .frame(minWidth: 360, idealWidth: 460)
+            }
+            .padding(.horizontal, 12)
+
+            Divider()
+
+            HStack {
+                if viewModel.isWorking {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                if let statusMessage = viewModel.statusMessage {
+                    Text(statusMessage)
+                        .foregroundStyle(.secondary)
+                }
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button("Close") {
+                    dismiss()
+                }
+            }
+            .padding(16)
+        }
+        .frame(width: 900, height: 660)
+        .onAppear {
+            appState.reloadServers()
+            viewModel.selectDefaultAccount(from: appState.cloudProviderAccounts)
+        }
+        .onChange(of: viewModel.selectedAccountId) {
+            Task {
+                await viewModel.loadRegions(appState: appState)
+            }
+        }
+    }
+
+    private func importSelected() {
+        do {
+            let profile = try viewModel.importSelectedInstance(appState: appState)
+            onImported(profile)
+            dismiss()
+        } catch {
+            viewModel.errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct CloudInstanceRow: View {
+    let link: CloudInstanceLink
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(link.displayName ?? link.instanceId)
+                    .font(.headline)
+                Spacer()
+                if let status = link.status {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text(link.publicIp ?? link.privateIp ?? "No IP address")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Label(link.regionId, systemImage: "mappin.and.ellipse")
+                if let instanceType = link.instanceType {
+                    Label(instanceType, systemImage: "cpu")
+                }
+                if link.serverId != nil {
+                    Label("Linked", systemImage: "link")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 5)
     }
 }
 

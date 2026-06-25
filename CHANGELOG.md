@@ -37,6 +37,7 @@ All notable changes to this project will be documented in this file.
 - Added the cloud provider adapter protocol, provider registry, normalized cloud errors, and timeout wrapper.
 - Added Tencent Cloud read-only adapter foundations with TC3 signing, Region queries, CVM instance queries, pagination, and fixture-backed tests.
 - Added cloud instance sync/import service foundations for upsert, SSH profile creation, existing profile linking, unlinking, and server-list source filtering.
+- Added a macOS cloud import sheet for Tencent Cloud account verification, region loading, CVM syncing, instance selection, and SSH profile import.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -69,3 +70,4 @@ All notable changes to this project will be documented in this file.
 - 添加云厂商 adapter 协议、provider registry、统一云错误和超时包装。
 - 添加腾讯云只读 adapter 基础，包含 TC3 签名、地域查询、CVM 实例查询、分页和 fixture 测试。
 - 添加云实例同步/导入服务基础，支持 upsert、创建 SSH profile、关联已有 profile、解除关联和服务器列表来源筛选。
+- 添加 macOS 云导入 sheet，支持腾讯云账号验证、地域加载、CVM 同步、实例选择和 SSH profile 导入。

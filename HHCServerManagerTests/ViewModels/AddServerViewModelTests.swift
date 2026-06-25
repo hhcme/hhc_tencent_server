@@ -57,6 +57,48 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.privateKeyFileName, "Existing private key")
     }
 
+    func testCloudImportViewModelRequiresVerifiedAccountRegionInstanceAndCredential() {
+        let viewModel = CloudImportViewModel()
+
+        XCTAssertFalse(viewModel.canAddAccount)
+        viewModel.accountDisplayName = "Tencent"
+        viewModel.secretId = "sid"
+        viewModel.secretKey = "skey"
+        XCTAssertTrue(viewModel.canAddAccount)
+        XCTAssertFalse(viewModel.canSync)
+        XCTAssertFalse(viewModel.canImport)
+
+        viewModel.selectedAccountId = UUID()
+        viewModel.selectedRegionId = "ap-guangzhou"
+        XCTAssertTrue(viewModel.canSync)
+
+        let accountId = UUID()
+        let link = CloudInstanceLink(
+            id: UUID(),
+            serverId: nil,
+            accountId: accountId,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "prod",
+            publicIp: "203.0.113.1",
+            privateIp: nil,
+            status: "RUNNING",
+            instanceType: "S5.SMALL1",
+            zoneId: nil,
+            vpcId: nil,
+            rawJSON: nil,
+            lastSyncedAt: Date()
+        )
+        viewModel.instances = [link]
+        viewModel.selectedInstanceId = link.id
+        XCTAssertFalse(viewModel.canImport)
+
+        viewModel.authType = .password
+        viewModel.password = "secret"
+        XCTAssertTrue(viewModel.canImport)
+    }
+
     private func makeProfile(authType: SSHAuthType) -> ServerProfile {
         ServerProfile(
             id: UUID(),
