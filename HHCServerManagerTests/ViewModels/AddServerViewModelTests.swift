@@ -179,6 +179,54 @@ final class AddServerViewModelTests: XCTestCase {
         )
     }
 
+    func testCloudResourceCenterRuntimePermissionFailureDowngradesCapability() {
+        let viewModel = CloudResourceCenterViewModel()
+        let registry = CloudProviderRegistry(adapters: [
+            MockResourceCenterCloudAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .snapshotActions]
+            ),
+        ])
+        viewModel.refreshCapabilityMatrix(registry: registry)
+
+        XCTAssertTrue(viewModel.supportsRuntimeCapability(.snapshotActions, providerId: .tencentCloud))
+
+        let downgraded = viewModel.recordRuntimeCapabilityFailure(
+            .snapshotActions,
+            providerId: .tencentCloud,
+            error: CloudProviderError.permissionDenied("UnauthorizedOperation: missing snapshot write policy")
+        )
+
+        XCTAssertTrue(downgraded)
+        let status = viewModel.capabilityStatus(providerId: .tencentCloud, capability: .snapshotActions)
+        XCTAssertEqual(status?.isSupported, true)
+        XCTAssertEqual(status?.isRuntimeDisabled, true)
+        XCTAssertEqual(status?.isEffective, false)
+        XCTAssertTrue(status?.runtimeDisabledReason?.contains("UnauthorizedOperation") == true)
+        XCTAssertFalse(viewModel.supportsRuntimeCapability(.snapshotActions, providerId: .tencentCloud))
+    }
+
+    func testCloudResourceCenterNonPermissionFailureDoesNotDowngradeCapability() {
+        let viewModel = CloudResourceCenterViewModel()
+        let registry = CloudProviderRegistry(adapters: [
+            MockResourceCenterCloudAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .cloudDisks]
+            ),
+        ])
+        viewModel.refreshCapabilityMatrix(registry: registry)
+
+        let downgraded = viewModel.recordRuntimeCapabilityFailure(
+            .cloudDisks,
+            providerId: .tencentCloud,
+            error: CloudProviderError.providerFailure("Cloud API returned malformed disk payload")
+        )
+
+        XCTAssertFalse(downgraded)
+        XCTAssertNil(viewModel.capabilityStatus(providerId: .tencentCloud, capability: .cloudDisks)?.runtimeDisabledReason)
+        XCTAssertTrue(viewModel.supportsRuntimeCapability(.cloudDisks, providerId: .tencentCloud))
+    }
+
     private func makeProfile(authType: SSHAuthType) -> ServerProfile {
         ServerProfile(
             id: UUID(),

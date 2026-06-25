@@ -278,6 +278,7 @@ final class CloudResourceCenterViewModel: ObservableObject {
     @Published var isWorking = false
     @Published var statusMessage: String?
     @Published var errorMessage: String?
+    private var runtimeDisabledCapabilities: [CloudProviderID: [CloudCapability: String]] = [:]
 
     var selectedResource: CloudUnifiedResource? {
         guard let selectedResourceId else { return nil }
@@ -308,7 +309,28 @@ final class CloudResourceCenterViewModel: ObservableObject {
     }
 
     func refreshCapabilityMatrix(registry: CloudProviderRegistry) {
-        capabilityRows = ProviderCapabilityMatrixBuilder.build(registry: registry).rows
+        capabilityRows = ProviderCapabilityMatrixBuilder.build(registry: registry).rows.map { row in
+            var downgraded = row
+            downgraded.runtimeDisabledReason = runtimeDisabledCapabilities[row.providerId]?[row.capability]
+            return downgraded
+        }
+    }
+
+    func capabilityStatus(providerId: CloudProviderID, capability: CloudCapability) -> ProviderCapabilityStatus? {
+        capabilityRows.first { $0.providerId == providerId && $0.capability == capability }
+    }
+
+    func supportsRuntimeCapability(_ capability: CloudCapability, providerId: CloudProviderID) -> Bool {
+        capabilityStatus(providerId: providerId, capability: capability)?.isEffective == true
+    }
+
+    @discardableResult
+    func recordRuntimeCapabilityFailure(
+        _ capability: CloudCapability,
+        providerId: CloudProviderID,
+        error: Error
+    ) -> Bool {
+        downgradeRuntimeCapabilityIfNeeded(capability, providerId: providerId, error: error)
     }
 
     func refreshLocalResources(appState: AppState) {
@@ -352,13 +374,13 @@ final class CloudResourceCenterViewModel: ObservableObject {
         guard let account = selectedAccount(from: appState.cloudProviderAccounts) else { return }
         await run("Syncing cloud resources...") {
             _ = try await appState.cloudInstanceSyncService.syncInstances(account: account, regionId: selectedRegionId)
-            if appState.cloudProviderRegistry.supports(.cloudDisks, providerId: account.providerId) {
+            try await syncOptionalCapability(.cloudDisks, account: account, appState: appState) {
                 _ = try await appState.cloudInstanceSyncService.syncDisks(account: account, regionId: selectedRegionId)
             }
-            if appState.cloudProviderRegistry.supports(.cloudSnapshots, providerId: account.providerId) {
+            try await syncOptionalCapability(.cloudSnapshots, account: account, appState: appState) {
                 _ = try await appState.cloudInstanceSyncService.syncSnapshots(account: account, regionId: selectedRegionId)
             }
-            if appState.cloudProviderRegistry.supports(.cloudBilling, providerId: account.providerId) {
+            try await syncOptionalCapability(.cloudBilling, account: account, appState: appState) {
                 _ = try await appState.cloudInstanceSyncService.syncBillingStates(account: account, regionId: selectedRegionId)
             }
             appState.reloadServers()
@@ -372,12 +394,14 @@ final class CloudResourceCenterViewModel: ObservableObject {
               let regionId = resource.regionId else { return }
         let snapshotName = selectedSnapshotName
         await run("Creating snapshot...") {
-            let snapshot = try await appState.cloudInstanceSyncService.createSnapshot(
-                account: account,
-                regionId: regionId,
-                diskId: resource.resourceId,
-                snapshotName: snapshotName
-            )
+            let snapshot = try await runCapabilityAction(.snapshotActions, providerId: account.providerId) {
+                try await appState.cloudInstanceSyncService.createSnapshot(
+                    account: account,
+                    regionId: regionId,
+                    diskId: resource.resourceId,
+                    snapshotName: snapshotName
+                )
+            }
             refreshLocalResources(appState: appState)
             selectedResourceId = "snapshot:\(snapshot.accountId.uuidString):\(snapshot.regionId):\(snapshot.snapshotId)"
             statusMessage = "Snapshot \(snapshot.snapshotId) is being created."
@@ -388,12 +412,14 @@ final class CloudResourceCenterViewModel: ObservableObject {
         guard let account = account(for: resource, from: appState.cloudProviderAccounts),
               let regionId = resource.regionId else { return }
         await run("Deleting snapshot...") {
-            try await appState.cloudInstanceSyncService.deleteSnapshot(
-                account: account,
-                regionId: regionId,
-                snapshotId: resource.resourceId,
-                currentStatus: resource.status
-            )
+            try await runCapabilityAction(.snapshotActions, providerId: account.providerId) {
+                try await appState.cloudInstanceSyncService.deleteSnapshot(
+                    account: account,
+                    regionId: regionId,
+                    snapshotId: resource.resourceId,
+                    currentStatus: resource.status
+                )
+            }
             refreshLocalResources(appState: appState)
             statusMessage = "Snapshot \(resource.resourceId) deleted."
         }
@@ -403,13 +429,15 @@ final class CloudResourceCenterViewModel: ObservableObject {
         guard let account = account(for: resource, from: appState.cloudProviderAccounts),
               let regionId = resource.regionId else { return }
         await run("Attaching disk...") {
-            try await appState.cloudInstanceSyncService.attachDisk(
-                account: account,
-                regionId: regionId,
-                diskId: resource.resourceId,
-                instanceId: instanceId,
-                currentStatus: resource.status
-            )
+            try await runCapabilityAction(.diskAttachmentActions, providerId: account.providerId) {
+                try await appState.cloudInstanceSyncService.attachDisk(
+                    account: account,
+                    regionId: regionId,
+                    diskId: resource.resourceId,
+                    instanceId: instanceId,
+                    currentStatus: resource.status
+                )
+            }
             refreshLocalResources(appState: appState)
             selectedResourceId = resource.id
             statusMessage = "Disk \(resource.resourceId) is attaching to \(instanceId)."
@@ -420,13 +448,15 @@ final class CloudResourceCenterViewModel: ObservableObject {
         guard let account = account(for: resource, from: appState.cloudProviderAccounts),
               let regionId = resource.regionId else { return }
         await run("Detaching disk...") {
-            try await appState.cloudInstanceSyncService.detachDisk(
-                account: account,
-                regionId: regionId,
-                diskId: resource.resourceId,
-                currentInstanceId: resource.primaryAddress,
-                currentStatus: resource.status
-            )
+            try await runCapabilityAction(.diskAttachmentActions, providerId: account.providerId) {
+                try await appState.cloudInstanceSyncService.detachDisk(
+                    account: account,
+                    regionId: regionId,
+                    diskId: resource.resourceId,
+                    currentInstanceId: resource.primaryAddress,
+                    currentStatus: resource.status
+                )
+            }
             refreshLocalResources(appState: appState)
             selectedResourceId = resource.id
             statusMessage = "Disk \(resource.resourceId) is detaching."
@@ -441,28 +471,30 @@ final class CloudResourceCenterViewModel: ObservableObject {
         guard let account = account(for: resource, from: appState.cloudProviderAccounts),
               let regionId = resource.regionId else { return }
         await run(action.progressTitle) {
-            switch action {
-            case .start:
-                try await appState.cloudInstanceSyncService.startInstance(
-                    account: account,
-                    regionId: regionId,
-                    instanceId: resource.resourceId,
-                    currentStatus: resource.status
-                )
-            case .stop:
-                try await appState.cloudInstanceSyncService.stopInstance(
-                    account: account,
-                    regionId: regionId,
-                    instanceId: resource.resourceId,
-                    currentStatus: resource.status
-                )
-            case .reboot:
-                try await appState.cloudInstanceSyncService.rebootInstance(
-                    account: account,
-                    regionId: regionId,
-                    instanceId: resource.resourceId,
-                    currentStatus: resource.status
-                )
+            try await runCapabilityAction(.powerActions, providerId: account.providerId) {
+                switch action {
+                case .start:
+                    try await appState.cloudInstanceSyncService.startInstance(
+                        account: account,
+                        regionId: regionId,
+                        instanceId: resource.resourceId,
+                        currentStatus: resource.status
+                    )
+                case .stop:
+                    try await appState.cloudInstanceSyncService.stopInstance(
+                        account: account,
+                        regionId: regionId,
+                        instanceId: resource.resourceId,
+                        currentStatus: resource.status
+                    )
+                case .reboot:
+                    try await appState.cloudInstanceSyncService.rebootInstance(
+                        account: account,
+                        regionId: regionId,
+                        instanceId: resource.resourceId,
+                        currentStatus: resource.status
+                    )
+                }
             }
             refreshLocalResources(appState: appState)
             selectedResourceId = resource.id
@@ -496,6 +528,81 @@ final class CloudResourceCenterViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             statusMessage = nil
+        }
+    }
+
+    private func syncOptionalCapability(
+        _ capability: CloudCapability,
+        account: CloudProviderAccount,
+        appState: AppState,
+        operation: () async throws -> Void
+    ) async throws {
+        guard supportsRuntimeCapability(capability, providerId: account.providerId) else { return }
+        do {
+            try await operation()
+        } catch {
+            if downgradeRuntimeCapabilityIfNeeded(capability, providerId: account.providerId, error: error) {
+                refreshCapabilityMatrix(registry: appState.cloudProviderRegistry)
+                return
+            }
+            throw error
+        }
+    }
+
+    private func runCapabilityAction<T>(
+        _ capability: CloudCapability,
+        providerId: CloudProviderID,
+        operation: () async throws -> T
+    ) async throws -> T {
+        do {
+            return try await operation()
+        } catch {
+            if downgradeRuntimeCapabilityIfNeeded(capability, providerId: providerId, error: error) {
+                throw CloudProviderError.permissionDenied(runtimeDisabledCapabilities[providerId]?[capability] ?? error.localizedDescription)
+            }
+            throw error
+        }
+    }
+
+    @discardableResult
+    private func downgradeRuntimeCapabilityIfNeeded(
+        _ capability: CloudCapability,
+        providerId: CloudProviderID,
+        error: Error
+    ) -> Bool {
+        guard let reason = runtimeDowngradeReason(for: error) else { return false }
+        var providerReasons = runtimeDisabledCapabilities[providerId, default: [:]]
+        providerReasons[capability] = reason
+        runtimeDisabledCapabilities[providerId] = providerReasons
+        capabilityRows = capabilityRows.map { row in
+            guard row.providerId == providerId && row.capability == capability else { return row }
+            var downgraded = row
+            downgraded.runtimeDisabledReason = reason
+            return downgraded
+        }
+        statusMessage = "\(providerId.displayName) \(capability.displayName) was disabled for this session: \(reason)"
+        return true
+    }
+
+    private func runtimeDowngradeReason(for error: Error) -> String? {
+        guard let cloudError = error as? CloudProviderError else { return nil }
+        switch cloudError {
+        case let .permissionDenied(message):
+            return message
+        case let .unsupportedCapability(_, capability):
+            return "Adapter capability \(capability.displayName) is unavailable."
+        case let .providerFailure(message):
+            let normalized = message.lowercased()
+            guard normalized.contains("permission") ||
+                    normalized.contains("unauthorized") ||
+                    normalized.contains("forbidden") ||
+                    normalized.contains("denied") ||
+                    normalized.contains("authfailure") else {
+                return nil
+            }
+            return message
+        case .authenticationFailed, .adapterNotRegistered, .timeout, .rateLimited, .networkFailure, .cancelled:
+            return nil
         }
     }
 }

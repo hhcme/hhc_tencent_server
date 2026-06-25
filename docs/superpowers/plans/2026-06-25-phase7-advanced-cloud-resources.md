@@ -113,6 +113,7 @@ CREATE TABLE cloud_billing_states (
 - 已为阿里云 ECS 接入安全组单条规则新增/删除操作，云资源中心会按 `securityGroupActions` capability 展示操作；规则参数复用统一预览模型，`443` 这类单端口会自动转为 `443/443`，执行后刷新规则快照并复用远程变更审计。
 - 已为华为云 VPC 接入安全组单条规则创建/删除操作，云资源中心会按 `securityGroupActions` capability 展示操作；规则读取会保留 `providerRuleId`，删除时使用华为云 rule id 精确定位，执行后刷新规则快照并复用远程变更审计。
 - 已将云资源中心危险操作的确认预览改为 provider-aware：腾讯云、阿里云、华为云分别展示对应 API/action 形态，避免跨云操作确认时误显示腾讯云命令名。
+- 已为云资源中心加入运行时能力降级：当可选资源同步或危险云操作遇到权限不足、unauthorized/forbidden/denied 类 provider failure 或 adapter capability 缺失时，当前会话内对应 provider capability 会标记为 disabled，能力矩阵显示黄色警告，相关操作入口禁用并展示原因；非权限类 provider failure 不会误降级。
 
 ## 6. UI 范围
 
@@ -198,6 +199,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 三家云快照操作风险确认：确认弹窗包含 provider-aware API/action 预览。
 - [x] 三家云云盘挂载/卸载风险确认：确认弹窗包含 provider-aware API/action 预览。
 - [x] 三家云实例电源操作风险确认：确认弹窗包含 provider-aware API/action 预览。
+- [x] 权限不足时运行时自动降级 provider capability，并在能力矩阵和资源详情操作区展示原因。
 
 ### Task 7：测试
 
@@ -209,6 +211,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 腾讯云云盘挂载/卸载请求、状态缓存和审计测试。
 - [x] 腾讯云实例电源操作请求、状态缓存和审计测试。
 - [x] 三家云危险操作风险确认文案测试，覆盖阿里云快照/云盘和华为云实例电源操作的 provider-aware 预览。
+- [x] 云资源中心运行时权限降级 ViewModel 测试，覆盖 permission denied 降级和非权限错误不降级。
 
 ### Task 8：手动验收
 
@@ -223,7 +226,7 @@ CREATE TABLE cloud_billing_states (
 - [ ] 真实腾讯云账号创建快照需要二次确认并写日志。
 - [ ] 真实腾讯云账号云盘挂载/卸载需要二次确认并写日志。
 - [ ] 真实腾讯云账号实例启动/停止/重启需要二次确认并写日志。
-- [ ] 权限不足时能力自动降级。
+- [x] 权限不足时能力自动降级。当前已通过 ViewModel/contract 测试覆盖运行时降级，真实云账号权限档位验收仍需继续补齐。
 
 ## 8. 完成标志
 

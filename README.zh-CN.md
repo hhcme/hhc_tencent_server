@@ -4,7 +4,7 @@
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。它的目标是以 SSH 为核心管理多台 Linux 服务器，提供类似宝塔面板的桌面端体验，并在用户主动配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-当前仓库处于 macOS 活跃实现阶段，Windows 原生版 Phase 8 技术验证已经启动。macOS 应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/scp 排队批量传输文件并展示运行中字节进度、有限并发和中断重试、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力并完成隔离真实生命周期验证，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。Windows 目录已加入 WinUI 3 / Windows App SDK / .NET solution 骨架，并完成领域模型、SQLite、Credential Manager 边界、主机指纹信任、SSH adapter、MVVM、依赖注入和连接状态机基础测试；完整 WinUI/MSIX/runtime 验证仍需 Windows 主机。
+当前仓库处于 macOS 活跃实现阶段，Windows 原生版 Phase 8 技术验证已经启动。macOS 应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览和编辑远程文件、通过 rsync/scp 排队批量传输文件并展示运行中字节进度、有限并发和中断重试、展示 SSH 与已关联云实例的 Dashboard 指标、查看并修改部分云资源和安全资源，并支持按运行时权限失败自动降级云能力，管理 systemd/Cron/Nginx/Firewall/Environment 基础能力，运行 GitLab 风格部署流程，管理 Verdaccio npm 私有仓库基础能力并完成隔离真实生命周期验证，并在 SQLite 中持久化命令、云资源、部署、仓库和远程变更元数据。Windows 目录已加入 WinUI 3 / Windows App SDK / .NET solution 骨架，并完成领域模型、SQLite、Credential Manager 边界、主机指纹信任、SSH adapter、MVVM、依赖注入和连接状态机基础测试；完整 WinUI/MSIX/runtime 验证仍需 Windows 主机。
 
 ## 为什么做这个项目
 

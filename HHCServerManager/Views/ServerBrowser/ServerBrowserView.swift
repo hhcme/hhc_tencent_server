@@ -430,7 +430,7 @@ private struct CloudResourceCenterSheet: View {
 
     @ViewBuilder
     private func cloudInstancePowerActions(for resource: CloudUnifiedResource) -> some View {
-        let supportsPowerActions = appState.cloudProviderRegistry.supports(.powerActions, providerId: resource.providerId)
+        let supportsPowerActions = viewModel.supportsRuntimeCapability(.powerActions, providerId: resource.providerId)
         if supportsPowerActions && resource.kind == .instance {
             Divider()
                 .padding(.bottom, 12)
@@ -480,12 +480,15 @@ private struct CloudResourceCenterSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        } else if resource.kind == .instance,
+                  let reason = viewModel.capabilityStatus(providerId: resource.providerId, capability: .powerActions)?.runtimeDisabledReason {
+            runtimeCapabilityWarning(reason)
         }
     }
 
     @ViewBuilder
     private func cloudSnapshotActions(for resource: CloudUnifiedResource) -> some View {
-        let supportsSnapshots = appState.cloudProviderRegistry.supports(.snapshotActions, providerId: resource.providerId)
+        let supportsSnapshots = viewModel.supportsRuntimeCapability(.snapshotActions, providerId: resource.providerId)
         if supportsSnapshots && resource.kind == .disk {
             Divider()
                 .padding(.bottom, 12)
@@ -527,12 +530,15 @@ private struct CloudResourceCenterSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        } else if (resource.kind == .disk || resource.kind == .snapshot),
+                  let reason = viewModel.capabilityStatus(providerId: resource.providerId, capability: .snapshotActions)?.runtimeDisabledReason {
+            runtimeCapabilityWarning(reason)
         }
     }
 
     @ViewBuilder
     private func cloudDiskAttachmentActions(for resource: CloudUnifiedResource) -> some View {
-        let supportsDiskAttachment = appState.cloudProviderRegistry.supports(.diskAttachmentActions, providerId: resource.providerId)
+        let supportsDiskAttachment = viewModel.supportsRuntimeCapability(.diskAttachmentActions, providerId: resource.providerId)
         if supportsDiskAttachment && resource.kind == .disk {
             Divider()
                 .padding(.bottom, 12)
@@ -587,6 +593,22 @@ private struct CloudResourceCenterSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        } else if resource.kind == .disk,
+                  let reason = viewModel.capabilityStatus(providerId: resource.providerId, capability: .diskAttachmentActions)?.runtimeDisabledReason {
+            runtimeCapabilityWarning(reason)
+        }
+    }
+
+    private func runtimeCapabilityWarning(_ reason: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+                .padding(.bottom, 6)
+            Label("Capability disabled for this session", systemImage: "exclamationmark.triangle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+            Text(reason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -675,11 +697,12 @@ private struct CapabilityMatrixView: View {
                             .foregroundStyle(group.isRegistered ? Color.secondary : Color.red)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 86), spacing: 6)], alignment: .leading, spacing: 6) {
-                        ForEach(group.supportedRows) { row in
-                            Label(row.capability.displayName, systemImage: "checkmark.circle")
+                        ForEach(group.visibleRows) { row in
+                            Label(row.capability.displayName, systemImage: row.isRuntimeDisabled ? "exclamationmark.triangle" : "checkmark.circle")
                                 .font(.caption)
-                                .foregroundStyle(.green)
+                                .foregroundStyle(row.isRuntimeDisabled ? .orange : .green)
                                 .lineLimit(1)
+                                .help(row.runtimeDisabledReason ?? "Supported")
                         }
                     }
                 }
@@ -702,8 +725,8 @@ private struct CapabilityProviderGroup: Identifiable {
         rows.first?.isRegistered == true
     }
 
-    var supportedRows: [ProviderCapabilityStatus] {
-        rows.filter(\.isSupported)
+    var visibleRows: [ProviderCapabilityStatus] {
+        rows.filter { $0.isSupported || $0.isRuntimeDisabled }
     }
 }
 

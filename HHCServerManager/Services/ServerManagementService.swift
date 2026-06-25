@@ -5244,6 +5244,15 @@ struct ProviderCapabilityStatus: Identifiable, Equatable, Hashable, Sendable {
     var capability: CloudCapability
     var isRegistered: Bool
     var isSupported: Bool
+    var runtimeDisabledReason: String?
+
+    var isRuntimeDisabled: Bool {
+        runtimeDisabledReason != nil
+    }
+
+    var isEffective: Bool {
+        isRegistered && isSupported && !isRuntimeDisabled
+    }
 }
 
 struct ProviderCapabilityMatrix: Equatable, Hashable, Sendable {
@@ -5269,7 +5278,8 @@ enum ProviderCapabilityMatrixBuilder {
                     providerName: adapter?.displayName ?? providerId.displayName,
                     capability: capability,
                     isRegistered: adapter != nil,
-                    isSupported: supported.contains(capability)
+                    isSupported: supported.contains(capability),
+                    runtimeDisabledReason: nil
                 )
             }
         })
