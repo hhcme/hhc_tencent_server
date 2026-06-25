@@ -605,6 +605,32 @@ final class RemoteFileService: @unchecked Sendable {
         return RemoteTextSaveResult(path: path, backupPath: backupPath)
     }
 
+    func uploadFile(
+        localURL: URL,
+        toDirectoryPath directoryPath: String,
+        profile: ServerProfile,
+        transferClient: RemoteFileTransferClient
+    ) async throws -> RemoteFileTransferResult {
+        let fileName = Self.validatedFileName(localURL.lastPathComponent)
+        guard !fileName.isEmpty else {
+            throw SSHClientError.processFailed("Local file name cannot be empty, '.', '..', or contain '/'.")
+        }
+        let remotePath = Self.joinedPath(basePath: Self.normalizedDirectoryPath(directoryPath), name: fileName)
+        return try await transferClient.uploadFile(localURL: localURL, remotePath: remotePath, profile: profile)
+    }
+
+    func downloadFile(
+        entry: RemoteFileEntry,
+        to localURL: URL,
+        profile: ServerProfile,
+        transferClient: RemoteFileTransferClient
+    ) async throws -> RemoteFileTransferResult {
+        guard entry.kind == .file else {
+            throw SSHClientError.processFailed("Only regular files can be downloaded.")
+        }
+        return try await transferClient.downloadFile(remotePath: entry.path, localURL: localURL, profile: profile)
+    }
+
     static func parentPath(for path: String) -> String {
         let normalized = normalizedDirectoryPath(path)
         guard normalized != "/" else { return "/" }
@@ -667,7 +693,7 @@ final class RemoteFileService: @unchecked Sendable {
         }
     }
 
-    private static func joinedPath(basePath: String, name: String) -> String {
+    static func joinedPath(basePath: String, name: String) -> String {
         if basePath == "/" {
             return "/\(name)"
         }

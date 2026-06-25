@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ServerWorkspaceView: View {
@@ -390,6 +391,13 @@ struct ServerWorkspaceView: View {
 
                 HStack(spacing: 8) {
                     Button {
+                        chooseRemoteUploadFile()
+                    } label: {
+                        Label("Upload", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(isRemoteFileBusy)
+
+                    Button {
                         viewModel.loadRemoteParentDirectory(
                             profile: profile,
                             sshClient: appState.sshClient,
@@ -440,6 +448,11 @@ struct ServerWorkspaceView: View {
 
                 if viewModel.isLoadingRemoteText {
                     Label("Opening text file...", systemImage: "doc.text.magnifyingglass")
+                        .foregroundStyle(.secondary)
+                }
+
+                if viewModel.isTransferringRemoteFile {
+                    Label("Transferring file...", systemImage: "arrow.up.arrow.down")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -496,6 +509,12 @@ struct ServerWorkspaceView: View {
                         Label("Open as Text", systemImage: "doc.text")
                     }
                     .disabled(isRemoteFileBusy)
+                    Button {
+                        chooseRemoteDownloadDestination(for: entry)
+                    } label: {
+                        Label("Download", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(isRemoteFileBusy)
                 }
                 Button {
                     startRenaming(entry)
@@ -539,6 +558,39 @@ struct ServerWorkspaceView: View {
             sshClient: appState.sshClient,
             remoteFileService: appState.remoteFileService
         )
+    }
+
+    private func chooseRemoteUploadFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Upload"
+        if panel.runModal() == .OK, let url = panel.url {
+            viewModel.uploadRemoteFile(
+                localURL: url,
+                profile: profile,
+                sshClient: appState.sshClient,
+                transferClient: appState.sshClient,
+                remoteFileService: appState.remoteFileService
+            )
+        }
+    }
+
+    private func chooseRemoteDownloadDestination(for entry: RemoteFileEntry) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = entry.name
+        panel.canCreateDirectories = true
+        panel.prompt = "Download"
+        if panel.runModal() == .OK, let url = panel.url {
+            viewModel.downloadRemoteFile(
+                entry,
+                to: url,
+                profile: profile,
+                transferClient: appState.sshClient,
+                remoteFileService: appState.remoteFileService
+            )
+        }
     }
 
     private func openRemoteFileEntry(_ entry: RemoteFileEntry) {
@@ -704,7 +756,8 @@ struct ServerWorkspaceView: View {
         viewModel.isLoadingRemoteFiles ||
             viewModel.isMutatingRemoteFile ||
             viewModel.isLoadingRemoteText ||
-            viewModel.isSavingRemoteText
+            viewModel.isSavingRemoteText ||
+            viewModel.isTransferringRemoteFile
     }
 }
 

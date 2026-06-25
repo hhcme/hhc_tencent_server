@@ -1,6 +1,6 @@
 # Phase 3：Dashboard + 文件管理器实施计划
 
-> Phase 3 在真实 SSH 和命令面板基础上，提供服务器状态概览和文件管理。Dashboard 必须基于能力探测，文件管理器必须先完成 SFTP 技术验证再进入交付实现。
+> Phase 3 在真实 SSH 和命令面板基础上，提供服务器状态概览和文件管理。Dashboard 必须基于能力探测；文件管理器先用 OpenSSH 工具链完成可用 bootstrap，再逐步固化正式 SFTP 传输队列。
 
 **前置条件:** Phase 2 已完成，云实例关联和简化命令面板稳定。
 
@@ -27,7 +27,7 @@
 - 指标命令必须有超时；解析失败时展示“能力不可用”而不是崩溃。
 - 云监控指标必须标明来源：Cloud API。
 - SSH 指标必须标明来源：SSH。
-- SFTP 未验证前，文件管理器不得宣称可交付。
+- 完整传输队列未落地前，文件管理器只能宣称支持 bootstrap 单文件传输。
 - 文件编辑保存必须先写临时文件，再原子替换或备份原文件。
 
 ## 4. 数据模型
@@ -79,6 +79,7 @@ CREATE TABLE file_transfer_jobs (
 - `CloudMetricCollector`：复用 Phase 2 provider adapter 查询云监控。
 - `DashboardService`：聚合指标并产出 UI state。
 - `SFTPValidationHarness`：验证连接、目录列表、读写、权限、断线恢复。
+- `RemoteFileTransferClient`：隔离 OpenSSH/scp bootstrap 与后续 SwiftNIO SSH/libssh2 SFTP 实现。
 - `RemoteFileService`：文件列表、上传、下载、重命名、删除、编辑保存。
 - `FileTransferQueue`：串行或有限并发传输队列。
 
@@ -123,14 +124,18 @@ CREATE TABLE file_transfer_jobs (
 ### Task 5：SFTP 技术验证
 
 - [ ] 验证 SwiftNIO SSH 是否能稳定接入 SFTP subsystem。
-- [ ] 评估成熟 SFTP 库或 libssh2 wrapper。
-- [ ] 验证目录列表、文件读取、上传、下载、权限、断线恢复。
-- [ ] 形成技术验证结论并写入设计文档。
+- [x] 评估成熟 SFTP 库或 libssh2 wrapper，并暂定以 OpenSSH/scp bootstrap 先交付单文件传输。
+- [x] 验证目录列表、文件读取、上传、下载基础路径。
+- [ ] 验证权限、断线恢复和正式传输队列。
+- [x] 形成技术验证结论并写入设计文档。
+
+结论：当前 macOS bootstrap 继续使用系统 OpenSSH 工具链。目录浏览和文本读写走 `ssh` 命令，单文件上传/下载走 `scp`，已在真实 Linux 服务器上验证远端 `sftp` 命令存在以及 scp 上传/下载往返可用。SwiftNIO SSH/libssh2 的正式 SFTP 封装留到传输队列阶段替换，避免在核心流程尚未稳定时引入额外 native binding 风险。
 
 ### Task 6：文件管理器
 
 - [x] 实现路径导航和只读目录列表 bootstrap。
-- [ ] 实现上传、下载、取消和进度。
+- [x] 实现单文件上传、下载 bootstrap。
+- [ ] 实现取消、进度和传输队列。
 - [x] 实现重命名。
 - [x] 实现权限查看基础展示。
 - [x] 删除前二次确认，优先移动到远端应用回收目录。
@@ -146,6 +151,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 文件浏览 ViewModel 测试。
 - [x] 文件重命名和可恢复删除测试。
 - [x] 轻量文本读取、保存和备份测试。
+- [x] 单文件上传/下载服务和 ViewModel 测试。
 - [ ] 可选真实 SFTP 集成测试。
 
 ### Task 8：手动验收
@@ -153,10 +159,10 @@ CREATE TABLE file_transfer_jobs (
 - [ ] 连接一台 Linux 服务器后 Dashboard 能展示基础指标。
 - [ ] 无 `/proc` 或命令缺失时 UI 不崩溃。
 - [ ] 已关联腾讯云实例时能展示云侧指标。
-- [ ] 文件列表能浏览目录。
-- [ ] 小文件上传、下载、重命名成功。
+- [x] 文件列表能浏览目录。
+- [x] 小文件上传、下载、重命名成功。
 - [ ] 删除会二次确认并进入可恢复路径。
-- [ ] 文本文件编辑保存成功，失败时不破坏原文件。
+- [x] 文本文件编辑保存成功，失败时不破坏原文件。
 
 ## 8. 完成标志
 

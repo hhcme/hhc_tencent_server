@@ -29,7 +29,7 @@ enum SSHClientError: LocalizedError {
     }
 }
 
-final class OpenSSHClient: SSHClient, @unchecked Sendable {
+final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Sendable {
     private let repository: ServerRepository
     private let keychain: KeychainService
     private let hostKeyTrustStore: HostKeyTrustStore
@@ -56,11 +56,89 @@ final class OpenSSHClient: SSHClient, @unchecked Sendable {
         try rebuildKnownHostsFile()
         let knownHostsURL = try knownHostsURL()
 
+        let authContext = try makeAuthContext(profile: profile, knownHostsURL: knownHostsURL, portFlag: "-p")
+        defer {
+            authContext.cleanup()
+        }
+        var arguments = authContext.arguments
+        arguments.append("\(profile.username)@\(profile.host)")
+        arguments.append(command)
+
+        let start = Date()
+        let processResult = try await runProcess("/usr/bin/ssh", arguments: arguments, environment: authContext.environment)
+        return CommandResult(
+            command: command,
+            stdout: processResult.stdout,
+            stderr: processResult.stderr,
+            exitCode: processResult.exitCode,
+            duration: Date().timeIntervalSince(start)
+        )
+    }
+
+    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        try await transferFile(
+            source: localURL.path,
+            destination: "\(profile.username)@\(profile.host):\(Self.scpRemoteQuote(remotePath))",
+            remotePath: remotePath,
+            localURL: localURL,
+            profile: profile
+        )
+    }
+
+    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        try await transferFile(
+            source: "\(profile.username)@\(profile.host):\(Self.scpRemoteQuote(remotePath))",
+            destination: localURL.path,
+            remotePath: remotePath,
+            localURL: localURL,
+            profile: profile
+        )
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {
+        try hostKeyTrustStore.trust(hostKeyInfo, for: profile)
+        try rebuildKnownHostsFile()
+    }
+
+    private func transferFile(
+        source: String,
+        destination: String,
+        remotePath: String,
+        localURL: URL,
+        profile: ServerProfile
+    ) async throws -> RemoteFileTransferResult {
+        try await ensureHostKeyTrusted(profile: profile)
+        try rebuildKnownHostsFile()
+        let knownHostsURL = try knownHostsURL()
+        let authContext = try makeAuthContext(profile: profile, knownHostsURL: knownHostsURL, portFlag: "-P")
+        defer {
+            authContext.cleanup()
+        }
+
+        let start = Date()
+        var arguments = authContext.arguments
+        arguments.append(contentsOf: [source, destination])
+        let processResult = try await runProcess("/usr/bin/scp", arguments: arguments, environment: authContext.environment)
+        guard processResult.exitCode == 0 else {
+            let message = processResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw SSHClientError.processFailed(message.isEmpty ? "File transfer failed." : message)
+        }
+
+        let byteCount = (try? fileManager.attributesOfItem(atPath: localURL.path)[.size]) as? Int64
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: byteCount,
+            duration: Date().timeIntervalSince(start)
+        )
+    }
+
+    private func makeAuthContext(profile: ServerProfile, knownHostsURL: URL, portFlag: String) throws -> SSHProcessAuthContext {
         var temporaryKeyURL: URL?
         var temporaryAskpassURL: URL?
         var environment: [String: String] = [:]
         var arguments = [
-            "-p", "\(profile.port)",
+            portFlag, "\(profile.port)",
             "-o", "ConnectTimeout=10",
             "-o", "StrictHostKeyChecking=yes",
             "-o", "UserKnownHostsFile=\(knownHostsURL.path)",
@@ -92,32 +170,12 @@ final class OpenSSHClient: SSHClient, @unchecked Sendable {
                 "-o", "PubkeyAuthentication=no",
             ])
         }
-        defer {
-            if let temporaryKeyURL {
-                try? fileManager.removeItem(at: temporaryKeyURL)
-            }
-            if let temporaryAskpassURL {
-                try? fileManager.removeItem(at: temporaryAskpassURL)
-            }
-        }
-
-        let start = Date()
-        arguments.append("\(profile.username)@\(profile.host)")
-        arguments.append(command)
-
-        let processResult = try await runProcess("/usr/bin/ssh", arguments: arguments, environment: environment)
-        return CommandResult(
-            command: command,
-            stdout: processResult.stdout,
-            stderr: processResult.stderr,
-            exitCode: processResult.exitCode,
-            duration: Date().timeIntervalSince(start)
+        return SSHProcessAuthContext(
+            arguments: arguments,
+            environment: environment,
+            temporaryURLs: [temporaryKeyURL, temporaryAskpassURL].compactMap { $0 },
+            fileManager: fileManager
         )
-    }
-
-    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {
-        try hostKeyTrustStore.trust(hostKeyInfo, for: profile)
-        try rebuildKnownHostsFile()
     }
 
     private func ensureHostKeyTrusted(profile: ServerProfile) async throws {
@@ -203,6 +261,10 @@ final class OpenSSHClient: SSHClient, @unchecked Sendable {
         return url
     }
 
+    private static func scpRemoteQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
     private func appSupportURL() throws -> URL {
         let supportURL = try fileManager.url(
             for: .applicationSupportDirectory,
@@ -267,6 +329,19 @@ final class OpenSSHClient: SSHClient, @unchecked Sendable {
             }.value
         } onCancel: {
             processBox.terminate()
+        }
+    }
+}
+
+private struct SSHProcessAuthContext {
+    var arguments: [String]
+    var environment: [String: String]
+    var temporaryURLs: [URL]
+    var fileManager: FileManager
+
+    func cleanup() {
+        for url in temporaryURLs {
+            try? fileManager.removeItem(at: url)
         }
     }
 }

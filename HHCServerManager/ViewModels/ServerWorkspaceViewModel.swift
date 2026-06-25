@@ -18,6 +18,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var remoteTextDraft = ""
     @Published var isLoadingRemoteText = false
     @Published var isSavingRemoteText = false
+    @Published var isTransferringRemoteFile = false
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -285,6 +286,89 @@ final class ServerWorkspaceViewModel: ObservableObject {
         remoteTextDraft = ""
         isLoadingRemoteText = false
         isSavingRemoteText = false
+    }
+
+    func uploadRemoteFile(
+        localURL: URL,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService
+    ) {
+        isTransferringRemoteFile = true
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+
+        Task {
+            do {
+                let didAccess = localURL.startAccessingSecurityScopedResource()
+                defer {
+                    if didAccess {
+                        localURL.stopAccessingSecurityScopedResource()
+                    }
+                }
+                let result = try await remoteFileService.uploadFile(
+                    localURL: localURL,
+                    toDirectoryPath: self.remoteFilePath,
+                    profile: profile,
+                    transferClient: transferClient
+                )
+                let listing = try await remoteFileService.listDirectory(
+                    path: self.remoteFilePath,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.remoteDirectoryListing = listing
+                    self.remoteFilePath = listing.path
+                    self.remoteFileActionMessage = "Uploaded \(localURL.lastPathComponent) to \(result.remotePath)."
+                    self.isTransferringRemoteFile = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.isTransferringRemoteFile = false
+                }
+            }
+        }
+    }
+
+    func downloadRemoteFile(
+        _ entry: RemoteFileEntry,
+        to localURL: URL,
+        profile: ServerProfile,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService
+    ) {
+        isTransferringRemoteFile = true
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+
+        Task {
+            do {
+                let didAccess = localURL.startAccessingSecurityScopedResource()
+                defer {
+                    if didAccess {
+                        localURL.stopAccessingSecurityScopedResource()
+                    }
+                }
+                let result = try await remoteFileService.downloadFile(
+                    entry: entry,
+                    to: localURL,
+                    profile: profile,
+                    transferClient: transferClient
+                )
+                await MainActor.run {
+                    self.remoteFileActionMessage = "Downloaded \(entry.name) to \(result.localPath)."
+                    self.isTransferringRemoteFile = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.isTransferringRemoteFile = false
+                }
+            }
+        }
     }
 
     private func runSmokeTest(

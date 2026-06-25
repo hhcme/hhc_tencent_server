@@ -348,6 +348,40 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testRemoteFileServiceUploadsAndDownloadsThroughTransferClient() async throws {
+        let profile = makeServiceTestProfile()
+        let transferClient = RecordingTransferClient()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let localUploadURL = URL(fileURLWithPath: "/tmp/app.env")
+        let localDownloadURL = URL(fileURLWithPath: "/tmp/downloaded.env")
+        let entry = RemoteFileEntry(
+            name: "app.env",
+            path: "/var/www/app.env",
+            kind: .file,
+            size: 6,
+            modifiedAt: nil,
+            permissions: "-rw-r--r--"
+        )
+
+        let upload = try await service.uploadFile(
+            localURL: localUploadURL,
+            toDirectoryPath: "/var/www",
+            profile: profile,
+            transferClient: transferClient
+        )
+        let download = try await service.downloadFile(
+            entry: entry,
+            to: localDownloadURL,
+            profile: profile,
+            transferClient: transferClient
+        )
+
+        XCTAssertEqual(upload.remotePath, "/var/www/app.env")
+        XCTAssertEqual(download.localPath, "/tmp/downloaded.env")
+        XCTAssertEqual(transferClient.uploads.map(\.remotePath), ["/var/www/app.env"])
+        XCTAssertEqual(transferClient.downloads.map(\.remotePath), ["/var/www/app.env"])
+    }
+
     func testCloudInstanceSyncUpsertsInstancesAndPreservesServerLink() async throws {
         let adapter = MockCloudProviderAdapter(
             providerId: .tencentCloud,
@@ -686,6 +720,31 @@ private final class RecordingSSHClient: SSHClient, @unchecked Sendable {
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class RecordingTransferClient: RemoteFileTransferClient, @unchecked Sendable {
+    private(set) var uploads: [(localURL: URL, remotePath: String)] = []
+    private(set) var downloads: [(remotePath: String, localURL: URL)] = []
+
+    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        uploads.append((localURL, remotePath))
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: nil,
+            duration: 0
+        )
+    }
+
+    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        downloads.append((remotePath, localURL))
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: nil,
+            duration: 0
+        )
+    }
 }
 
 private final class MockTencentCloudTransport: TencentCloudHTTPTransport, @unchecked Sendable {

@@ -127,6 +127,13 @@ struct RemoteTextSaveResult: Equatable, Hashable, Sendable {
     var backupPath: String
 }
 
+struct RemoteFileTransferResult: Equatable, Hashable, Sendable {
+    var remotePath: String
+    var localPath: String
+    var byteCount: Int64?
+    var duration: TimeInterval
+}
+
 struct CommandHistoryEntry: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var serverId: UUID

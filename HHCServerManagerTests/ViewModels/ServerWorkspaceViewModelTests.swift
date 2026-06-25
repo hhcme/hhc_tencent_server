@@ -368,6 +368,47 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.remoteFileErrorMessage)
     }
 
+    func testRemoteFileUploadAndDownloadUpdateTransferStateAndMessages() async throws {
+        let profile = makeProfile()
+        let client = RemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let uploadURL = URL(fileURLWithPath: "/tmp/upload.env")
+        let downloadURL = URL(fileURLWithPath: "/tmp/download.env")
+
+        viewModel.loadRemoteFiles(
+            path: "/var/www",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["app.env"] }
+
+        viewModel.uploadRemoteFile(
+            localURL: uploadURL,
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["app.env", "upload.env"] }
+        XCTAssertEqual(client.uploads.map(\.remotePath), ["/var/www/upload.env"])
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Uploaded upload.env to /var/www/upload.env.")
+
+        let entry = try XCTUnwrap(viewModel.remoteDirectoryListing?.entries.first { $0.name == "app.env" })
+        viewModel.downloadRemoteFile(
+            entry,
+            to: downloadURL,
+            profile: profile,
+            transferClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteFileActionMessage == "Downloaded app.env to /tmp/download.env." }
+        XCTAssertEqual(client.downloads.map(\.remotePath), ["/var/www/app.env"])
+        XCTAssertFalse(viewModel.isTransferringRemoteFile)
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -632,6 +673,51 @@ private final class RemoteTextFileMockSSHClient: SSHClient, @unchecked Sendable 
             return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
         }
         return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class RemoteFileTransferMockSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Sendable {
+    private(set) var uploads: [(localURL: URL, remotePath: String)] = []
+    private(set) var downloads: [(remotePath: String, localURL: URL)] = []
+    private var remoteNames = ["app.env"]
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        if command.contains("find . -maxdepth 1") {
+            let stdout = remoteNames.map { name in
+                "\(name)\tf\t8\t1700000001.0\t-rw-r--r--"
+            }
+            .joined(separator: "\n")
+            return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        uploads.append((localURL, remotePath))
+        remoteNames.append(localURL.lastPathComponent)
+        remoteNames.sort()
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: 8,
+            duration: 0
+        )
+    }
+
+    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+        downloads.append((remotePath, localURL))
+        return RemoteFileTransferResult(
+            remotePath: remotePath,
+            localPath: localURL.path,
+            byteCount: 8,
+            duration: 0
+        )
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
