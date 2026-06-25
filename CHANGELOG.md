@@ -111,6 +111,7 @@ All notable changes to this project will be documented in this file.
 - Added limited Firewall rule add/delete actions with validation, risk confirmation, refreshed snapshots, and remote change audit logs.
 - Added Tencent Cloud security group single-rule add/remove actions with provider capability gating, risk confirmation, refreshed policy snapshots, RequestId capture, and remote change audit logs.
 - Added Alibaba Cloud security group single-rule add/remove actions for ingress and egress CIDR rules with provider capability gating, signed ECS API fixtures, RequestId capture, and the shared risk confirmation/audit flow.
+- Added Huawei Cloud security group single-rule create/delete actions with provider rule ID retention, signed VPC v3 API fixtures, and the shared risk confirmation/audit flow.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -220,3 +221,4 @@ All notable changes to this project will be documented in this file.
 - 添加受限防火墙规则新增/删除动作，包含输入校验、风险确认、规则快照刷新和远程变更审计日志。
 - 添加腾讯云安全组单条规则新增/删除动作，包含 provider capability 门禁、风险确认、规则快照刷新、RequestId 捕获和远程变更审计日志。
 - 添加阿里云安全组单条 ingress/egress CIDR 规则新增/删除动作，包含 provider capability 门禁、ECS 签名请求 fixture、RequestId 捕获和统一风险确认/审计流程。
+- 添加华为云安全组单条规则创建/删除动作，包含 provider rule id 保留、VPC v3 签名请求 fixture 和统一风险确认/审计流程。

@@ -170,6 +170,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         let existingRule = CloudSecurityGroupRule(
             direction: .ingress,
             policyIndex: 0,
+            providerRuleId: nil,
             protocolName: "TCP",
             port: "443",
             cidrBlock: "10.0.0.0/8",
@@ -2620,6 +2621,7 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
             CloudSecurityGroupRule(
                 direction: .ingress,
                 policyIndex: 0,
+                providerRuleId: nil,
                 protocolName: "TCP",
                 port: "22",
                 cidrBlock: "203.0.113.0/24",
@@ -2639,6 +2641,7 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
                 CloudSecurityGroupRule(
                     direction: .egress,
                     policyIndex: 0,
+                    providerRuleId: nil,
                     protocolName: "ALL",
                     port: "all",
                     cidrBlock: "0.0.0.0/0",

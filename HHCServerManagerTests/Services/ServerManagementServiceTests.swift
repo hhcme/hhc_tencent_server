@@ -4264,6 +4264,7 @@ final class ServerManagementServiceTests: XCTestCase {
             rule: CloudSecurityGroupRule(
                 direction: .egress,
                 policyIndex: 2,
+                providerRuleId: nil,
                 protocolName: "udp",
                 port: "53/53",
                 cidrBlock: "198.51.100.0/24",
@@ -4786,11 +4787,13 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.ingress[0].action, "allow")
         XCTAssertEqual(snapshot.ingress[0].description, "SSH")
         XCTAssertEqual(snapshot.ingress[0].policyIndex, 1)
+        XCTAssertEqual(snapshot.ingress[0].providerRuleId, "rule-ingress")
         XCTAssertEqual(snapshot.egress.count, 1)
         XCTAssertEqual(snapshot.egress[0].protocolName, "any")
         XCTAssertNil(snapshot.egress[0].cidrBlock)
         XCTAssertEqual(snapshot.egress[0].ipv6CidrBlock, "2001:db8::/64")
         XCTAssertEqual(snapshot.egress[0].referencedSecurityGroupId, "sg-peer")
+        XCTAssertEqual(snapshot.egress[0].providerRuleId, "rule-egress")
         XCTAssertEqual(snapshot.egress[0].modifiedTime, "2026-07-03T00:00:00Z")
 
         XCTAssertEqual(transport.requests.count, 2)
@@ -4805,6 +4808,110 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].queryValue("limit"), "100")
         XCTAssertEqual(transport.requests[1].queryValue("security_group_id"), "sg-hw-1")
         XCTAssertNil(transport.requests[1].queryValue("marker"))
+    }
+
+    func testHuaweiCloudAdapterAppliesSecurityGroupRuleChangesUsesSignedVPCAPI() async throws {
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockHuaweiCloudTransport(responses: [
+            """
+            {
+              "security_group_rule": {
+                "id": "rule-created",
+                "security_group_id": "sg-hw-1",
+                "direction": "ingress",
+                "ethertype": "IPv4",
+                "protocol": "tcp",
+                "port_range_min": 443,
+                "port_range_max": 443,
+                "remote_ip_prefix": "203.0.113.0/24",
+                "action": "allow",
+                "priority": 1
+              }
+            }
+            """,
+            "",
+        ])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            timeout: 1
+        )
+        let group = CloudSecurityGroup(
+            accountId: UUID(),
+            providerId: .huaweiCloud,
+            regionId: "ap-southeast-1|project-1",
+            securityGroupId: "sg-hw-1",
+            name: "web",
+            description: nil,
+            projectId: "project-1",
+            isDefault: nil,
+            createdTime: nil,
+            updatedTime: nil
+        )
+        let addPreview = CloudSecurityGroupRuleChangePreview.adding(
+            draft: CloudSecurityGroupRuleDraft(
+                direction: .ingress,
+                protocolName: "TCP",
+                port: "443",
+                cidrBlock: "203.0.113.0/24",
+                action: "ACCEPT",
+                description: "HTTPS"
+            ),
+            to: CloudSecurityGroupPolicySnapshot(group: group, version: nil, ingress: [], egress: [], capturedAt: capturedAt)
+        )
+        let removePreview = CloudSecurityGroupRuleChangePreview.removing(
+            rule: CloudSecurityGroupRule(
+                direction: .egress,
+                policyIndex: 2,
+                providerRuleId: "rule-egress",
+                protocolName: "udp",
+                port: "53/53",
+                cidrBlock: nil,
+                ipv6CidrBlock: "2001:db8::/64",
+                referencedSecurityGroupId: nil,
+                action: "deny",
+                description: "DNS deny",
+                modifiedTime: nil
+            ),
+            from: CloudSecurityGroupPolicySnapshot(group: group, version: nil, ingress: [], egress: [], capturedAt: capturedAt)
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        XCTAssertTrue(addPreview.commandPreview.hasPrefix("Huawei Cloud CreateSecurityGroupRule "))
+        let createdRuleId = try await adapter.applySecurityGroupRuleChange(
+            credential: credential,
+            preview: addPreview
+        )
+        let deletedRuleId = try await adapter.applySecurityGroupRuleChange(
+            credential: credential,
+            preview: removePreview
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.securityGroupActions))
+        XCTAssertEqual(createdRuleId, "rule-created")
+        XCTAssertEqual(deletedRuleId, "rule-egress")
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].httpMethod, "POST")
+        XCTAssertEqual(transport.requests[0].url?.host, "vpc.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[0].url?.path, "/v3/project-1/vpc/security-group-rules")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-Sdk-Date"), "20231114T221320Z")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("SDK-HMAC-SHA256 Access=HUAWEIAK") == true)
+        let body = try XCTUnwrap(transport.requests[0].jsonBody?["security_group_rule"] as? [String: Any])
+        XCTAssertEqual(body["security_group_id"] as? String, "sg-hw-1")
+        XCTAssertEqual(body["direction"] as? String, "ingress")
+        XCTAssertEqual(body["protocol"] as? String, "tcp")
+        XCTAssertEqual(body["ethertype"] as? String, "IPv4")
+        XCTAssertEqual(body["port_range_min"] as? Int, 443)
+        XCTAssertEqual(body["port_range_max"] as? Int, 443)
+        XCTAssertEqual(body["remote_ip_prefix"] as? String, "203.0.113.0/24")
+        XCTAssertEqual(body["action"] as? String, "allow")
+        XCTAssertEqual(body["priority"] as? Int, 1)
+        XCTAssertEqual(body["description"] as? String, "HTTPS")
+        XCTAssertEqual(transport.requests[1].httpMethod, "DELETE")
+        XCTAssertEqual(transport.requests[1].url?.host, "vpc.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[1].url?.path, "/v3/project-1/vpc/security-group-rules/rule-egress")
+        XCTAssertNil(transport.requests[1].httpBody)
     }
 
     private final class Harness {
@@ -4915,6 +5022,7 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
                 CloudSecurityGroupRule(
                     direction: .ingress,
                     policyIndex: 0,
+                    providerRuleId: nil,
                     protocolName: "TCP",
                     port: "22",
                     cidrBlock: "203.0.113.0/24",
@@ -4929,6 +5037,7 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
                 CloudSecurityGroupRule(
                     direction: .egress,
                     policyIndex: 0,
+                    providerRuleId: nil,
                     protocolName: "ALL",
                     port: "all",
                     cidrBlock: "0.0.0.0/0",

@@ -1253,6 +1253,7 @@ struct CloudSecurityGroupRule: Identifiable, Equatable, Hashable, Sendable {
         [
             direction.rawValue,
             policyIndex.map(String.init) ?? "unknown",
+            providerRuleId ?? "no-provider-rule-id",
             protocolName ?? "ALL",
             port ?? "all",
             cidrBlock ?? ipv6CidrBlock ?? referencedSecurityGroupId ?? "any",
@@ -1262,6 +1263,7 @@ struct CloudSecurityGroupRule: Identifiable, Equatable, Hashable, Sendable {
 
     var direction: CloudSecurityGroupRuleDirection
     var policyIndex: Int?
+    var providerRuleId: String?
     var protocolName: String?
     var port: String?
     var cidrBlock: String?
@@ -1308,6 +1310,7 @@ struct CloudSecurityGroupRuleDraft: Equatable, Hashable, Sendable {
         CloudSecurityGroupRule(
             direction: direction,
             policyIndex: nil,
+            providerRuleId: nil,
             protocolName: normalized(protocolName, fallback: "ALL"),
             port: normalized(port, fallback: "ALL"),
             cidrBlock: normalized(cidrBlock, fallback: "0.0.0.0/0"),
@@ -1354,6 +1357,10 @@ struct CloudSecurityGroupRuleChangePreview: Identifiable, Equatable, Hashable, S
             actionName = "RevokeSecurityGroup"
         case (.alibabaCloud, .remove, .egress):
             actionName = "RevokeSecurityGroupEgress"
+        case (.huaweiCloud, .add, _):
+            actionName = "CreateSecurityGroupRule"
+        case (.huaweiCloud, .remove, _):
+            actionName = "DeleteSecurityGroupRule"
         default:
             let operation = action == .add ? "Authorize" : "Revoke"
             let suffix = proposedRule.direction == .ingress ? "Ingress" : "Egress"

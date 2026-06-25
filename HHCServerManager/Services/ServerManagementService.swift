@@ -5946,6 +5946,7 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             CloudSecurityGroupRule(
                 direction: direction,
                 policyIndex: rule.policyIndex,
+                providerRuleId: nil,
                 protocolName: rule.protocolName,
                 port: rule.port,
                 cidrBlock: rule.cidrBlock,
@@ -6573,6 +6574,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             return CloudSecurityGroupRule(
                 direction: direction,
                 policyIndex: permission.priority,
+                providerRuleId: nil,
                 protocolName: permission.ipProtocol,
                 port: permission.portRange,
                 cidrBlock: direction == .ingress ? permission.sourceCidrIp : permission.destCidrIp,
@@ -6664,6 +6666,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudDisks,
         .cloudSnapshots,
         .securityGroups,
+        .securityGroupActions,
         .snapshotActions,
         .diskAttachmentActions,
         .powerActions,
@@ -6836,6 +6839,19 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             egress: Self.mapHuaweiSecurityGroupRules(rules, direction: .egress),
             capturedAt: capturedAt
         )
+    }
+
+    func applySecurityGroupRuleChange(
+        credential: CloudProviderCredential,
+        preview: CloudSecurityGroupRuleChangePreview
+    ) async throws -> String? {
+        switch preview.action {
+        case .add:
+            return try await createSecurityGroupRule(credential: credential, preview: preview)
+        case .remove:
+            try await deleteSecurityGroupRule(credential: credential, preview: preview)
+            return preview.proposedRule.providerRuleId
+        }
     }
 
     func fetchDisks(
@@ -7079,6 +7095,40 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         try await performInstanceAction(credential: credential, regionId: regionId, payload: payload)
     }
 
+    private func createSecurityGroupRule(
+        credential: CloudProviderCredential,
+        preview: CloudSecurityGroupRuleChangePreview
+    ) async throws -> String? {
+        let region = Self.decodeRegionId(preview.group.regionId)
+        let response: HuaweiCreateSecurityGroupRuleResponse = try await request(
+            credential: credential,
+            host: "vpc.\(region.regionName).myhuaweicloud.com",
+            path: "/v3/\(CloudSignature.percentEncode(region.projectId))/vpc/security-group-rules",
+            queryItems: [],
+            method: "POST",
+            body: try encoder.encode(Self.huaweiSecurityGroupRulePayload(preview))
+        )
+        return response.securityGroupRule?.id
+    }
+
+    private func deleteSecurityGroupRule(
+        credential: CloudProviderCredential,
+        preview: CloudSecurityGroupRuleChangePreview
+    ) async throws {
+        guard let ruleId = preview.proposedRule.providerRuleId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !ruleId.isEmpty else {
+            throw CloudProviderError.providerFailure("Huawei Cloud security group rule id is required for removal.")
+        }
+        let region = Self.decodeRegionId(preview.group.regionId)
+        try await requestWithoutResponse(
+            credential: credential,
+            host: "vpc.\(region.regionName).myhuaweicloud.com",
+            path: "/v3/\(CloudSignature.percentEncode(region.projectId))/vpc/security-group-rules/\(CloudSignature.percentEncode(ruleId))",
+            queryItems: [],
+            method: "DELETE"
+        )
+    }
+
     private func performInstanceAction<Payload: Encodable>(
         credential: CloudProviderCredential,
         regionId: String,
@@ -7252,6 +7302,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
                 return CloudSecurityGroupRule(
                     direction: direction,
                     policyIndex: rule.priority,
+                    providerRuleId: rule.id,
                     protocolName: rule.protocolName ?? rule.ethertype,
                     port: rule.portRangeText,
                     cidrBlock: isIPv6 ? nil : rule.remoteIpPrefix,
@@ -7262,6 +7313,60 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
                     modifiedTime: rule.updatedAt ?? rule.createdAt
                 )
             }
+    }
+
+    private static func huaweiSecurityGroupRulePayload(
+        _ preview: CloudSecurityGroupRuleChangePreview
+    ) -> HuaweiCreateSecurityGroupRulePayload {
+        let rule = preview.proposedRule
+        let portRange = huaweiPortRange(rule.port)
+        return HuaweiCreateSecurityGroupRulePayload(
+            securityGroupRule: HuaweiCreateSecurityGroupRulePayload.Rule(
+                securityGroupId: preview.group.securityGroupId,
+                direction: rule.direction.rawValue,
+                protocolName: huaweiProtocol(rule.protocolName),
+                ethertype: rule.ipv6CidrBlock == nil ? "IPv4" : "IPv6",
+                portRangeMin: portRange.min,
+                portRangeMax: portRange.max,
+                remoteIpPrefix: rule.ipv6CidrBlock ?? rule.cidrBlock,
+                remoteGroupId: rule.referencedSecurityGroupId,
+                action: huaweiAction(rule.action),
+                priority: rule.policyIndex ?? 1,
+                description: rule.description
+            )
+        )
+    }
+
+    private static func huaweiProtocol(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, trimmed.uppercased() != "ALL" else { return nil }
+        return trimmed.lowercased()
+    }
+
+    private static func huaweiAction(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        switch trimmed {
+        case "deny", "drop":
+            return "deny"
+        default:
+            return "allow"
+        }
+    }
+
+    private static func huaweiPortRange(_ value: String?) -> (min: Int?, max: Int?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, trimmed.uppercased() != "ALL", trimmed != "-1" else {
+            return (nil, nil)
+        }
+        let parts = trimmed.split(separator: "/", maxSplits: 1).compactMap { Int($0) }
+        switch parts.count {
+        case 1:
+            return (parts[0], parts[0])
+        case 2:
+            return (parts[0], parts[1])
+        default:
+            return (nil, nil)
+        }
     }
 
     private static func parseHuaweiDate(_ text: String) -> Date? {
@@ -7768,6 +7873,50 @@ private struct HuaweiServerRebootPayload: Encodable {
     struct Reboot: Encodable {
         var type: String
         var servers: [HuaweiServerActionServer]
+    }
+}
+
+private struct HuaweiCreateSecurityGroupRulePayload: Encodable {
+    var securityGroupRule: Rule
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroupRule = "security_group_rule"
+    }
+
+    struct Rule: Encodable {
+        var securityGroupId: String
+        var direction: String
+        var protocolName: String?
+        var ethertype: String
+        var portRangeMin: Int?
+        var portRangeMax: Int?
+        var remoteIpPrefix: String?
+        var remoteGroupId: String?
+        var action: String
+        var priority: Int
+        var description: String?
+
+        enum CodingKeys: String, CodingKey {
+            case securityGroupId = "security_group_id"
+            case direction
+            case protocolName = "protocol"
+            case ethertype
+            case portRangeMin = "port_range_min"
+            case portRangeMax = "port_range_max"
+            case remoteIpPrefix = "remote_ip_prefix"
+            case remoteGroupId = "remote_group_id"
+            case action
+            case priority
+            case description
+        }
+    }
+}
+
+private struct HuaweiCreateSecurityGroupRuleResponse: Decodable {
+    var securityGroupRule: HuaweiSecurityGroupRule?
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroupRule = "security_group_rule"
     }
 }
 
