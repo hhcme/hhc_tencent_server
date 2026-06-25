@@ -75,17 +75,27 @@ HHCServerManager/
 │   └── Monitor/
 │       └── ServerMonitor.swift   # 服务器状态采集
 ├── ViewModels/                   # 视图模型
-│   ├── ServerListViewModel.swift
-│   ├── DashboardViewModel.swift
+│   ├── ServerBrowserViewModel.swift
+│   ├── ServerWorkspaceViewModel.swift
+│   ├── ServerSwitcherViewModel.swift
 │   ├── TerminalViewModel.swift
 │   ├── FileManagerViewModel.swift
 │   ├── ServiceManagerViewModel.swift
 │   ├── DeployerViewModel.swift
 │   └── PackageManagerViewModel.swift
 ├── Views/                        # 视图层
-│   ├── Sidebar/
-│   │   ├── ServerListView.swift
-│   │   └── AddServerView.swift
+│   ├── ServerBrowser/
+│   │   ├── ServerBrowserView.swift
+│   │   ├── ServerRowView.swift
+│   │   └── ServerSummaryPanel.swift
+│   ├── ServerWorkspace/
+│   │   ├── ServerWorkspaceView.swift
+│   │   ├── ServerWorkspaceSidebar.swift
+│   │   ├── ServerOverviewView.swift
+│   │   └── ServerSwitcherPopover.swift
+│   ├── Sheets/
+│   │   ├── AddServerSheet.swift
+│   │   └── HostKeyTrustSheet.swift
 │   ├── Dashboard/
 │   │   ├── DashboardView.swift
 │   │   ├── GaugeCard.swift
@@ -117,27 +127,37 @@ HHCServerManager/
 
 ### 2.2 导航结构
 
+产品导航采用“两层模型”：
+
+1. **Server Browser（启动服务器列表）**：应用启动后首先进入服务器列表，支持分组、搜索、筛选、选中摘要、Open/Connect/Delete 等操作。
+2. **Server Workspace（单服务器工作台）**：点击 Open 后进入该服务器的专用工作台，工作台左侧是当前服务器的功能导航，顶部 toolbar 提供返回列表、服务器切换器和常用操作入口。
+
 ```
-┌─────────────────────────────────────────────────────┐
-│  HHC Server Manager                          ─  □  ✕ │
-├──────────┬──────────────────────────────────────────┤
-│          │                                          │
-│ 🖥 腾讯   │  ┌──────────────────────────────────┐   │
-│  Server-1│  │  📊 概览  │  📁 文件  │  ⚙ 配置  │   │
-│          │  │  🖥 终端  │  🚀 部署  │  📦 仓库  │   │
-│ 🖥 阿里   │  ├──────────────────────────────────┤   │
-│  Server-2│  │                                  │   │
-│          │  │          主内容区域                │   │
-│ ──────── │  │                                  │   │
-│ ＋ 添加   │  │                                  │   │
-│  服务器   │  │                                  │   │
-│          │  └──────────────────────────────────┘   │
-└──────────┴──────────────────────────────────────────┘
+启动页：
+┌──────────────────────────────────────────────────────┐
+│ Toolbar: Search / Add / Cloud / More                 │
+├───────────────┬──────────────────────────────────────┤
+│ Source List   │ Server table + selected summary      │
+│ All Servers   │ Open / Connect / Delete              │
+│ Groups        │                                      │
+│ Cloud/Manual  │                                      │
+└───────────────┴──────────────────────────────────────┘
+
+工作台：
+┌──────────────────────────────────────────────────────┐
+│ Toolbar: Servers / Current Server Switcher / Actions │
+├───────────────┬──────────────────────────────────────┤
+│ Server tools  │ Current server workspace             │
+│ Overview      │ Overview / Terminal / Files / ...    │
+│ Terminal      │                                      │
+│ Files         │                                      │
+└───────────────┴──────────────────────────────────────┘
 ```
 
-- **左侧边栏**：服务器列表，支持分组、搜索、右键菜单
-- **右侧内容区**：选中服务器后展示 6 个标签页（概览/终端/文件/配置/部署/仓库）
-- **多窗口**：支持同时打开多个服务器的管理窗口
+- **启动服务器列表**：面向多服务器浏览、搜索、分组和选择。
+- **单服务器工作台**：面向当前服务器操作和浏览。
+- **服务器切换器**：在工作台内切换当前服务器，不要求用户每次都返回启动列表。
+- **多窗口**：后续可以支持同时打开多个服务器工作台，但 Phase 1 不要求。
 
 ## 3. SSH 连接层
 
@@ -183,7 +203,7 @@ SSHConnection
 3. 建立 TCP 连接并安装 `NIOSSHHandler`（超时 10 秒）
 4. 通过 server authentication delegate 验证主机公钥指纹
 5. 首次连接时提示用户确认并持久化 host key；后续连接必须比对
-6. 认证成功后执行健康检查命令（如 `printf hhc-ok`）
+6. 认证成功后执行健康检查命令（`printf hhc-ssh-ok`）
 7. 连接成功 → 加入连接池
 8. 空闲检测：5 分钟无操作发送 keepalive 或执行轻量命令
 9. 断线检测 → 自动重连；仅自动重试幂等操作
@@ -194,7 +214,7 @@ SSHConnection
 |---------|---------|
 | 连接超时 | 自动重试 3 次，间隔递增（1s/2s/4s） |
 | 认证失败 | 提示用户检查密钥/密码，不自动重试 |
-| 主机指纹变更 | 警告用户，要求手动确认 |
+| 主机指纹变更 | 阻断连接，要求用户检查并重新建立信任记录 |
 | 命令执行失败 | 返回 stderr 输出，由上层决定处理方式 |
 | 网络中断 | 自动重连；未完成操作默认标记失败，只有声明为幂等的操作可重试 |
 | 依赖能力缺失 | 展示“当前服务器不支持此功能”并给出检测结果 |

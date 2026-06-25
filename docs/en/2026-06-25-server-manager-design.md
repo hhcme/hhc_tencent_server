@@ -65,7 +65,39 @@ Recommended service boundaries:
 
 SwiftNIO details such as `Channel`, `EventLoopGroup`, and authentication delegates should stay inside the SSH service layer. View models should call async APIs and observe state changes.
 
-## 4. SSH connection model
+## 4. Product Navigation
+
+The product uses a two-level navigation model:
+
+1. **Server Browser**: the app starts with a server list for browsing, grouping, search, filtering, selected-server summary, and Open/Connect/Delete actions.
+2. **Server Workspace**: opening a server enters a dedicated workspace for that server. The workspace has server-scoped navigation on the left and a toolbar with back-to-list, current server switcher, and common actions.
+
+Startup screen:
+
+```text
+Toolbar: Search / Add / Cloud / More
+├── Source List
+│   ├── All Servers
+│   ├── Groups
+│   └── Cloud / Manual SSH
+└── Server table + selected summary
+    └── Open / Connect / Delete
+```
+
+Workspace:
+
+```text
+Toolbar: Servers / Current Server Switcher / Actions
+├── Server tools
+│   ├── Overview
+│   ├── Terminal
+│   └── Files
+└── Current server workspace
+```
+
+The server switcher changes the active workspace context without forcing the user back to the startup list.
+
+## 5. SSH connection model
 
 The SSH layer should support:
 
@@ -87,12 +119,12 @@ Connection lifecycle:
 5. Unknown host keys require explicit user confirmation.
 6. Changed host keys block the connection.
 7. User authentication runs.
-8. A smoke-test command verifies the connection.
+8. The smoke-test command `printf hhc-ssh-ok` verifies the connection.
 9. The connection enters the pool.
 
 Only idempotent operations may be retried automatically after a network interruption.
 
-## 5. Cloud Provider API enhancement
+## 6. Cloud Provider API enhancement
 
 Cloud APIs complement SSH. They should be used for cloud-resource information and cloud-control operations, while SSH remains responsible for server-internal operations.
 
@@ -143,7 +175,7 @@ Provider priority:
 2. Alibaba Cloud adapter for ECS discovery and CloudMonitor.
 3. Huawei Cloud adapter for ECS details and Cloud Eye.
 
-## 6. Credential and host key policy
+## 7. Credential and host key policy
 
 Credentials:
 
@@ -160,7 +192,7 @@ Host keys:
 - A fingerprint mismatch must not be silently overwritten.
 - The UI must show both old and new fingerprints when a mismatch occurs.
 
-## 7. Data model
+## 8. Data model
 
 Core tables:
 
@@ -231,7 +263,7 @@ Keychain records:
 - `cloud_huawei_access_key_id_<keychain_ref>` and `cloud_huawei_secret_access_key_<keychain_ref>`
 - `webhook_secret_<project_id>` for future deployment automation
 
-## 8. Feature modules
+## 9. Feature modules
 
 ### Dashboard
 
@@ -259,7 +291,7 @@ For GitLab webhooks, validate `X-Gitlab-Token` with constant-time comparison. HM
 
 Verdaccio should be installed with an explicit stable version, not a floating pre-release. Dart/Flutter pub registry support should be revalidated before Phase 6 because server options and maintenance status can change.
 
-## 9. Roadmap
+## 10. Roadmap
 
 1. Phase 1: app skeleton, server CRUD, Keychain, host key trust, real SSH command.
 2. Phase 2: cloud provider foundation, cloud account settings, Tencent Cloud read-only discovery, and simplified command panel.
@@ -270,7 +302,7 @@ Verdaccio should be installed with an explicit stable version, not a floating pr
 7. Phase 7: more providers, snapshots, disks, billing, and advanced cloud resource management.
 8. Phase 8: Windows native client with WinUI 3, Windows App SDK, .NET/C#, Windows Credential Manager, and a real SSH MVP.
 
-## 10. Non-functional requirements
+## 11. Non-functional requirements
 
 - SSH work must not block the UI.
 - Cloud API calls must be rate-limited, cancellable, and audited when they change remote state.

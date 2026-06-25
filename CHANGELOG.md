@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - Added macOS MVP local design snapshots and bilingual design handoff notes.
 - Revised the macOS design direction with a native v0.2 flow: server list first, dedicated server workspace, and toolbar-based server switching.
 - Added repository-versioned PNG snapshots for the macOS MVP v0.2 design.
+- Aligned the Phase 1 implementation plan and architecture documents with the local macOS v0.2 design flow.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -35,3 +36,4 @@ All notable changes to this project will be documented in this file.
 - 添加 macOS MVP 本地设计快照和中英文设计交接说明。
 - 修订 macOS 设计方向，新增更原生的 v0.2 流程：先展示服务器列表，再进入单服务器工作台，并通过工具栏切换服务器。
 - 添加 macOS MVP v0.2 设计稿的仓库内 PNG 快照。
+- 将 Phase 1 实施计划和架构文档校准到 macOS v0.2 本地设计流程。

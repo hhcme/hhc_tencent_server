@@ -4,6 +4,10 @@
 
 **设计文档:** `docs/superpowers/specs/2026-06-25-server-manager-design.md`
 
+**本地设计快照:** `docs/assets/design/macos-mvp-v0.2/README.md`
+
+**当前开发入口:** 先实现 macOS 原生 Phase 1。启动页采用“服务器列表优先”的结构；点击服务器后进入单服务器工作台；在工作台顶部通过服务器切换器切换当前操作对象。
+
 ---
 
 ## 1. 目标
@@ -15,7 +19,7 @@ Phase 1 完成后，项目应具备：
 3. SSH 凭据写入 macOS Keychain，不把密码或私钥明文写入 SQLite。
 4. App Sandbox 所需 entitlements 配置完整。
 5. 真实 SSH 连接闭环：TCP connect -> SSH handshake -> host key trust -> user auth -> exec command -> disconnect。
-6. 侧边栏服务器列表、添加服务器弹窗、服务器详情页、连接/断开按钮和命令 smoke test 输出。
+6. 启动服务器列表、添加服务器 sheet、单服务器工作台、服务器切换器、主机指纹确认 sheet、连接/断开按钮和命令 smoke test 输出。
 7. 单元测试覆盖模型、Repository、Keychain wrapper、服务层状态机；可选真实 SSH 集成测试通过环境变量启用。
 
 ## 2. 非目标
@@ -83,19 +87,26 @@ HHCServerManager/
 │   │   │   └── KeychainService.swift
 │   │   └── ServerManagementService.swift
 │   ├── ViewModels/
-│   │   ├── ServerListViewModel.swift
+│   │   ├── ServerBrowserViewModel.swift
 │   │   ├── AddServerViewModel.swift
-│   │   └── ServerDetailViewModel.swift
+│   │   ├── ServerWorkspaceViewModel.swift
+│   │   └── ServerSwitcherViewModel.swift
 │   ├── Views/
 │   │   ├── ContentView.swift
-│   │   ├── Sidebar/
-│   │   │   ├── ServerListView.swift
+│   │   ├── ServerBrowser/
+│   │   │   ├── ServerBrowserView.swift
 │   │   │   ├── ServerRowView.swift
-│   │   │   └── AddServerSheet.swift
-│   │   └── Detail/
-│   │       ├── ServerDetailView.swift
-│   │       ├── HostKeyTrustSheet.swift
-│   │       └── NoServerSelectedView.swift
+│   │   │   ├── ServerSummaryPanel.swift
+│   │   │   └── EmptyServerListView.swift
+│   │   ├── ServerWorkspace/
+│   │   │   ├── ServerWorkspaceView.swift
+│   │   │   ├── ServerWorkspaceSidebar.swift
+│   │   │   ├── ServerOverviewView.swift
+│   │   │   ├── SmokeTestOutputView.swift
+│   │   │   └── ServerSwitcherPopover.swift
+│   │   └── Sheets/
+│   │       ├── AddServerSheet.swift
+│   │       └── HostKeyTrustSheet.swift
 │   └── Utilities/
 │       └── Constants.swift
 └── HHCServerManagerTests/
@@ -336,15 +347,28 @@ ViewModel 不直接写 Keychain，不直接打开 NIO channel。
 
 ## 11. UI 范围
 
-### 11.1 侧边栏
+Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/macos-mvp-v0.2/README.md`。
 
-- 服务器列表。
-- 分组显示。
-- 搜索。
-- 连接状态点：disconnected / connecting / awaitingTrust / connected / failed。
-- 右键删除，带确认弹窗。
+### 11.1 启动服务器列表
 
-### 11.2 添加服务器
+- 应用启动后首先展示服务器列表，而不是直接进入某台服务器详情。
+- 左侧 source list 展示 All Servers、Favorites、Recently Used、Groups、Cloud/Manual SSH 等分类。
+- 主区域展示服务器表格或列表：名称、host、group、连接状态、云资源来源、最近使用时间。
+- 选中服务器时展示底部或右侧摘要：名称、分组、host、连接状态和主要操作。
+- `Open` 进入单服务器工作台；`Connect` 可以在列表页触发连接，但连接状态仍归属该服务器。
+- 支持搜索、分组筛选、删除服务器并带确认弹窗。
+- 连接状态点至少覆盖：disconnected / connecting / awaitingTrust / connected / failed。
+
+### 11.2 单服务器工作台
+
+- 打开服务器后进入专用工作台，不在启动页混合展示所有操作。
+- 顶部 toolbar 包含返回服务器列表、当前服务器名称、服务器切换器、Run/Files/Logs/More 等入口。
+- 左侧工作台导航只展示当前服务器的功能分类：Overview、Terminal、Files、Services、Processes、Logs、Configuration、Cloud。
+- Phase 1 只实现 Overview 中的基础信息、连接状态、Connect / Disconnect、Smoke Test 和输出区域。
+- Terminal、Files、Services、Processes、Logs、Configuration、Cloud 可以显示 disabled/coming later 状态，但不能宣称已完成。
+- 服务器切换器弹窗展示可切换服务器列表、搜索框和当前服务器标记；切换后更新工作台上下文，不重新回到启动页。
+
+### 11.3 添加服务器
 
 字段：
 
@@ -365,17 +389,12 @@ ViewModel 不直接写 Keychain，不直接打开 NIO channel。
 - 表单校验 port 范围为 `1...65535`。
 - Host 不能为空；保留域名、IPv4、IPv6 的输入空间，不做过度正则限制。
 
-### 11.3 服务器详情
+### 11.4 主机指纹确认
 
-Phase 1 详情页只需要：
-
-- 服务器基本信息。
-- 当前连接状态。
-- Connect / Disconnect 按钮。
-- Smoke Test 按钮，执行 `printf hhc-ssh-ok`。
-- 输出区域展示 stdout、stderr、exit code。
-
-其他标签页可以显示禁用占位，但不要宣称已实现。
+- 首次连接未知主机时以 sheet 形式展示 host、port、algorithm、SHA256 fingerprint。
+- 用户点击 Trust 才写入 `trusted_host_keys` 并继续连接。
+- 用户点击 Reject 必须断开连接，并将状态恢复到可理解的失败状态。
+- 指纹变更时使用阻断式警告，不允许继续执行命令。
 
 ## 12. 实施任务
 
@@ -470,9 +489,10 @@ Phase 1 详情页只需要：
 ### Task 7: AppState 与 ViewModels
 
 - [ ] `AppState` 使用 `@MainActor @Observable`。
-- [ ] `ServerListViewModel` 加载、搜索、删除服务器。
+- [ ] `ServerBrowserViewModel` 加载、搜索、筛选、删除服务器。
 - [ ] `AddServerViewModel` 做表单验证，不直接写 Keychain。
-- [ ] `ServerDetailViewModel` 处理 connect/disconnect/smoke test。
+- [ ] `ServerWorkspaceViewModel` 处理当前服务器上下文、connect/disconnect/smoke test。
+- [ ] `ServerSwitcherViewModel` 处理工作台内服务器切换。
 - [ ] 所有异步操作有 loading/error 状态。
 
 验收：
@@ -480,19 +500,26 @@ Phase 1 详情页只需要：
 - [ ] UI 状态更新没有跨线程警告。
 - [ ] 连接中重复点击不会创建重复连接。
 - [ ] 删除当前选中服务器会清空 selection 并断开连接。
+- [ ] 在工作台内切换服务器不会复用上一台服务器的连接状态或 smoke test 输出。
 
 ### Task 8: SwiftUI 界面
 
-- [ ] 主窗口 `NavigationSplitView`。
-- [ ] 侧边栏服务器列表。
+- [ ] 主窗口采用 macOS 原生 split/toolbar 结构。
+- [ ] 启动服务器列表页。
+- [ ] 服务器摘要面板和 Open/Connect 操作。
+- [ ] 单服务器工作台。
+- [ ] 工作台顶部服务器切换器和 popover。
 - [ ] 添加服务器 sheet。
 - [ ] 主机指纹确认 sheet。
-- [ ] 详情页连接控制和 smoke test 输出。
+- [ ] Overview 中的连接控制和 smoke test 输出。
 - [ ] 删除确认弹窗。
 
 验收：
 
 - [ ] 空状态清晰。
+- [ ] 首屏是服务器列表，不是单服务器详情。
+- [ ] 点击 Open 后进入该服务器工作台。
+- [ ] 工作台内可以通过服务器切换器切换服务器。
 - [ ] 表单校验准确。
 - [ ] 首次连接出现指纹确认。
 - [ ] 指纹变更出现阻断警告。
@@ -523,6 +550,9 @@ HHC_TEST_SSH_PASSWORD=...
 
 - [ ] 首次启动为空列表。
 - [ ] 添加密码认证服务器。
+- [ ] 服务器出现在启动服务器列表中。
+- [ ] 点击 Open 进入该服务器工作台。
+- [ ] 工作台内服务器切换器能列出服务器并切换当前上下文。
 - [ ] 首次连接展示主机指纹确认。
 - [ ] 确认后连接成功。
 - [ ] Smoke test 返回 `hhc-ssh-ok`。
@@ -545,6 +575,7 @@ Phase 1 只有在以下条件都满足时才算完成：
 7. 断开连接释放 NIO channel 和 event loop。
 8. 单元测试通过。
 9. 手动验收清单通过。
+10. UI 符合本地设计快照中的“服务器列表 -> 单服务器工作台 -> 服务器切换器”结构。
 
 ## 14. 后续 Phase 边界
 
