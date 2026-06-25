@@ -132,7 +132,7 @@ CREATE TABLE environment_profiles (
 
 - [x] 命令解析 fixture 测试：已覆盖 systemd service 列表解析、unit 名校验、Cron 解析和 crontab 写入内容、Nginx 配置列表解析和路径校验、Environment 文件列表解析和路径校验。
 - [x] 风险确认模型测试：已覆盖 systemd、Cron、Nginx、Environment、远程文件权限修改的风险级别、命令预览、恢复说明和确认文案。
-- [x] Nginx 配置测试/回滚逻辑测试：已覆盖配置保存、保存前备份、`nginx -t`、测试失败回滚、测试通过后 reload 和审计日志写入。
+- [x] Nginx 配置测试/回滚逻辑测试：已覆盖配置保存、保存前备份、`nginx -t`、测试失败回滚、测试通过后 reload 和审计日志写入；已加入 `HHC_TEST_NGINX_REAL=1` 受保护真实集成入口，用于在 nginx 运行且存在安全 include 目录时验证临时 server block 写入、reload、HTTP smoke 和清理。
 - [x] Firewall adapter 能力探测测试：已覆盖 firewalld、ufw、nftables、iptables 解析和 firewalld 未运行状态。
 - [x] Environment 文件读写测试：已覆盖受限文件发现、UTF-8 读取、保存前备份、ViewModel 状态流和审计日志写入；真实服务器已通过临时 `$HOME/hhc-phase4-env-*` 目录验证 `.env` 发现、保存、备份和审计。
 - [x] 安全组测试：已覆盖 TencentCloudAdapter VPC 安全组/规则读取和单条写操作 API contract、CloudSecurityGroupService 账号/凭据/关联链路、ViewModel 加载/选择/写入刷新和审计状态流。
@@ -144,7 +144,7 @@ CREATE TABLE environment_profiles (
 - [ ] 腾讯云安全组可读取。当前 mock/contract 测试已通过，真实腾讯云账号手动验收待执行。
 - [x] 新增安全组规则前显示预览和确认基础：当前安全组详情页可生成拟新增规则预览并展示风险，确认后执行腾讯云单条规则写入。
 - [x] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，并通过受控临时 oneshot unit 验证真实 restart 写操作、远端 marker 和 `remote_change_logs` 审计。
-- [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，真实配置写入/reload 待谨慎手动验收。
+- [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，且已加入受保护的临时配置写入/reload 集成入口。当前测试服务器 nginx 服务未运行，真实配置写入/reload 仍待合适环境谨慎验收。
 - [x] 防火墙后端只读探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作已有 mock/contract 测试覆盖，真实服务器写入仍需谨慎手动验收。
 - [x] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，并通过受控临时 cron entry 验证 add/disable/enable/delete、原 crontab 恢复和 `remote_change_logs` 审计。
 - [x] Environment 文件保存可备份并审计。当前真实服务器已通过受控临时 `.env` 验证保存、`.hhc-backup-*` 备份、远端内容变更和 `remote_change_logs` 审计。

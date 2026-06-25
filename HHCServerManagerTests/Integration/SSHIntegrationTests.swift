@@ -411,6 +411,120 @@ final class SSHIntegrationTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testRealNginxTemporaryConfigReloadsAndCleansUpWhenExplicitlyEnabled() async throws {
+        guard Self.testEnvironment()["HHC_TEST_NGINX_REAL"] == "1" else {
+            throw XCTSkip("Set HHC_TEST_NGINX_REAL=1 with the real SSH environment to run the guarded Nginx write/reload integration test.")
+        }
+
+        let harness = try makeRealSSHHarness()
+        defer { try? harness.service.deleteServer(harness.profile) }
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+
+        let preflight = try await harness.sshClient.execute(Self.nginxTemporaryConfigPreflightCommand(), profile: harness.profile)
+        guard preflight.exitCode == 0 else {
+            throw XCTSkip("Real Nginx write/reload test requires a running nginx service and an included writable conf.d directory.")
+        }
+        let configDirectory = preflight.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard configDirectory.hasPrefix("/etc/nginx/") || configDirectory.hasPrefix("/www/server/nginx/") else {
+            throw XCTSkip("Refusing to write outside known Nginx configuration roots.")
+        }
+
+        let manager = NginxConfigManager()
+        let viewModel = ServerWorkspaceViewModel()
+        let token = "hhc-phase4-nginx-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12))"
+        let listenPort = Int.random(in: 43_000...49_000)
+        let configPath = "\(configDirectory)/\(token).conf"
+        let cleanup = "rm -f -- \(Self.shellQuote(configPath)) \(Self.shellQuote(configPath)).hhc-backup-* \(Self.shellQuote(configPath)).hhc-tmp.*; nginx -t >/dev/null 2>&1 && (systemctl reload nginx 2>/dev/null || nginx -s reload) || true"
+
+        do {
+            _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+            let content = """
+            server {
+                listen 127.0.0.1:\(listenPort);
+                server_name \(token).invalid;
+                location / {
+                    return 204;
+                }
+            }
+            """
+
+            let upsert = try await manager.upsertConfig(
+                path: configPath,
+                content: content,
+                profile: harness.profile,
+                sshClient: harness.sshClient
+            )
+            XCTAssertTrue(upsert.createdNewFile)
+            XCTAssertFalse(upsert.rolledBack)
+            XCTAssertTrue(upsert.testResult.succeeded)
+
+            let file = upsert.file
+            viewModel.selectNginxConfig(file, profile: harness.profile, sshClient: harness.sshClient, nginxConfigManager: manager)
+            try await Self.waitUntil {
+                viewModel.isLoadingNginxConfigContent == false
+                    && viewModel.nginxConfigContent?.file.path == configPath
+            }
+
+            let editedContent = content + "\n# hhc edited through ServerWorkspaceViewModel\n"
+            viewModel.nginxConfigDraft = editedContent
+            viewModel.saveNginxConfig(
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                nginxConfigManager: manager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil {
+                viewModel.isSavingNginxConfig == false
+                    && viewModel.nginxActionMessage?.contains("Saved Nginx config") == true
+            }
+            XCTAssertNil(viewModel.nginxErrorMessage)
+            XCTAssertEqual(viewModel.nginxConfigContent?.content, editedContent)
+
+            viewModel.reloadNginx(
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                nginxConfigManager: manager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil {
+                viewModel.isReloadingNginx == false
+                    && viewModel.nginxActionMessage == "Reloaded Nginx."
+            }
+            XCTAssertNil(viewModel.nginxErrorMessage)
+
+            let smoke = try await harness.sshClient.execute(
+                "curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:\(listenPort)/",
+                profile: harness.profile
+            )
+            XCTAssertEqual(smoke.exitCode, 0, smoke.stderr)
+            XCTAssertEqual(smoke.stdout, "204")
+
+            let logs = try harness.repository.fetchRemoteChangeLogs(serverId: harness.profile.id)
+            XCTAssertTrue(logs.contains {
+                $0.targetType == "nginx"
+                    && $0.targetId == configPath
+                    && $0.action == "save"
+                    && $0.status == "success"
+            })
+            XCTAssertTrue(logs.contains {
+                $0.targetType == "nginx"
+                    && $0.targetId == configPath
+                    && $0.action == "reload"
+                    && $0.status == "success"
+            })
+
+            let cleanupResult = try await harness.sshClient.execute(cleanup, profile: harness.profile)
+            XCTAssertEqual(cleanupResult.exitCode, 0, cleanupResult.stderr)
+
+            let removed = try await harness.sshClient.execute("test ! -e \(Self.shellQuote(configPath))", profile: harness.profile)
+            XCTAssertEqual(removed.exitCode, 0, removed.stderr)
+        } catch {
+            _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+            throw error
+        }
+    }
+
     func testRealVerdaccioLifecycleWhenExplicitlyEnabled() async throws {
         guard ProcessInfo.processInfo.environment["HHC_TEST_VERDACCIO_REAL"] == "1" else {
             throw XCTSkip("Set HHC_TEST_VERDACCIO_REAL=1 with the real SSH environment to run the Verdaccio lifecycle integration test.")
@@ -632,6 +746,28 @@ final class SSHIntegrationTests: XCTestCase {
         else \
           crontab -r >/dev/null 2>&1 || true; \
         fi
+        """
+    }
+
+    private static func nginxTemporaryConfigPreflightCommand() -> String {
+        """
+        set -e; \
+        command -v nginx >/dev/null 2>&1; \
+        nginx -t >/dev/null 2>&1; \
+        if command -v systemctl >/dev/null 2>&1; then systemctl is-active --quiet nginx; fi; \
+        info=$(nginx -V 2>&1 || true); \
+        conf=$(printf '%s' "$info" | tr ' ' '\\n' | sed -n 's/^--conf-path=//p' | tail -n 1); \
+        [ -n "$conf" ] || conf=/etc/nginx/nginx.conf; \
+        base=$(dirname -- "$conf"); \
+        for dir in "$base/conf.d" /etc/nginx/conf.d "$base/vhost" "$base/sites-enabled"; do \
+          [ -d "$dir" ] || continue; \
+          [ -w "$dir" ] || continue; \
+          case "$dir" in /etc/nginx/*|/www/server/nginx/*) ;; *) continue ;; esac; \
+          if grep -R "include[[:space:]].*$(basename "$dir")/\\\\*\\\\.conf" "$conf" "$base"/*.conf >/dev/null 2>&1; then \
+            printf '%s' "$dir"; exit 0; \
+          fi; \
+        done; \
+        exit 4
         """
     }
 
