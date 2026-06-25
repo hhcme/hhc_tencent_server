@@ -2,6 +2,51 @@ import XCTest
 @testable import HHCServerManager
 
 final class OpenSSHClientTests: XCTestCase {
+    func testPrivateKeyAuthWithoutPassphraseUsesBatchMode() throws {
+        let harness = try AuthHarness()
+        try harness.keychain.savePrivateKey(Data("private-key-data".utf8), passphrase: nil, keychainRef: harness.profile.keychainRef)
+
+        let context = try harness.client.makeAuthContext(
+            profile: harness.profile,
+            knownHostsURL: harness.knownHostsURL,
+            portFlag: "-p"
+        )
+        defer { context.cleanup() }
+
+        XCTAssertTrue(context.arguments.contains("-o"))
+        XCTAssertTrue(context.arguments.contains("BatchMode=yes"))
+        XCTAssertTrue(context.arguments.contains("IdentitiesOnly=yes"))
+        XCTAssertTrue(context.arguments.contains("-i"))
+        XCTAssertNil(context.environment["SSH_ASKPASS"])
+        XCTAssertNil(context.environment["HHC_SSH_PASSWORD"])
+    }
+
+    func testPrivateKeyAuthWithPassphraseUsesAskpassAndDisablesPasswordFallback() throws {
+        let harness = try AuthHarness()
+        try harness.keychain.savePrivateKey(
+            Data("private-key-data".utf8),
+            passphrase: "secret-passphrase",
+            keychainRef: harness.profile.keychainRef
+        )
+
+        let context = try harness.client.makeAuthContext(
+            profile: harness.profile,
+            knownHostsURL: harness.knownHostsURL,
+            portFlag: "-p"
+        )
+        defer { context.cleanup() }
+
+        XCTAssertTrue(context.arguments.contains("BatchMode=no"))
+        XCTAssertTrue(context.arguments.contains("PreferredAuthentications=publickey"))
+        XCTAssertTrue(context.arguments.contains("PasswordAuthentication=no"))
+        XCTAssertTrue(context.arguments.contains("KbdInteractiveAuthentication=no"))
+        XCTAssertTrue(context.arguments.contains("IdentitiesOnly=yes"))
+        XCTAssertNotNil(context.environment["SSH_ASKPASS"])
+        XCTAssertEqual(context.environment["SSH_ASKPASS_REQUIRE"], "force")
+        XCTAssertEqual(context.environment["HHC_SSH_PASSWORD"], "secret-passphrase")
+        XCTAssertEqual(context.environment["DISPLAY"], "localhost:0")
+    }
+
     func testRsyncProgressUpdateParsesByteCountAndPercent() {
         let progress = OpenSSHClient.rsyncProgressUpdate(fromLine: "      1,024  50%  100.00kB/s    0:00:01")
 
@@ -38,5 +83,38 @@ final class OpenSSHClientTests: XCTestCase {
 
         XCTAssertEqual(upload, "reput \"/Users/hhc/Downloads/app config \\\"prod\\\".json\" \"/srv/app/app config \\\"prod\\\".json\"\n")
         XCTAssertEqual(download, "reget \"/srv/app/app config.json\" \"/Users/hhc/Downloads/app config.json\"\n")
+    }
+
+    private final class AuthHarness {
+        let repository: ServerRepository
+        let keychain: KeychainService
+        let client: OpenSSHClient
+        let profile: ServerProfile
+        let knownHostsURL: URL
+
+        init() throws {
+            repository = ServerRepository(database: try AppDatabase.inMemory())
+            keychain = KeychainService(serviceName: "me.hhc.HHCServerManager.openssh.tests.\(UUID().uuidString)")
+            client = OpenSSHClient(repository: repository, keychain: keychain)
+            profile = ServerProfile(
+                id: UUID(),
+                name: "Test",
+                host: "example.internal",
+                port: 22,
+                username: "root",
+                authType: .privateKey,
+                keychainRef: "server_\(UUID().uuidString)",
+                groupName: nil,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+            knownHostsURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("hhc-known-hosts-\(UUID().uuidString)")
+        }
+
+        deinit {
+            keychain.deleteCredentials(keychainRef: profile.keychainRef)
+            try? FileManager.default.removeItem(at: knownHostsURL)
+        }
     }
 }

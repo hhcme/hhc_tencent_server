@@ -305,7 +305,7 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         )
     }
 
-    private func makeAuthContext(profile: ServerProfile, knownHostsURL: URL, portFlag: String) throws -> SSHProcessAuthContext {
+    func makeAuthContext(profile: ServerProfile, knownHostsURL: URL, portFlag: String) throws -> SSHProcessAuthContext {
         var temporaryKeyURL: URL?
         var temporaryAskpassURL: URL?
         var environment: [String: String] = [:]
@@ -321,11 +321,29 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             guard let keyData = try keychain.readPrivateKey(keychainRef: profile.keychainRef) else {
                 throw SSHClientError.missingPrivateKey
             }
+            let passphrase = try keychain.readPrivateKeyPassphrase(keychainRef: profile.keychainRef)
             temporaryKeyURL = try materializePrivateKey(keyData, serverId: profile.id)
-            arguments.append(contentsOf: [
-                "-o", "BatchMode=yes",
-                "-i", temporaryKeyURL!.path,
-            ])
+            if let passphrase, !passphrase.isEmpty {
+                temporaryAskpassURL = try materializeAskpassScript(serverId: profile.id)
+                environment["SSH_ASKPASS"] = temporaryAskpassURL!.path
+                environment["SSH_ASKPASS_REQUIRE"] = "force"
+                environment["HHC_SSH_PASSWORD"] = passphrase
+                environment["DISPLAY"] = environment["DISPLAY"] ?? "localhost:0"
+                arguments.append(contentsOf: [
+                    "-o", "BatchMode=no",
+                    "-o", "PreferredAuthentications=publickey",
+                    "-o", "PasswordAuthentication=no",
+                    "-o", "KbdInteractiveAuthentication=no",
+                    "-o", "IdentitiesOnly=yes",
+                    "-i", temporaryKeyURL!.path,
+                ])
+            } else {
+                arguments.append(contentsOf: [
+                    "-o", "BatchMode=yes",
+                    "-o", "IdentitiesOnly=yes",
+                    "-i", temporaryKeyURL!.path,
+                ])
+            }
         case .password:
             guard let password = try keychain.readPassword(keychainRef: profile.keychainRef) else {
                 throw SSHClientError.missingPassword
@@ -649,7 +667,7 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
     }
 }
 
-private struct SSHProcessAuthContext {
+struct SSHProcessAuthContext {
     var arguments: [String]
     var environment: [String: String]
     var temporaryURLs: [URL]

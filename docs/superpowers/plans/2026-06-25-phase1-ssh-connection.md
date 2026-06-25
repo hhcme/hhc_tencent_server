@@ -470,14 +470,14 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 
 ### Task 6: 真实 SSHConnection
 
-- [ ] 使用 SwiftNIO SSH 建立真实连接。
-- [ ] 实现 server authentication delegate。
-- [ ] 实现 user authentication delegate。
-- [ ] 实现 password 认证。
-- [ ] 实现至少一种私钥认证路径，或将私钥解析列为明确阻塞项并保留 UI disable。
-- [ ] 实现 `execute(command:timeout:)`。
-- [ ] 实现 disconnect 和 event loop graceful shutdown。
-- [ ] 所有状态更新回到主线程可观察状态。
+- [x] 使用 macOS OpenSSH 后端建立真实连接：当前 Phase1 采用 `/usr/bin/ssh`、`ssh-keyscan`、`ssh-keygen` 和用户级 known_hosts 文件，SwiftNIO SSH 方案保留为后续替换评估。
+- [x] 实现 server authentication：连接前扫描 host key，写入/校验应用内 known_hosts，未知和变更指纹由 `HostKeyTrustStore` 阻断。
+- [x] 实现 user authentication：认证参数由 `OpenSSHClient.makeAuthContext` 从 Keychain 生成，并为临时私钥和 askpass 脚本设置文件权限。
+- [x] 实现 password 认证：通过 `SSH_ASKPASS` 注入 Keychain 密码，并禁用公钥回退。
+- [x] 实现私钥认证路径：支持无口令私钥的 BatchMode 路径，以及带 passphrase 私钥的 askpass 路径，同时禁用密码/键盘交互回退。
+- [x] 实现 `execute(command:)`：命令通过 OpenSSH 执行并返回 stdout、stderr、exit code、duration。
+- [x] 实现 disconnect 和进程资源清理：当前连接模型为按命令进程执行，命令结束后清理临时私钥/askpass 文件；工作台 disconnect 将状态重置为 disconnected。
+- [x] 所有状态更新回到主线程可观察状态：`ServerWorkspaceViewModel` 为 `@MainActor`，异步回调通过 `MainActor.run` 写入 `@Published` 状态。
 
 验收：
 
