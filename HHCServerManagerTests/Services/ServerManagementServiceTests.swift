@@ -3563,6 +3563,113 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].queryValue("PageNumber"), "2")
     }
 
+    func testAlibabaCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedECSAPI() async throws {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockAlibabaCloudTransport(responses: [
+            """
+            {
+              "RequestId": "aliyun-sg",
+              "TotalCount": 1,
+              "SecurityGroups": {
+                "SecurityGroup": [
+                  {
+                    "SecurityGroupId": "sg-1",
+                    "SecurityGroupName": "web",
+                    "Description": "web ingress",
+                    "ResourceGroupId": "rg-1",
+                    "VpcId": "vpc-1",
+                    "CreationTime": "2026-07-01T00:00:00Z"
+                  }
+                ]
+              }
+            }
+            """,
+            """
+            {
+              "RequestId": "aliyun-sg-attr",
+              "SecurityGroupId": "sg-1",
+              "SecurityGroupName": "web",
+              "InnerAccessPolicy": "Accept",
+              "Permissions": {
+                "Permission": [
+                  {
+                    "Direction": "ingress",
+                    "IpProtocol": "tcp",
+                    "PortRange": "22/22",
+                    "SourceCidrIp": "203.0.113.0/24",
+                    "Policy": "Accept",
+                    "Description": "SSH",
+                    "Priority": 1,
+                    "CreateTime": "2026-07-01T00:00:00Z"
+                  },
+                  {
+                    "Direction": "egress",
+                    "IpProtocol": "all",
+                    "PortRange": "-1/-1",
+                    "DestCidrIp": "0.0.0.0/0",
+                    "Policy": "Accept",
+                    "Priority": 1
+                  }
+                ]
+              }
+            }
+            """,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            nonce: { "nonce-sg" },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK")
+
+        let groups = try await adapter.fetchSecurityGroups(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-southeast-1"
+        )
+        let snapshot = try await adapter.fetchSecurityGroupPolicies(
+            credential: credential,
+            group: try XCTUnwrap(groups.first),
+            capturedAt: capturedAt
+        )
+
+        XCTAssertEqual(groups.map(\.securityGroupId), ["sg-1"])
+        XCTAssertEqual(groups[0].accountId, accountId)
+        XCTAssertEqual(groups[0].providerId, .alibabaCloud)
+        XCTAssertEqual(groups[0].regionId, "ap-southeast-1")
+        XCTAssertEqual(groups[0].name, "web")
+        XCTAssertEqual(groups[0].description, "web ingress")
+        XCTAssertEqual(groups[0].projectId, "rg-1")
+        XCTAssertEqual(groups[0].createdTime, "2026-07-01T00:00:00Z")
+        XCTAssertEqual(snapshot.version, "Accept")
+        XCTAssertEqual(snapshot.ingress.count, 1)
+        XCTAssertEqual(snapshot.ingress[0].protocolName, "tcp")
+        XCTAssertEqual(snapshot.ingress[0].port, "22/22")
+        XCTAssertEqual(snapshot.ingress[0].cidrBlock, "203.0.113.0/24")
+        XCTAssertEqual(snapshot.ingress[0].action, "Accept")
+        XCTAssertEqual(snapshot.ingress[0].description, "SSH")
+        XCTAssertEqual(snapshot.ingress[0].policyIndex, 1)
+        XCTAssertEqual(snapshot.egress.count, 1)
+        XCTAssertEqual(snapshot.egress[0].protocolName, "all")
+        XCTAssertEqual(snapshot.egress[0].cidrBlock, "0.0.0.0/0")
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-action"), "DescribeSecurityGroups")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-version"), "2014-05-26")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-signature-nonce"), "nonce-sg")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("ACS3-HMAC-SHA256 Credential=ALIYUNAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("RegionId"), "ap-southeast-1")
+        XCTAssertEqual(transport.requests[0].queryValue("PageNumber"), "1")
+        XCTAssertEqual(transport.requests[0].queryValue("PageSize"), "100")
+        XCTAssertEqual(transport.requests[1].url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "x-acs-action"), "DescribeSecurityGroupAttribute")
+        XCTAssertEqual(transport.requests[1].queryValue("RegionId"), "ap-southeast-1")
+        XCTAssertEqual(transport.requests[1].queryValue("SecurityGroupId"), "sg-1")
+    }
+
     func testHuaweiCloudAdapterFetchRegionsAndInstancesUsesSignedECSAPI() async throws {
         let transport = MockHuaweiCloudTransport(responses: [
             """

@@ -5929,6 +5929,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .cloudDisks,
         .cloudSnapshots,
         .cloudBilling,
+        .securityGroups,
     ]
 
     private let transport: AlibabaCloudHTTPTransport
@@ -6018,7 +6019,45 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         accountId: UUID,
         regionId: String
     ) async throws -> [CloudSecurityGroup] {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .securityGroups)
+        var pageNumber = 1
+        let pageSize = 100
+        var totalCount: Int?
+        var groups: [CloudSecurityGroup] = []
+
+        repeat {
+            let response: AlibabaDescribeSecurityGroupsResponse = try await request(
+                credential: credential,
+                host: "ecs.\(regionId).aliyuncs.com",
+                action: "DescribeSecurityGroups",
+                queryItems: [
+                    URLQueryItem(name: "RegionId", value: regionId),
+                    URLQueryItem(name: "PageNumber", value: "\(pageNumber)"),
+                    URLQueryItem(name: "PageSize", value: "\(pageSize)"),
+                ]
+            )
+            let page = response.securityGroups?.securityGroup ?? []
+            guard !page.isEmpty else {
+                break
+            }
+            groups.append(contentsOf: page.map { group in
+                CloudSecurityGroup(
+                    accountId: accountId,
+                    providerId: .alibabaCloud,
+                    regionId: regionId,
+                    securityGroupId: group.securityGroupId,
+                    name: group.securityGroupName ?? group.securityGroupId,
+                    description: group.description,
+                    projectId: group.resourceGroupId,
+                    isDefault: nil,
+                    createdTime: group.creationTime,
+                    updatedTime: nil
+                )
+            })
+            totalCount = response.totalCount
+            pageNumber += 1
+        } while groups.count < (totalCount ?? 0)
+
+        return groups
     }
 
     func fetchSecurityGroupPolicies(
@@ -6026,7 +6065,23 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         group: CloudSecurityGroup,
         capturedAt: Date
     ) async throws -> CloudSecurityGroupPolicySnapshot {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .securityGroups)
+        let response: AlibabaDescribeSecurityGroupAttributeResponse = try await request(
+            credential: credential,
+            host: "ecs.\(group.regionId).aliyuncs.com",
+            action: "DescribeSecurityGroupAttribute",
+            queryItems: [
+                URLQueryItem(name: "RegionId", value: group.regionId),
+                URLQueryItem(name: "SecurityGroupId", value: group.securityGroupId),
+            ]
+        )
+        let permissions = response.permissions?.permission ?? []
+        return CloudSecurityGroupPolicySnapshot(
+            group: group,
+            version: response.innerAccessPolicy,
+            ingress: Self.mapAlibabaSecurityGroupPermissions(permissions, direction: .ingress),
+            egress: Self.mapAlibabaSecurityGroupPermissions(permissions, direction: .egress),
+            capturedAt: capturedAt
+        )
     }
 
     func fetchDisks(
@@ -6328,6 +6383,29 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: text)
+    }
+
+    private static func mapAlibabaSecurityGroupPermissions(
+        _ permissions: [AlibabaSecurityGroupPermission],
+        direction: CloudSecurityGroupRuleDirection
+    ) -> [CloudSecurityGroupRule] {
+        permissions.compactMap { permission in
+            guard permission.matches(direction: direction) else {
+                return nil
+            }
+            return CloudSecurityGroupRule(
+                direction: direction,
+                policyIndex: permission.priority,
+                protocolName: permission.ipProtocol,
+                port: permission.portRange,
+                cidrBlock: direction == .ingress ? permission.sourceCidrIp : permission.destCidrIp,
+                ipv6CidrBlock: direction == .ingress ? permission.ipv6SourceCidrIp : permission.ipv6DestCidrIp,
+                referencedSecurityGroupId: direction == .ingress ? permission.sourceGroupId : permission.destGroupId,
+                action: permission.policy,
+                description: permission.description,
+                modifiedTime: permission.createTime
+            )
+        }
     }
 }
 
@@ -6909,6 +6987,102 @@ private struct AlibabaSnapshot: Decodable {
         case size = "Size"
         case creationTime = "CreationTime"
         case createTime = "CreateTime"
+    }
+}
+
+private struct AlibabaDescribeSecurityGroupsResponse: Decodable {
+    var totalCount: Int?
+    var securityGroups: AlibabaSecurityGroups?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCount = "TotalCount"
+        case securityGroups = "SecurityGroups"
+    }
+}
+
+private struct AlibabaSecurityGroups: Decodable {
+    var securityGroup: [AlibabaSecurityGroup]
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroup = "SecurityGroup"
+    }
+}
+
+private struct AlibabaSecurityGroup: Decodable {
+    var securityGroupId: String
+    var securityGroupName: String?
+    var description: String?
+    var resourceGroupId: String?
+    var creationTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroupId = "SecurityGroupId"
+        case securityGroupName = "SecurityGroupName"
+        case description = "Description"
+        case resourceGroupId = "ResourceGroupId"
+        case creationTime = "CreationTime"
+    }
+}
+
+private struct AlibabaDescribeSecurityGroupAttributeResponse: Decodable {
+    var innerAccessPolicy: String?
+    var permissions: AlibabaSecurityGroupPermissions?
+
+    enum CodingKeys: String, CodingKey {
+        case innerAccessPolicy = "InnerAccessPolicy"
+        case permissions = "Permissions"
+    }
+}
+
+private struct AlibabaSecurityGroupPermissions: Decodable {
+    var permission: [AlibabaSecurityGroupPermission]
+
+    enum CodingKeys: String, CodingKey {
+        case permission = "Permission"
+    }
+}
+
+private struct AlibabaSecurityGroupPermission: Decodable {
+    var direction: String?
+    var ipProtocol: String?
+    var portRange: String?
+    var sourceCidrIp: String?
+    var destCidrIp: String?
+    var ipv6SourceCidrIp: String?
+    var ipv6DestCidrIp: String?
+    var sourceGroupId: String?
+    var destGroupId: String?
+    var policy: String?
+    var description: String?
+    var priority: Int?
+    var createTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case direction = "Direction"
+        case ipProtocol = "IpProtocol"
+        case portRange = "PortRange"
+        case sourceCidrIp = "SourceCidrIp"
+        case destCidrIp = "DestCidrIp"
+        case ipv6SourceCidrIp = "Ipv6SourceCidrIp"
+        case ipv6DestCidrIp = "Ipv6DestCidrIp"
+        case sourceGroupId = "SourceGroupId"
+        case destGroupId = "DestGroupId"
+        case policy = "Policy"
+        case description = "Description"
+        case priority = "Priority"
+        case createTime = "CreateTime"
+    }
+
+    func matches(direction target: CloudSecurityGroupRuleDirection) -> Bool {
+        if let direction {
+            return direction.caseInsensitiveCompare(target.rawValue) == .orderedSame
+        }
+        switch target {
+        case .ingress:
+            return sourceCidrIp != nil || ipv6SourceCidrIp != nil || sourceGroupId != nil
+        case .egress:
+            return destCidrIp != nil || ipv6DestCidrIp != nil || destGroupId != nil
+        }
     }
 }
 
