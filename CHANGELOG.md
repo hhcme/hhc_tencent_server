@@ -93,6 +93,7 @@ All notable changes to this project will be documented in this file.
 - Disabled parallel Xcode test workers in the shared CI script to reduce duplicate app-host icons during macOS app-hosted tests.
 - Added Verdaccio htpasswd user create, password update, and delete command foundations with backup-before-change behavior and preflight warnings when htpasswd is unavailable.
 - Added a macOS Registries workspace section for Verdaccio preflight, service status, package listing, backup creation, and Dart/Flutter hosted repository direction.
+- Added a real SSH deployment integration smoke for temporary Git repositories with injectable deployment path policy.
 - Added a guarded Verdaccio install action to the macOS Registries workspace with preflight gating, confirmation, health-check handling, and status refresh.
 - Added Verdaccio user management controls to the macOS Registries workspace for htpasswd create, password update, and confirmed delete actions.
 - Added Verdaccio backup restore controls to the macOS Registries workspace with restore-path capture, destructive confirmation, health-check handling, and status refresh.
@@ -203,6 +204,7 @@ All notable changes to this project will be documented in this file.
 - 添加 Verdaccio Nginx 反向代理配置生成，以及带 `nginx -t` 和失败回滚的新建/更新 Nginx 配置流程。
 - 添加 Dart/Flutter pub registry 调研结论模型，并记录 Phase 6 暂不实现自托管 pub installer，需等待真实 publish/get 验收通过后再开放。
 - 在共享 CI 脚本中关闭 Xcode 并行测试 worker，减少 macOS app-hosted tests 期间 Dock 同时出现多个测试宿主图标。
+- 添加真实 SSH 临时 Git 仓库部署集成验收，并支持 DeploymentRunner 注入部署路径策略。
 - 添加 Verdaccio htpasswd 用户创建、改密和删除命令层，支持修改前备份，并在 htpasswd 缺失时通过 preflight warning 提示。
 - 添加 macOS Registries 工作台入口，支持 Verdaccio preflight、服务状态、包列表、备份创建，以及 Dart/Flutter hosted repository 方向展示。
 - 在 macOS Registries 工作台加入带 preflight gating 和确认弹窗的 Verdaccio 安装动作，安装后处理 health check 并刷新状态。

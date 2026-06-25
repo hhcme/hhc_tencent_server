@@ -1128,13 +1128,16 @@ enum DeploymentLogRedactor {
 
 final class DeploymentRunner: @unchecked Sendable {
     private let repository: ServerRepository
+    private let pathPolicy: DeploymentPathPolicy
     private let now: @Sendable () -> Date
 
     init(
         repository: ServerRepository,
+        pathPolicy: DeploymentPathPolicy = .defaultPolicy,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.repository = repository
+        self.pathPolicy = pathPolicy
         self.now = now
     }
 
@@ -1145,7 +1148,7 @@ final class DeploymentRunner: @unchecked Sendable {
         triggerType: DeploymentTriggerType = .manual,
         requestedRef: String? = nil
     ) async throws -> DeploymentRun {
-        let plan = try DeploymentCommandBuilder.buildPlan(for: project)
+        let plan = try DeploymentCommandBuilder.buildPlan(for: project, pathPolicy: pathPolicy)
         return try await runPlan(
             plan,
             project: project,
@@ -1165,7 +1168,7 @@ final class DeploymentRunner: @unchecked Sendable {
         profile: ServerProfile,
         sshClient: SSHClient
     ) async throws -> DeploymentRun {
-        let plan = try DeploymentCommandBuilder.buildRollbackPlan(for: project, targetCommit: targetCommit)
+        let plan = try DeploymentCommandBuilder.buildRollbackPlan(for: project, targetCommit: targetCommit, pathPolicy: pathPolicy)
         return try await runPlan(
             plan,
             project: project,

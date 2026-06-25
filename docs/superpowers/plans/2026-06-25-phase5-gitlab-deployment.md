@@ -155,11 +155,12 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] GitLab webhook HTTP listener 测试：已覆盖 HTTP 请求解析、header/body 保留和响应格式。
 - [x] webhook 操作日志测试：已覆盖 started/succeeded 状态和 project target id。
 - [x] 日志脱敏测试：已覆盖 token、password、Authorization/Bearer、URL credentials。
+- [x] 真实 SSH 临时部署集成测试：已覆盖远端 `/tmp/hhc-deploy-*` 临时 Git 仓库、existing checkout、fetch/reset、build、health check、commit 捕获和日志落库；默认通过环境变量启用。
 
 ### Task 8：手动验收
 
-- [ ] 添加部署项目。
-- [ ] 手动部署成功，日志完整。
+- [x] 添加部署项目：工作台和 repository 测试已覆盖，真实 SSH 集成测试可用环境变量创建临时项目并验证部署。
+- [x] 手动部署成功，日志完整：已增加真实 SSH 临时 Git 仓库部署集成测试，并在用户提供的测试服务器上完成等价命令 smoke；生产项目部署仍需按项目配置单独验收。
 - [x] 构建失败时状态正确，后续步骤不执行：runner 和工作台 ViewModel 测试已覆盖，真实服务器手动验收仍需谨慎执行。
 - [x] health check 失败时部署标记失败：mock/contract 测试和工作台 ViewModel 测试已覆盖，真实服务器手动验收仍需谨慎执行。
 - [x] 回滚能回到 previous commit：mock/contract 测试已覆盖，真实服务器手动回滚仍需谨慎验收。
