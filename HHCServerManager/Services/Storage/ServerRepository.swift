@@ -359,7 +359,7 @@ final class ServerRepository: @unchecked Sendable {
         if let accountId {
             return try database.query("""
                 SELECT id, server_id, account_id, provider_id, region_id, instance_id, display_name,
-                       public_ip, private_ip, status, instance_type, zone_id, vpc_id, raw_json, last_synced_at
+                       public_ip, private_ip, status, instance_type, zone_id, vpc_id, security_group_ids, raw_json, last_synced_at
                 FROM cloud_instance_links
                 WHERE account_id = ?
                 ORDER BY last_synced_at DESC, display_name ASC
@@ -370,7 +370,7 @@ final class ServerRepository: @unchecked Sendable {
 
         return try database.query("""
             SELECT id, server_id, account_id, provider_id, region_id, instance_id, display_name,
-                   public_ip, private_ip, status, instance_type, zone_id, vpc_id, raw_json, last_synced_at
+                   public_ip, private_ip, status, instance_type, zone_id, vpc_id, security_group_ids, raw_json, last_synced_at
             FROM cloud_instance_links
             ORDER BY last_synced_at DESC, display_name ASC
         """) { statement in
@@ -381,7 +381,7 @@ final class ServerRepository: @unchecked Sendable {
     func fetchCloudInstanceLink(accountId: UUID, regionId: String, instanceId: String) throws -> CloudInstanceLink {
         let links = try database.query("""
             SELECT id, server_id, account_id, provider_id, region_id, instance_id, display_name,
-                   public_ip, private_ip, status, instance_type, zone_id, vpc_id, raw_json, last_synced_at
+                   public_ip, private_ip, status, instance_type, zone_id, vpc_id, security_group_ids, raw_json, last_synced_at
             FROM cloud_instance_links
             WHERE account_id = ? AND region_id = ? AND instance_id = ?
             LIMIT 1
@@ -407,6 +407,7 @@ final class ServerRepository: @unchecked Sendable {
             instanceType: nil,
             zoneId: nil,
             vpcId: nil,
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: nil
         )
@@ -416,8 +417,8 @@ final class ServerRepository: @unchecked Sendable {
         try database.execute("""
             INSERT INTO cloud_instance_links (
                 id, server_id, account_id, provider_id, region_id, instance_id, display_name,
-                public_ip, private_ip, status, instance_type, zone_id, vpc_id, raw_json, last_synced_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                public_ip, private_ip, status, instance_type, zone_id, vpc_id, security_group_ids, raw_json, last_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_id, region_id, instance_id) DO UPDATE SET
                 server_id = excluded.server_id,
                 provider_id = excluded.provider_id,
@@ -428,6 +429,7 @@ final class ServerRepository: @unchecked Sendable {
                 instance_type = excluded.instance_type,
                 zone_id = excluded.zone_id,
                 vpc_id = excluded.vpc_id,
+                security_group_ids = excluded.security_group_ids,
                 raw_json = excluded.raw_json,
                 last_synced_at = excluded.last_synced_at
         """, bindings: [
@@ -444,6 +446,7 @@ final class ServerRepository: @unchecked Sendable {
             link.instanceType.map(SQLiteValue.text) ?? .null,
             link.zoneId.map(SQLiteValue.text) ?? .null,
             link.vpcId.map(SQLiteValue.text) ?? .null,
+            .text(Self.encodeStringArray(link.securityGroupIds)),
             link.rawJSON.map(SQLiteValue.text) ?? .null,
             link.lastSyncedAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
         ])
@@ -952,6 +955,23 @@ final class ServerRepository: @unchecked Sendable {
         return text
     }
 
+    private static func encodeStringArray(_ value: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(value) else {
+            return "[]"
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func decodeStringArray(_ value: String?) -> [String] {
+        guard let value,
+              let data = value.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String].self, from: data)
+        else {
+            return []
+        }
+        return decoded
+    }
+
     private func mapDashboardSnapshot(_ statement: OpaquePointer) throws -> ServerDashboardSnapshot {
         let capabilitiesData = Data(Self.string(statement, 0).utf8)
         let metricsData = Data(Self.string(statement, 1).utf8)
@@ -1024,8 +1044,9 @@ final class ServerRepository: @unchecked Sendable {
             instanceType: optionalString(statement, 10),
             zoneId: optionalString(statement, 11),
             vpcId: optionalString(statement, 12),
-            rawJSON: optionalString(statement, 13),
-            lastSyncedAt: optionalDate(statement, 14)
+            securityGroupIds: decodeStringArray(optionalString(statement, 13)),
+            rawJSON: optionalString(statement, 14),
+            lastSyncedAt: optionalDate(statement, 15)
         )
     }
 

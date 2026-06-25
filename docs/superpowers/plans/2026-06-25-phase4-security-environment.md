@@ -96,6 +96,7 @@ CREATE TABLE environment_profiles (
 - [x] 规则 diff 和预览：当前已支持本地生成安全组规则新增/删除 diff、before/after 计数、风险级别、命令预览和警告。
 - [x] 有限写操作：腾讯云已支持新增/删除单条 ingress/egress 规则，并在执行前确认风险。
 - [x] 权限不足时明确提示：安全组读取、规则读取和规则变更会把 provider 权限错误转换为包含所需读/写权限、provider 名称和原始错误信息的用户提示，并在规则变更失败时写入审计日志。
+- [x] 实例精确安全组过滤：实例同步会持久化 provider 返回的安全组 ID，安全组页优先只展示当前服务器关联实例绑定的安全组；旧数据或 provider 未返回绑定关系时降级展示账号地域安全组列表。
 
 ### Task 3：systemd
 
@@ -150,7 +151,7 @@ CREATE TABLE environment_profiles (
 
 ## 8. 完成标志
 
-1. 云安全组读取、规则 diff/preview 和腾讯云单条规则写操作已可用；实例精确安全组关联和多云写操作仍待后续接入。
+1. 云安全组读取、规则 diff/preview、实例精确安全组过滤和三家云单条规则写操作已可用；真实云账号写操作验收仍待继续补齐。
 2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。当前 systemd、Nginx、Cron、Environment 已有工作台基础，Firewall 已支持只读探测和受限规则写操作。
 3. 所有远程写操作有确认和审计。当前 systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 已接入审计；现有危险确认已接入统一风险模型。
 4. Nginx 等配置类操作有备份和回滚。当前 Nginx 已具备读取、编辑、保存前备份、保存后测试、失败回滚和 reload 前保护。

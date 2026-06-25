@@ -3721,12 +3721,13 @@ final class CloudSecurityGroupService: @unchecked Sendable {
                 requiredPermission: "security group read permissions"
             )
         }
+        let filteredGroups = Self.groupsForLinkedInstance(groups, securityGroupIds: context.link.securityGroupIds)
         return CloudSecurityGroupList(
             accountId: context.account.id,
             providerId: context.account.providerId,
             regionId: context.link.regionId,
             instanceId: context.link.instanceId,
-            groups: groups.sorted { left, right in
+            groups: filteredGroups.sorted { left, right in
                 left.name.localizedStandardCompare(right.name) == .orderedAscending
             },
             capturedAt: now()
@@ -3833,6 +3834,17 @@ final class CloudSecurityGroupService: @unchecked Sendable {
             throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
         }
         return (link, account, credential)
+    }
+
+    private static func groupsForLinkedInstance(
+        _ groups: [CloudSecurityGroup],
+        securityGroupIds: [String]
+    ) -> [CloudSecurityGroup] {
+        let linkedIds = Set(securityGroupIds.filter { !$0.isEmpty })
+        guard !linkedIds.isEmpty else {
+            return groups
+        }
+        return groups.filter { linkedIds.contains($0.securityGroupId) }
     }
 
     private static func securityGroupAccessError(
@@ -5483,6 +5495,7 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
                     instanceType: instance.instanceType,
                     zoneId: instance.placement?.zone,
                     vpcId: instance.virtualPrivateCloud?.vpcId,
+                    securityGroupIds: instance.securityGroupIds ?? [],
                     billingType: instance.instanceChargeType,
                     expiredTime: instance.expiredTime.flatMap(Self.parseTencentDate),
                     rawJSON: instance.rawJSONString
@@ -6248,6 +6261,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
                     instanceType: instance.instanceType,
                     zoneId: instance.zoneId,
                     vpcId: instance.vpcAttributes?.vpcId,
+                    securityGroupIds: instance.securityGroupIds?.securityGroupId ?? [],
                     billingType: instance.instanceChargeType,
                     expiredTime: instance.expiredTime.flatMap(Self.parseAlibabaDate),
                     rawJSON: nil
@@ -7019,6 +7033,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
                     instanceType: server.flavor?.id,
                     zoneId: server.availabilityZone,
                     vpcId: nil,
+                    securityGroupIds: server.securityGroups?.map(\.name) ?? [],
                     billingType: server.metadata?.chargingMode,
                     expiredTime: nil,
                     rawJSON: nil
@@ -8120,6 +8135,7 @@ private struct AlibabaInstance: Decodable {
     var innerIpAddress: AlibabaIPAddressSet?
     var eipAddress: AlibabaEIPAddress?
     var vpcAttributes: AlibabaVpcAttributes?
+    var securityGroupIds: AlibabaSecurityGroupIdSet?
 
     enum CodingKeys: String, CodingKey {
         case instanceId = "InstanceId"
@@ -8133,6 +8149,15 @@ private struct AlibabaInstance: Decodable {
         case innerIpAddress = "InnerIpAddress"
         case eipAddress = "EipAddress"
         case vpcAttributes = "VpcAttributes"
+        case securityGroupIds = "SecurityGroupIds"
+    }
+}
+
+private struct AlibabaSecurityGroupIdSet: Decodable {
+    var securityGroupId: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroupId = "SecurityGroupId"
     }
 }
 
@@ -8582,6 +8607,7 @@ private struct HuaweiServer: Decodable {
     var addresses: HuaweiAddressMap?
     var flavor: HuaweiFlavor?
     var availabilityZone: String?
+    var securityGroups: [HuaweiServerSecurityGroup]?
     var metadata: HuaweiServerMetadata?
 
     enum CodingKeys: String, CodingKey {
@@ -8592,8 +8618,13 @@ private struct HuaweiServer: Decodable {
         case addresses
         case flavor
         case availabilityZone = "OS-EXT-AZ:availability_zone"
+        case securityGroups = "security_groups"
         case metadata
     }
+}
+
+private struct HuaweiServerSecurityGroup: Decodable {
+    var name: String
 }
 
 private struct HuaweiAddressMap: Decodable {
@@ -9127,6 +9158,7 @@ private struct TencentInstance: Decodable {
     var privateIpAddresses: [String]?
     var placement: TencentPlacement?
     var virtualPrivateCloud: TencentVirtualPrivateCloud?
+    var securityGroupIds: [String]?
     var instanceChargeType: String?
     var expiredTime: String?
     var rawJSONString: String?
@@ -9140,6 +9172,7 @@ private struct TencentInstance: Decodable {
         case privateIpAddresses = "PrivateIpAddresses"
         case placement = "Placement"
         case virtualPrivateCloud = "VirtualPrivateCloud"
+        case securityGroupIds = "SecurityGroupIds"
         case instanceChargeType = "InstanceChargeType"
         case expiredTime = "ExpiredTime"
     }
@@ -9154,6 +9187,7 @@ private struct TencentInstance: Decodable {
         privateIpAddresses = try container.decodeIfPresent([String].self, forKey: .privateIpAddresses)
         placement = try container.decodeIfPresent(TencentPlacement.self, forKey: .placement)
         virtualPrivateCloud = try container.decodeIfPresent(TencentVirtualPrivateCloud.self, forKey: .virtualPrivateCloud)
+        securityGroupIds = try container.decodeIfPresent([String].self, forKey: .securityGroupIds)
         instanceChargeType = try container.decodeIfPresent(String.self, forKey: .instanceChargeType)
         expiredTime = try container.decodeIfPresent(String.self, forKey: .expiredTime)
         rawJSONString = nil

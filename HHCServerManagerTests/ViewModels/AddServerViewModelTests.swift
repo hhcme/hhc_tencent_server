@@ -88,6 +88,7 @@ final class AddServerViewModelTests: XCTestCase {
             instanceType: "S5.SMALL1",
             zoneId: nil,
             vpcId: nil,
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: Date()
         )
@@ -124,6 +125,7 @@ final class AddServerViewModelTests: XCTestCase {
                 instanceType: "S5.SMALL1",
                 zoneId: nil,
                 vpcId: nil,
+                securityGroupIds: [],
                 rawJSON: nil,
                 lastSyncedAt: Date()
             ),

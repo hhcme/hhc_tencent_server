@@ -270,11 +270,15 @@ final class AppDatabase: @unchecked Sendable {
                 instance_type TEXT,
                 zone_id TEXT,
                 vpc_id TEXT,
+                security_group_ids TEXT,
                 raw_json TEXT,
                 last_synced_at TEXT,
                 UNIQUE(account_id, region_id, instance_id)
             )
         """)
+        if try !columnExists("security_group_ids", in: "cloud_instance_links") {
+            try execute("ALTER TABLE cloud_instance_links ADD COLUMN security_group_ids TEXT")
+        }
         try execute("""
             CREATE INDEX IF NOT EXISTS idx_cloud_instance_links_server
             ON cloud_instance_links(server_id)
@@ -440,6 +444,16 @@ final class AppDatabase: @unchecked Sendable {
 
     private var lastErrorMessage: String {
         String(cString: sqlite3_errmsg(db))
+    }
+
+    private func columnExists(_ columnName: String, in tableName: String) throws -> Bool {
+        try query("PRAGMA table_info(\(tableName))") { statement in
+            guard let text = sqlite3_column_text(statement, 1) else {
+                return ""
+            }
+            return String(cString: text)
+        }
+        .contains(columnName)
     }
 
     private func bind(_ bindings: [SQLiteValue], to statement: OpaquePointer?) throws {

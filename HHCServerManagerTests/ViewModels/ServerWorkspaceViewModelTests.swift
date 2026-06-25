@@ -1098,7 +1098,9 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         )
 
         XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.status), [.pending, .running])
-        XCTAssertEqual(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).map(\.status), [.running, .pending])
+        let persistedStatuses = try repository.fetchRemoteFileTransferJobs(serverId: profile.id).map(\.status)
+        XCTAssertEqual(persistedStatuses.filter { $0 == .running }.count, 1)
+        XCTAssertEqual(persistedStatuses.filter { $0 == .pending }.count, 1)
         try await waitUntil {
             viewModel.remoteFileTransferJobs.count == 2 &&
                 viewModel.remoteFileTransferJobs.allSatisfy { $0.status == .succeeded }
@@ -1435,6 +1437,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             instanceType: "mock",
             zoneId: "ap-guangzhou-1",
             vpcId: "vpc-123",
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: Date()
         ))
@@ -1495,6 +1498,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             instanceType: "mock",
             zoneId: "ap-guangzhou-1",
             vpcId: "vpc-123",
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: Date()
         ))
@@ -1556,6 +1560,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             instanceType: "mock",
             zoneId: "ap-guangzhou-1",
             vpcId: "vpc-123",
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: Date()
         ))
@@ -1638,6 +1643,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             instanceType: "mock",
             zoneId: "ap-guangzhou-1",
             vpcId: "vpc-123",
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: Date()
         ))

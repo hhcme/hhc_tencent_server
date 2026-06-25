@@ -345,6 +345,7 @@ final class ServerRepositoryTests: XCTestCase {
             instanceType: "S5.SMALL1",
             zoneId: "ap-guangzhou-1",
             vpcId: "vpc-123",
+            securityGroupIds: ["sg-web", "sg-ssh"],
             rawJSON: #"{"InstanceId":"ins-123"}"#,
             lastSyncedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
@@ -354,12 +355,14 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertEqual(links.count, 1)
         XCTAssertEqual(links[0].serverId, server.id)
         XCTAssertEqual(links[0].publicIp, "203.0.113.1")
+        XCTAssertEqual(links[0].securityGroupIds, ["sg-web", "sg-ssh"])
 
         var updated = link
         updated.id = UUID()
         updated.serverId = nil
         updated.displayName = "prod-renamed"
         updated.status = "STOPPED"
+        updated.securityGroupIds = ["sg-admin"]
         updated.lastSyncedAt = Date(timeIntervalSince1970: 1_700_000_030)
         try repository.upsertCloudInstanceLink(updated)
 
@@ -368,6 +371,7 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertEqual(links[0].displayName, "prod-renamed")
         XCTAssertNil(links[0].serverId)
         XCTAssertEqual(links[0].status, "STOPPED")
+        XCTAssertEqual(links[0].securityGroupIds, ["sg-admin"])
 
         updated.serverId = server.id
         try repository.upsertCloudInstanceLink(updated)

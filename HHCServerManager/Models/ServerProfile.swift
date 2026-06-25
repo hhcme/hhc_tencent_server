@@ -1187,6 +1187,7 @@ struct CloudInstanceLink: Identifiable, Codable, Equatable, Hashable {
     var instanceType: String?
     var zoneId: String?
     var vpcId: String?
+    var securityGroupIds: [String]
     var rawJSON: String?
     var lastSyncedAt: Date?
 }
@@ -1208,6 +1209,7 @@ struct CloudProviderInstance: Identifiable, Codable, Equatable, Hashable {
     var instanceType: String?
     var zoneId: String?
     var vpcId: String?
+    var securityGroupIds: [String]
     var billingType: String?
     var expiredTime: Date?
     var rawJSON: String?
@@ -1579,6 +1581,7 @@ extension CloudInstanceLink {
         instanceType = instance.instanceType
         zoneId = instance.zoneId
         vpcId = instance.vpcId
+        securityGroupIds = instance.securityGroupIds
         rawJSON = instance.rawJSON
         lastSyncedAt = syncedAt
     }

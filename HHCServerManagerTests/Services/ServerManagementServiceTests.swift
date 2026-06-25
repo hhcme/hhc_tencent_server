@@ -250,6 +250,7 @@ final class ServerManagementServiceTests: XCTestCase {
                     instanceType: "S5.SMALL1",
                     zoneId: "ap-guangzhou-3",
                     vpcId: "vpc-123",
+                    securityGroupIds: [],
                     rawJSON: nil,
                     lastSyncedAt: capturedAt
                 ),
@@ -2096,6 +2097,7 @@ final class ServerManagementServiceTests: XCTestCase {
             instanceType: "mock",
             zoneId: "ap-guangzhou-1",
             vpcId: "vpc-123",
+            securityGroupIds: ["sg-123"],
             rawJSON: nil,
             lastSyncedAt: Date()
         ))
@@ -2386,6 +2388,7 @@ final class ServerManagementServiceTests: XCTestCase {
             instanceType: nil,
             zoneId: nil,
             vpcId: nil,
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: Date(timeIntervalSince1970: 1_700_000_000)
         ))
@@ -2790,6 +2793,7 @@ final class ServerManagementServiceTests: XCTestCase {
             instanceType: "S5.SMALL1",
             zoneId: "ap-guangzhou-3",
             vpcId: "vpc-1",
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: nil
         )
@@ -2872,6 +2876,7 @@ final class ServerManagementServiceTests: XCTestCase {
             instanceType: "ecs.g7.large",
             zoneId: "ap-southeast-1a",
             vpcId: "vpc-1",
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: nil
         )
@@ -2954,6 +2959,7 @@ final class ServerManagementServiceTests: XCTestCase {
             instanceType: "s6.large.2",
             zoneId: "ap-southeast-1a",
             vpcId: nil,
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: nil
         )
@@ -3031,6 +3037,7 @@ final class ServerManagementServiceTests: XCTestCase {
             instanceType: "S5.SMALL1",
             zoneId: "ap-guangzhou-3",
             vpcId: "vpc-1",
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: Date(timeIntervalSince1970: 1_700_000_100)
         )
@@ -3117,7 +3124,8 @@ final class ServerManagementServiceTests: XCTestCase {
                     "PublicIpAddresses": ["203.0.113.1"],
                     "PrivateIpAddresses": ["10.0.0.2"],
                     "Placement": {"Zone": "ap-guangzhou-3"},
-                    "VirtualPrivateCloud": {"VpcId": "vpc-1"}
+                    "VirtualPrivateCloud": {"VpcId": "vpc-1"},
+                    "SecurityGroupIds": ["sg-web", "sg-ssh"]
                   }
                 ],
                 "RequestId": "request-1"
@@ -3160,6 +3168,7 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(instances[0].publicIp, "203.0.113.1")
         XCTAssertEqual(instances[0].privateIp, "10.0.0.2")
         XCTAssertEqual(instances[0].zoneId, "ap-guangzhou-3")
+        XCTAssertEqual(instances[0].securityGroupIds, ["sg-web", "sg-ssh"])
         XCTAssertEqual(instances[1].publicIp, nil)
         XCTAssertEqual(instances[1].status, "STOPPED")
         XCTAssertEqual(transport.requests.count, 2)
@@ -3706,6 +3715,7 @@ final class ServerManagementServiceTests: XCTestCase {
             instanceType: "mock",
             zoneId: "ap-guangzhou-1",
             vpcId: "vpc-123",
+            securityGroupIds: ["sg-123"],
             rawJSON: nil,
             lastSyncedAt: Date()
         ))
@@ -3767,6 +3777,7 @@ final class ServerManagementServiceTests: XCTestCase {
             instanceType: "mock",
             zoneId: "ap-guangzhou-1",
             vpcId: "vpc-123",
+            securityGroupIds: [],
             rawJSON: nil,
             lastSyncedAt: Date()
         )
@@ -3857,7 +3868,8 @@ final class ServerManagementServiceTests: XCTestCase {
                     "VpcAttributes": {
                       "VpcId": "vpc-1",
                       "PrivateIpAddress": {"IpAddress": ["10.0.0.10"]}
-                    }
+                    },
+                    "SecurityGroupIds": {"SecurityGroupId": ["sg-web", "sg-ssh"]}
                   }
                 ]
               }
@@ -3903,6 +3915,7 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(instances[0].publicIp, "203.0.113.10")
         XCTAssertEqual(instances[0].privateIp, "10.0.0.10")
         XCTAssertEqual(instances[0].vpcId, "vpc-1")
+        XCTAssertEqual(instances[0].securityGroupIds, ["sg-web", "sg-ssh"])
         XCTAssertEqual(instances[0].billingType, "PrePaid")
         XCTAssertEqual(instances[1].publicIp, "198.51.100.20")
 
@@ -4576,6 +4589,7 @@ final class ServerManagementServiceTests: XCTestCase {
                   "OS-EXT-AZ:availability_zone": "ap-southeast-1a",
                   "flavor": {"id": "s6.large.2"},
                   "metadata": {"charging_mode": "prePaid"},
+                  "security_groups": [{"name": "sg-web"}, {"name": "sg-ssh"}],
                   "addresses": {
                     "net-a": [
                       {"addr": "10.0.1.5", "OS-EXT-IPS:type": "fixed"},
@@ -4606,6 +4620,7 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(instances[0].privateIp, "10.0.1.5")
         XCTAssertEqual(instances[0].instanceType, "s6.large.2")
         XCTAssertEqual(instances[0].zoneId, "ap-southeast-1a")
+        XCTAssertEqual(instances[0].securityGroupIds, ["sg-web", "sg-ssh"])
         XCTAssertEqual(instances[0].billingType, "prePaid")
 
         XCTAssertEqual(transport.requests.count, 2)
@@ -5371,6 +5386,7 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
                 instanceType: "mock",
                 zoneId: "\(regionId)-1",
                 vpcId: "vpc-123",
+                securityGroupIds: ["sg-123"],
                 billingType: "POSTPAID_BY_HOUR",
                 expiredTime: nil,
                 rawJSON: nil
@@ -5411,6 +5427,18 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
                 securityGroupId: "sg-123",
                 name: "web",
                 description: "web ingress",
+                projectId: "0",
+                isDefault: false,
+                createdTime: "2026-06-01 10:00:00",
+                updatedTime: "2026-06-02 10:00:00"
+            ),
+            CloudSecurityGroup(
+                accountId: accountId,
+                providerId: providerId,
+                regionId: regionId,
+                securityGroupId: "sg-admin",
+                name: "admin",
+                description: "not attached to the linked instance",
                 projectId: "0",
                 isDefault: false,
                 createdTime: "2026-06-01 10:00:00",
