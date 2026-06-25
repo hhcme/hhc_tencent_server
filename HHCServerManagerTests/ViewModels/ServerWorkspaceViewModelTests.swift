@@ -290,6 +290,23 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.deploymentCommandPlan?.commandPreview.contains("systemctl restart api.service") == true)
     }
 
+    func testDeploymentProjectRejectsPathOutsideAllowlist() throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.startNewDeploymentProject(serverId: profile.id)
+        viewModel.deploymentName = "Bad API"
+        viewModel.deploymentRepositoryURL = "git@gitlab.com:hhc/api.git"
+        viewModel.deploymentBranch = "main"
+        viewModel.deploymentPath = "/etc/api"
+        viewModel.saveDeploymentProject(profile: profile, repository: repository)
+
+        XCTAssertTrue(viewModel.deploymentProjects.isEmpty)
+        XCTAssertTrue(try repository.fetchDeploymentProjects(serverId: profile.id).isEmpty)
+        XCTAssertTrue(viewModel.deploymentErrorMessage?.contains("outside the allowed deployment roots") == true)
+    }
+
     func testRunDeploymentPersistsRunLogsFromWorkspace() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
@@ -320,6 +337,34 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedDeploymentRun?.targetCommit, "def456")
         XCTAssertTrue(viewModel.deploymentLogs.contains { $0.stepName == "finish" && $0.message == "Deployment completed." })
         XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'origin/main'") })
+    }
+
+    func testRunDeploymentShowsHealthCheckFailureInWorkspace() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = DeploymentWorkspaceMockSSHClient(failingStep: "health_check")
+        let runner = DeploymentRunner(repository: repository)
+
+        viewModel.startNewDeploymentProject(serverId: profile.id)
+        viewModel.deploymentName = "API"
+        viewModel.deploymentRepositoryURL = "git@gitlab.com:hhc/api.git"
+        viewModel.deploymentBranch = "main"
+        viewModel.deploymentPath = "/srv/api"
+        viewModel.deploymentHealthCheckCommand = "curl -fsS http://127.0.0.1:3000/health"
+
+        viewModel.runDeployment(
+            profile: profile,
+            sshClient: client,
+            deploymentRunner: runner,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isRunningDeployment == false && viewModel.selectedDeploymentRun != nil }
+
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.status, .failed)
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.summary, "health_check failed with exit code 1.")
+        XCTAssertTrue(viewModel.deploymentLogs.contains { $0.stepName == "health_check" && $0.stream == .stderr && $0.message == "health_check failed" })
+        XCTAssertTrue(client.commands.contains { $0.contains("curl -fsS http://127.0.0.1:3000/health") })
     }
 
     func testRunDeploymentRefreshesLogsWhileRunning() async throws {
@@ -1142,6 +1187,11 @@ private final class MockSSHClient: SSHClient, @unchecked Sendable {
 
 private final class DeploymentWorkspaceMockSSHClient: SSHClient, @unchecked Sendable {
     private(set) var commands: [String] = []
+    private let failingStep: String?
+
+    init(failingStep: String? = nil) {
+        self.failingStep = failingStep
+    }
 
     func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
         try await execute("printf hhc-ssh-ok", profile: profile)
@@ -1149,6 +1199,10 @@ private final class DeploymentWorkspaceMockSSHClient: SSHClient, @unchecked Send
 
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
         commands.append(command)
+        let step = stepName(for: command)
+        if step == failingStep {
+            return CommandResult(command: command, stdout: "", stderr: "\(step) failed", exitCode: 1, duration: 0.1)
+        }
         if command.contains("if [ -d") && command.contains("git rev-parse HEAD") {
             return CommandResult(command: command, stdout: "abc123\n", stderr: "", exitCode: 0, duration: 0.1)
         }
@@ -1159,6 +1213,28 @@ private final class DeploymentWorkspaceMockSSHClient: SSHClient, @unchecked Send
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+
+    private func stepName(for command: String) -> String {
+        if command == "command -v git" {
+            return "git_check"
+        }
+        if command.contains("if [ -d") && command.contains("git rev-parse HEAD") {
+            return "current_commit"
+        }
+        if command.contains("git clone") || command.contains("git fetch") {
+            return "clone_or_fetch"
+        }
+        if command.contains("git reset --hard") {
+            return "checkout"
+        }
+        if command.contains("git rev-parse HEAD") {
+            return "target_commit"
+        }
+        if command.contains("curl -fsS") {
+            return "health_check"
+        }
+        return "command"
+    }
 }
 
 private final class TrustThenExecuteMockSSHClient: SSHClient, @unchecked Sendable {
