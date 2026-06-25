@@ -5,6 +5,7 @@ struct ServerBrowserView: View {
     @StateObject private var viewModel = ServerBrowserViewModel()
     @State private var showingAddServer = false
     @State private var showingCloudImport = false
+    @State private var showingCloudResourceCenter = false
     @State private var serverPendingEdit: ServerProfile?
     @State private var serverPendingDeletion: ServerProfile?
 
@@ -42,6 +43,9 @@ struct ServerBrowserView: View {
                 viewModel.selectedServerId = profile.id
             }
         }
+        .sheet(isPresented: $showingCloudResourceCenter) {
+            CloudResourceCenterSheet()
+        }
         .sheet(item: $serverPendingEdit) { profile in
             AddServerSheet(profile: profile) { updated in
                 appState.reloadServers()
@@ -71,6 +75,12 @@ struct ServerBrowserView: View {
                 .frame(maxWidth: 320)
 
             Spacer()
+
+            Button {
+                showingCloudResourceCenter = true
+            } label: {
+                Label("Resources", systemImage: "externaldrive.connected.to.line.below")
+            }
 
             Button {
                 showingCloudImport = true
@@ -157,6 +167,409 @@ struct ServerBrowserView: View {
                 }
             }
         )
+    }
+}
+
+private struct CloudResourceCenterSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var viewModel = CloudResourceCenterViewModel()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Cloud Resources")
+                        .font(.title2.weight(.semibold))
+                    Text("Search synced instances, disks, snapshots, billing states, and provider capabilities.")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .help("Close")
+            }
+            .padding(22)
+
+            Divider()
+
+            HSplitView {
+                cloudControls
+                    .frame(minWidth: 310, idealWidth: 350)
+
+                resourceList
+                    .frame(minWidth: 360, idealWidth: 470)
+
+                resourceDetail
+                    .frame(minWidth: 340, idealWidth: 430)
+            }
+            .padding(.horizontal, 12)
+
+            Divider()
+
+            HStack(spacing: 10) {
+                if viewModel.isWorking {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                if let statusMessage = viewModel.statusMessage {
+                    Text(statusMessage)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button("Close") {
+                    dismiss()
+                }
+            }
+            .padding(16)
+        }
+        .frame(width: 1120, height: 720)
+        .onAppear {
+            appState.reloadServers()
+            viewModel.selectDefaultAccount(from: appState.cloudProviderAccounts)
+            viewModel.refreshCapabilityMatrix(registry: appState.cloudProviderRegistry)
+            viewModel.refreshLocalResources(appState: appState)
+            if viewModel.selectedAccountId != nil {
+                Task {
+                    await viewModel.loadRegions(appState: appState)
+                }
+            }
+        }
+        .onChange(of: viewModel.selectedAccountId) {
+            Task {
+                await viewModel.loadRegions(appState: appState)
+            }
+        }
+        .onChange(of: viewModel.searchText) {
+            viewModel.refreshLocalResources(appState: appState)
+        }
+        .onChange(of: viewModel.kindFilter) {
+            viewModel.refreshLocalResources(appState: appState)
+        }
+        .onChange(of: viewModel.statusFilter) {
+            viewModel.refreshLocalResources(appState: appState)
+        }
+        .onChange(of: viewModel.selectedRegionId) {
+            viewModel.refreshLocalResources(appState: appState)
+        }
+    }
+
+    private var cloudControls: some View {
+        Form {
+            Section("Scope") {
+                Picker("Account", selection: $viewModel.selectedAccountId) {
+                    Text("All accounts").tag(Optional<UUID>.none)
+                    ForEach(appState.cloudProviderAccounts) { account in
+                        Text("\(account.displayName) · \(account.providerId.displayName)")
+                            .tag(Optional(account.id))
+                    }
+                }
+
+                Picker("Region", selection: $viewModel.selectedRegionId) {
+                    Text("All loaded regions").tag("")
+                    ForEach(viewModel.regions) { region in
+                        Text(region.displayName).tag(region.id)
+                    }
+                }
+
+                HStack {
+                    Button {
+                        Task {
+                            await viewModel.loadRegions(appState: appState)
+                        }
+                    } label: {
+                        Label("Regions", systemImage: "map")
+                    }
+                    .disabled(!viewModel.canLoadRegions)
+
+                    Button {
+                        Task {
+                            await viewModel.syncSelectedRegion(appState: appState)
+                        }
+                    } label: {
+                        Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!viewModel.canSync)
+                }
+            }
+
+            Section("Filter") {
+                TextField("Search resources", text: $viewModel.searchText)
+                Picker("Kind", selection: $viewModel.kindFilter) {
+                    ForEach(CloudResourceKindFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                TextField("Status", text: $viewModel.statusFilter)
+
+                Button {
+                    viewModel.resetFilters(appState: appState)
+                } label: {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                }
+            }
+
+            Section("Capabilities") {
+                CapabilityMatrixView(rows: viewModel.capabilityRows)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var resourceList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Resources")
+                    .font(.headline)
+                Spacer()
+                Text("\(viewModel.resources.count)")
+                    .foregroundStyle(.secondary)
+            }
+            .padding([.horizontal, .top], 12)
+            .padding(.bottom, 8)
+
+            if viewModel.resources.isEmpty {
+                ContentUnavailableView(
+                    "No Resources",
+                    systemImage: "externaldrive.connected.to.line.below",
+                    description: Text("Select an account and region, then sync cloud resources.")
+                )
+            } else {
+                List(viewModel.resources, selection: $viewModel.selectedResourceId) { resource in
+                    CloudUnifiedResourceRow(resource: resource)
+                        .tag(resource.id)
+                }
+                .listStyle(.inset)
+            }
+        }
+    }
+
+    private var resourceDetail: some View {
+        Group {
+            if let resource = viewModel.selectedResource {
+                CloudResourceDetailView(resource: resource)
+            } else {
+                ContentUnavailableView(
+                    "Select a Resource",
+                    systemImage: "cursorarrow.click",
+                    description: Text("Choose a synced resource to inspect its cloud metadata.")
+                )
+            }
+        }
+    }
+}
+
+private struct CapabilityMatrixView: View {
+    let rows: [ProviderCapabilityStatus]
+
+    private var groups: [CapabilityProviderGroup] {
+        Dictionary(grouping: rows, by: \.providerId)
+            .map { providerId, rows in
+                CapabilityProviderGroup(providerId: providerId, rows: rows.sorted { $0.capability.rawValue < $1.capability.rawValue })
+            }
+            .sorted { $0.providerName < $1.providerName }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(groups) { (group: CapabilityProviderGroup) in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(group.providerName)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text(group.isRegistered ? "Registered" : "Missing")
+                            .font(.caption)
+                            .foregroundStyle(group.isRegistered ? Color.secondary : Color.red)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 86), spacing: 6)], alignment: .leading, spacing: 6) {
+                        ForEach(group.supportedRows) { row in
+                            Label(row.capability.displayName, systemImage: "checkmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                Divider()
+            }
+        }
+    }
+}
+
+private struct CapabilityProviderGroup: Identifiable {
+    var id: String { providerId.rawValue }
+    let providerId: CloudProviderID
+    let rows: [ProviderCapabilityStatus]
+
+    var providerName: String {
+        rows.first?.providerName ?? providerId.displayName
+    }
+
+    var isRegistered: Bool {
+        rows.first?.isRegistered == true
+    }
+
+    var supportedRows: [ProviderCapabilityStatus] {
+        rows.filter(\.isSupported)
+    }
+}
+
+private struct CloudUnifiedResourceRow: View {
+    let resource: CloudUnifiedResource
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Label(resource.displayName, systemImage: iconName)
+                    .font(.headline)
+                Spacer()
+                Text(resource.kind.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(resource.resourceId)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            HStack(spacing: 10) {
+                Label(resource.providerId.displayName, systemImage: "cloud")
+                if let regionId = resource.regionId {
+                    Label(regionId, systemImage: "mappin.and.ellipse")
+                }
+                if let status = resource.status {
+                    Label(status, systemImage: "circle.fill")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 5)
+    }
+
+    private var iconName: String {
+        switch resource.kind {
+        case .instance:
+            "server.rack"
+        case .securityGroup:
+            "lock.shield"
+        case .disk:
+            "internaldrive"
+        case .snapshot:
+            "camera.filters"
+        case .billing:
+            "creditcard"
+        }
+    }
+}
+
+private struct CloudResourceDetailView: View {
+    let resource: CloudUnifiedResource
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label(resource.displayName, systemImage: iconName)
+                    .font(.title3.weight(.semibold))
+                Text(resource.kind.displayName)
+                    .foregroundStyle(.secondary)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                detailRow("Provider", resource.providerId.displayName)
+                if let regionId = resource.regionId {
+                    detailRow("Region", regionId)
+                }
+                detailRow("Resource ID", resource.resourceId)
+                if let status = resource.status {
+                    detailRow("Status", status)
+                }
+                if let primaryAddress = resource.primaryAddress {
+                    detailRow(primaryLabel, primaryAddress)
+                }
+                if let secondaryText = resource.secondaryText {
+                    detailRow(secondaryLabel, secondaryText)
+                }
+                if let lastSyncedAt = resource.lastSyncedAt {
+                    detailRow("Last Sync", AppDatabase.string(from: lastSyncedAt))
+                }
+            }
+
+            if resource.kind == .billing {
+                Text("Billing data comes from cloud API fields and may lag behind the provider console.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var iconName: String {
+        switch resource.kind {
+        case .instance:
+            "server.rack"
+        case .securityGroup:
+            "lock.shield"
+        case .disk:
+            "internaldrive"
+        case .snapshot:
+            "camera.filters"
+        case .billing:
+            "creditcard"
+        }
+    }
+
+    private var primaryLabel: String {
+        switch resource.kind {
+        case .instance:
+            "Address"
+        case .disk, .snapshot:
+            "Attached To"
+        case .billing:
+            "Billing Type"
+        case .securityGroup:
+            "Address"
+        }
+    }
+
+    private var secondaryLabel: String {
+        switch resource.kind {
+        case .disk:
+            "Disk"
+        case .snapshot:
+            "Size"
+        case .billing:
+            "Expire At"
+        default:
+            "Details"
+        }
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .textSelection(.enabled)
+        }
     }
 }
 

@@ -99,6 +99,40 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.canImport)
     }
 
+    func testCloudResourceCenterKindFiltersMapToSearchKinds() {
+        XCTAssertEqual(CloudResourceKindFilter.all.queryKinds, Set(CloudResourceKind.allCases))
+        XCTAssertEqual(CloudResourceKindFilter.instance.queryKinds, [.instance])
+        XCTAssertEqual(CloudResourceKindFilter.disk.queryKinds, [.disk])
+        XCTAssertEqual(CloudResourceKindFilter.snapshot.queryKinds, [.snapshot])
+        XCTAssertEqual(CloudResourceKindFilter.billing.queryKinds, [.billing])
+        XCTAssertEqual(CloudResourceKindFilter.securityGroup.queryKinds, [.securityGroup])
+    }
+
+    func testCloudResourceCenterCapabilityMatrixMarksMissingProviders() {
+        let viewModel = CloudResourceCenterViewModel()
+        let registry = CloudProviderRegistry(adapters: [
+            MockResourceCenterCloudAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .cloudDisks, .cloudSnapshots, .cloudBilling]
+            ),
+        ])
+
+        viewModel.refreshCapabilityMatrix(registry: registry)
+
+        XCTAssertEqual(
+            viewModel.capabilityRows.first {
+                $0.providerId == .tencentCloud && $0.capability == .cloudDisks
+            }?.isSupported,
+            true
+        )
+        XCTAssertEqual(
+            viewModel.capabilityRows.first {
+                $0.providerId == .alibabaCloud && $0.capability == .instanceDiscovery
+            }?.isRegistered,
+            false
+        )
+    }
+
     private func makeProfile(authType: SSHAuthType) -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -113,4 +147,62 @@ final class AddServerViewModelTests: XCTestCase {
             updatedAt: Date()
         )
     }
+}
+
+private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
+    let providerId: CloudProviderID
+    let displayName = "Mock Cloud"
+    let capabilities: Set<CloudCapability>
+
+    func validateCredential(_ credential: CloudProviderCredential) async throws {}
+
+    func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion] { [] }
+
+    func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance] { [] }
+
+    func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
+        CloudMetricSeries(
+            metricName: query.metricName,
+            instanceId: query.instanceId,
+            regionId: query.regionId,
+            unit: "%",
+            values: [],
+            timestamps: []
+        )
+    }
+
+    func fetchSecurityGroups(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String
+    ) async throws -> [CloudSecurityGroup] { [] }
+
+    func fetchSecurityGroupPolicies(
+        credential: CloudProviderCredential,
+        group: CloudSecurityGroup,
+        capturedAt: Date
+    ) async throws -> CloudSecurityGroupPolicySnapshot {
+        CloudSecurityGroupPolicySnapshot(group: group, version: nil, ingress: [], egress: [], capturedAt: capturedAt)
+    }
+
+    func fetchDisks(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudDisk] { [] }
+
+    func fetchSnapshots(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudSnapshot] { [] }
+
+    func fetchBillingStates(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudBillingState] { [] }
 }

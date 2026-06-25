@@ -196,6 +196,171 @@ final class CloudImportViewModel: ObservableObject {
     }
 }
 
+enum CloudResourceKindFilter: String, CaseIterable, Identifiable {
+    case all
+    case instance
+    case disk
+    case snapshot
+    case billing
+    case securityGroup
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            "All"
+        case .instance:
+            "Instances"
+        case .disk:
+            "Disks"
+        case .snapshot:
+            "Snapshots"
+        case .billing:
+            "Billing"
+        case .securityGroup:
+            "Security Groups"
+        }
+    }
+
+    var queryKinds: Set<CloudResourceKind> {
+        switch self {
+        case .all:
+            Set(CloudResourceKind.allCases)
+        case .instance:
+            [.instance]
+        case .disk:
+            [.disk]
+        case .snapshot:
+            [.snapshot]
+        case .billing:
+            [.billing]
+        case .securityGroup:
+            [.securityGroup]
+        }
+    }
+}
+
+@MainActor
+final class CloudResourceCenterViewModel: ObservableObject {
+    @Published var selectedAccountId: UUID?
+    @Published var regions: [CloudRegion] = []
+    @Published var selectedRegionId = ""
+    @Published var searchText = ""
+    @Published var statusFilter = ""
+    @Published var kindFilter: CloudResourceKindFilter = .all
+    @Published private(set) var resources: [CloudUnifiedResource] = []
+    @Published private(set) var capabilityRows: [ProviderCapabilityStatus] = []
+    @Published var selectedResourceId: String?
+    @Published var isWorking = false
+    @Published var statusMessage: String?
+    @Published var errorMessage: String?
+
+    var selectedResource: CloudUnifiedResource? {
+        guard let selectedResourceId else { return nil }
+        return resources.first { $0.id == selectedResourceId }
+    }
+
+    var canLoadRegions: Bool {
+        selectedAccountId != nil && !isWorking
+    }
+
+    var canSync: Bool {
+        selectedAccountId != nil && !selectedRegionId.isEmpty && !isWorking
+    }
+
+    func selectDefaultAccount(from accounts: [CloudProviderAccount]) {
+        if selectedAccountId == nil {
+            selectedAccountId = accounts.first(where: \.enabled)?.id ?? accounts.first?.id
+        }
+    }
+
+    func refreshCapabilityMatrix(registry: CloudProviderRegistry) {
+        capabilityRows = ProviderCapabilityMatrixBuilder.build(registry: registry).rows
+    }
+
+    func refreshLocalResources(appState: AppState) {
+        do {
+            let query = CloudResourceSearchQuery(
+                text: searchText,
+                accountId: selectedAccountId,
+                regionId: selectedRegionId.nilIfBlank,
+                kinds: kindFilter.queryKinds,
+                status: statusFilter.nilIfBlank
+            )
+            resources = try appState.cloudInstanceSyncService.loadUnifiedCloudResources(
+                accountId: selectedAccountId,
+                regionId: selectedRegionId.nilIfBlank,
+                query: query
+            )
+            if let selectedResourceId, !resources.contains(where: { $0.id == selectedResourceId }) {
+                self.selectedResourceId = resources.first?.id
+            } else if selectedResourceId == nil {
+                selectedResourceId = resources.first?.id
+            }
+            statusMessage = resources.isEmpty ? "No cached cloud resources match the current filters." : "Loaded \(resources.count) cached cloud resources."
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+            statusMessage = nil
+        }
+    }
+
+    func loadRegions(appState: AppState) async {
+        guard let account = selectedAccount(from: appState.cloudProviderAccounts) else { return }
+        await run("Loading regions...") {
+            regions = try await appState.cloudInstanceSyncService.fetchRegions(account: account).filter(\.available)
+            selectedRegionId = regions.first?.id ?? ""
+            refreshLocalResources(appState: appState)
+            statusMessage = regions.isEmpty ? "No available regions returned." : "Regions loaded."
+        }
+    }
+
+    func syncSelectedRegion(appState: AppState) async {
+        guard let account = selectedAccount(from: appState.cloudProviderAccounts) else { return }
+        await run("Syncing cloud resources...") {
+            _ = try await appState.cloudInstanceSyncService.syncInstances(account: account, regionId: selectedRegionId)
+            if appState.cloudProviderRegistry.supports(.cloudDisks, providerId: account.providerId) {
+                _ = try await appState.cloudInstanceSyncService.syncDisks(account: account, regionId: selectedRegionId)
+            }
+            if appState.cloudProviderRegistry.supports(.cloudSnapshots, providerId: account.providerId) {
+                _ = try await appState.cloudInstanceSyncService.syncSnapshots(account: account, regionId: selectedRegionId)
+            }
+            if appState.cloudProviderRegistry.supports(.cloudBilling, providerId: account.providerId) {
+                _ = try await appState.cloudInstanceSyncService.syncBillingStates(account: account, regionId: selectedRegionId)
+            }
+            appState.reloadServers()
+            refreshLocalResources(appState: appState)
+            statusMessage = resources.isEmpty ? "Sync completed. No resources matched the current filters." : "Sync completed. \(resources.count) resources are visible."
+        }
+    }
+
+    func resetFilters(appState: AppState) {
+        searchText = ""
+        statusFilter = ""
+        kindFilter = .all
+        refreshLocalResources(appState: appState)
+    }
+
+    private func selectedAccount(from accounts: [CloudProviderAccount]) -> CloudProviderAccount? {
+        guard let selectedAccountId else { return nil }
+        return accounts.first { $0.id == selectedAccountId }
+    }
+
+    private func run(_ status: String, operation: () async throws -> Void) async {
+        isWorking = true
+        errorMessage = nil
+        statusMessage = status
+        defer { isWorking = false }
+        do {
+            try await operation()
+        } catch {
+            errorMessage = error.localizedDescription
+            statusMessage = nil
+        }
+    }
+}
+
 enum CloudImportError: LocalizedError {
     case validation(String)
 

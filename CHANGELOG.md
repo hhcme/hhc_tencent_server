@@ -91,6 +91,7 @@ All notable changes to this project will be documented in this file.
 - Added a Verdaccio npm smoke test harness and workspace action that publishes a temporary package, installs it back, verifies `require`, and cleans up without placing the plaintext password in the shell command.
 - Added Verdaccio service controls and pinned-version upgrade support with systemd unit backup, restart, health check, status refresh, and remote change audit logs.
 - Started Phase 7 advanced cloud resources with Tencent Cloud CBS disk and snapshot read APIs, billing/expiry state extraction, SQLite persistence, provider capability matrix, and unified resource search.
+- Added a macOS Cloud Resources center for account/region scoped sync, cross-resource filtering, provider capability matrix display, and resource detail inspection.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -177,3 +178,4 @@ All notable changes to this project will be documented in this file.
 - 添加 Verdaccio npm smoke test harness 和工作台入口，可临时发布包、安装回读、验证 `require` 并清理，且明文密码不进入 shell 命令。
 - 添加 Verdaccio 服务控制和固定版本升级能力，支持 systemd unit 备份、重启、health check、状态刷新和远程变更审计日志。
 - 启动 Phase 7 高级云资源能力，加入腾讯云 CBS 云盘/快照只读 API、计费/到期状态提取、SQLite 持久化、provider capability matrix 和统一资源搜索。
+- 添加 macOS 云资源中心，支持按账号/地域同步、跨资源过滤、provider capability matrix 展示和资源详情查看。

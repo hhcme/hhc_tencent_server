@@ -96,6 +96,7 @@ CREATE TABLE cloud_billing_states (
 - 已新增 SQLite 表和 Repository 读写：`cloud_disks`、`cloud_snapshots`、`cloud_billing_states`。
 - 已新增 `ProviderCapabilityMatrixBuilder` 和 `CloudResourceSearchService`。
 - 已扩展 `CloudInstanceSyncService`，支持腾讯云云盘、快照、计费状态同步入库，并从本地库加载统一云资源。
+- 已新增 macOS 云资源中心，支持按账号/地域同步、跨资源搜索过滤、能力矩阵展示和资源详情查看。
 
 ## 6. UI 范围
 
@@ -148,8 +149,8 @@ CREATE TABLE cloud_billing_states (
 ### Task 6：云资源中心 UI
 
 - [x] 资源搜索和过滤服务。
-- [ ] 高级资源详情页。
-- [ ] capability matrix 展示。
+- [x] 高级资源详情页。
+- [x] capability matrix 展示。
 - [ ] 操作风险确认。
 
 ### Task 7：测试
@@ -163,9 +164,9 @@ CREATE TABLE cloud_billing_states (
 ### Task 8：手动验收
 
 - [ ] 腾讯云、阿里云、华为云账号都可只读同步实例。
-- [ ] 云资源中心能跨厂商搜索。
-- [ ] 腾讯云云盘和快照信息可展示。
-- [ ] 计费/到期状态有来源和刷新时间。
+- [x] 云资源中心能跨厂商搜索。
+- [x] 腾讯云云盘和快照信息可展示。
+- [x] 计费/到期状态有来源和刷新时间。
 - [ ] 创建快照需要二次确认并写日志。
 - [ ] 权限不足时能力自动降级。
 
