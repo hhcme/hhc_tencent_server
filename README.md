@@ -29,9 +29,9 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 ## Documentation / 文档
 
 - [Documentation index / 文档索引](docs/README.md)
-- [macOS MVP Figma design / macOS MVP Figma 设计稿](https://www.figma.com/design/Wvukq4AG9kHbVYKdF64gBX)
-- [macOS MVP design note, Chinese / macOS MVP 设计稿说明中文](docs/superpowers/specs/2026-06-25-macos-mvp-figma-design.md)
-- [macOS MVP design note, English](docs/en/2026-06-25-macos-mvp-figma-design.md)
+- [macOS MVP design snapshots / macOS MVP 本地设计快照](docs/assets/design/macos-mvp-v0.2/README.md)
+- [macOS MVP design note, Chinese / macOS MVP 设计稿说明中文](docs/superpowers/specs/2026-06-25-macos-mvp-design.md)
+- [macOS MVP design note, English](docs/en/2026-06-25-macos-mvp-design.md)
 - [Design document, Chinese / 设计文档中文](docs/superpowers/specs/2026-06-25-server-manager-design.md)
 - [Design document, English](docs/en/2026-06-25-server-manager-design.md)
 - [Cloud Provider API enhancement, Chinese / 云厂商 API 增强层中文](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)

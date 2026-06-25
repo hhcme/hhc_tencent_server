@@ -1,10 +1,10 @@
-# macOS MVP Figma Design
+# macOS MVP Design
 
-Figma file: [HHC Server Manager - macOS MVP Design](https://www.figma.com/design/Wvukq4AG9kHbVYKdF64gBX)
+Repository snapshots: [macOS MVP v0.2 Design Snapshots](../assets/design/macos-mvp-v0.2/README.md)
 
 ## Scope
 
-This design file is used to validate product information architecture, core flows, and UI density before implementing the macOS client. The recommended implementation reference is now the `02 macOS Native Flow v0.2` page; the `01 macOS MVP` page is kept as an early exploration.
+This design file is used to validate product information architecture, core flows, and UI density before implementing the macOS client. The recommended implementation reference is now the checked-in `macos-mvp-v0.2` design snapshots.
 
 The core v0.2 adjustment is: the app starts with a server list; opening a server enters a dedicated workspace for that server; switching servers happens through an explicit switcher in the workspace toolbar.
 
@@ -17,24 +17,21 @@ The current design focuses on UI decisions that affect Phase 1 and Phase 2:
 - Cloud provider account settings.
 - Cloud instance discovery and linking cloud instances to local SSH profiles.
 
-## Frames
+## Snapshots
 
-### Recommended: `02 macOS Native Flow v0.2`
+- `01-startup-server-list.png`: startup screen focused on server browsing, grouping, search, filtering, and selected-server summary.
+- `02-server-workspace-overview.png`: dedicated single-server workspace after opening a server, with server-specific navigation on the left and back/switch controls in the toolbar.
+- `03-server-switcher-popover.png`: popover for switching the active server without returning to the full list.
+- `04-add-server-native-sheet.png`: add-server form closer to a native macOS sheet.
+- `05-host-key-trust-native-sheet.png`: host-key confirmation flow closer to a native macOS sheet.
 
-- `01 Startup - Server List`: startup screen focused on server browsing, grouping, search, filtering, and selected-server summary.
-- `02 Server Workspace - Overview`: dedicated single-server workspace after opening a server, with server-specific navigation on the left and back/switch controls in the toolbar.
-- `03 Server Switcher Popover`: popover for switching the active server without returning to the full list.
-- `04 Add Server - Native Sheet`: add-server form closer to a native macOS sheet.
-- `05 Host Key Trust - Native Sheet`: host-key confirmation flow closer to a native macOS sheet.
+## Local Images
 
-### Early reference: `01 macOS MVP`
-
-- `01 Main Window - Dashboard`: main window, sidebar, server overview, cloud instance information, recent operations, and terminal preview.
-- `02 Add Server Sheet`: add-server sheet with profile fields, authentication mode, and security guidance.
-- `03 Host Key Trust Sheet`: fingerprint confirmation flow for unknown hosts.
-- `04 Cloud Accounts Settings`: cloud account management, provider adapter capability model, and Tencent Cloud account configuration.
-- `05 Instance Import and SSH Link`: cloud API instance discovery and SSH profile creation for unconfigured instances.
-- `06 Visual System and Handoff Notes`: colors, implementation decisions, and key states.
+- [Startup server list](../assets/design/macos-mvp-v0.2/01-startup-server-list.png)
+- [Server workspace overview](../assets/design/macos-mvp-v0.2/02-server-workspace-overview.png)
+- [Server switcher popover](../assets/design/macos-mvp-v0.2/03-server-switcher-popover.png)
+- [Add server native sheet](../assets/design/macos-mvp-v0.2/04-add-server-native-sheet.png)
+- [Host key trust native sheet](../assets/design/macos-mvp-v0.2/05-host-key-trust-native-sheet.png)
 
 ## Design Decisions
 
@@ -57,6 +54,6 @@ The current design focuses on UI decisions that affect Phase 1 and Phase 2:
 
 ## Follow-up Iterations
 
-- Replace base nodes with reusable components after adopting the Apple macOS UI Kit or a project-owned component library.
+- Use the checked-in snapshots as the stable implementation reference for the open-source project.
 - Add deeper screens for terminal, file manager, command panel, and deployment workflows.
 - Feed SwiftUI implementation findings back into control sizing, states, and empty-state designs.

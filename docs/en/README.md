@@ -1,7 +1,7 @@
 # English Documentation
 
-- [macOS MVP Figma design](https://www.figma.com/design/Wvukq4AG9kHbVYKdF64gBX)
-- [macOS MVP design note](2026-06-25-macos-mvp-figma-design.md)
+- [macOS MVP design snapshots](../assets/design/macos-mvp-v0.2/README.md)
+- [macOS MVP design note](2026-06-25-macos-mvp-design.md)
 - [Design document](2026-06-25-server-manager-design.md)
 - [Cloud Provider API enhancement](2026-06-25-cloud-provider-integration.md)
 - [Windows native client strategy](2026-06-25-windows-native-client-strategy.md)
