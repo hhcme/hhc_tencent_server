@@ -73,6 +73,62 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertNil(harness.appState.selectedServer)
     }
 
+    @MainActor
+    func testAppStateReloadsPersistedServerProfilesAfterDatabaseReopen() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HHCServerManagerTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let databaseURL = directory.appendingPathComponent("HHCServerManager.sqlite")
+        let keychainServiceName = "me.hhc.HHCServerManagerTests.persisted-app-state.\(UUID().uuidString)"
+        var keychainRef: String?
+        defer {
+            if let keychainRef {
+                KeychainService(serviceName: keychainServiceName).deleteCredentials(keychainRef: keychainRef)
+            }
+        }
+
+        do {
+            let database = try AppDatabase(url: databaseURL)
+            let repository = ServerRepository(database: database)
+            let keychain = KeychainService(serviceName: keychainServiceName)
+            let appState = AppState(repository: repository, keychain: keychain)
+            let profile = try appState.serverManagementService.createServer(
+                name: "Persistent Server",
+                host: "persistent.example.internal",
+                port: 2222,
+                username: "deploy",
+                groupName: "production",
+                authType: .password,
+                credential: .password("persisted-secret")
+            )
+            keychainRef = profile.keychainRef
+            appState.reloadServers()
+
+            XCTAssertEqual(appState.servers.map(\.id), [profile.id])
+            XCTAssertEqual(try keychain.readPassword(keychainRef: profile.keychainRef), "persisted-secret")
+        }
+
+        do {
+            let reopenedDatabase = try AppDatabase(url: databaseURL)
+            let reopenedRepository = ServerRepository(database: reopenedDatabase)
+            let reopenedKeychain = KeychainService(serviceName: keychainServiceName)
+            let reopenedAppState = AppState(repository: reopenedRepository, keychain: reopenedKeychain)
+            let profile = try XCTUnwrap(reopenedAppState.servers.first)
+
+            XCTAssertEqual(reopenedAppState.servers.count, 1)
+            XCTAssertEqual(profile.name, "Persistent Server")
+            XCTAssertEqual(profile.host, "persistent.example.internal")
+            XCTAssertEqual(profile.port, 2222)
+            XCTAssertEqual(profile.username, "deploy")
+            XCTAssertEqual(profile.groupName, "production")
+            XCTAssertEqual(profile.authType, .password)
+            XCTAssertNil(reopenedAppState.selectedServerId)
+            XCTAssertEqual(try reopenedKeychain.readPassword(keychainRef: profile.keychainRef), "persisted-secret")
+        }
+    }
+
     func testCreateServerStoresProfileAndPasswordCredential() throws {
         let harness = try Harness()
         let profile = try harness.service.createServer(

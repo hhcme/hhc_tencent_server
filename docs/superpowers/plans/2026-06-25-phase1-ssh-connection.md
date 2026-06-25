@@ -529,6 +529,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 - [x] Keychain 测试：`KeychainServiceTests` 覆盖 password、private key、cloud credential 和 webhook secret 的保存、覆盖、读取、删除。
 - [x] ServerManagementService 补偿逻辑测试：`ServerManagementServiceTests` 覆盖服务器创建/更新/删除、凭据清理和云账号凭据生命周期。
 - [x] AppState 入口和工作台切换测试：`ServerManagementServiceTests.testAppStateStartsWithEmptyServerListAndNoWorkspaceSelection` 覆盖首次启动空服务器列表和无选中工作台；`testAppStateOpensClosesAndSwitchesWorkspaceSelection` 覆盖添加服务器后列表可见、Open 进入工作台、工作台切换服务器和关闭工作台；`testAppStateReloadClearsWorkspaceSelectionWhenSelectedServerWasRemoved` 覆盖当前服务器被外部删除后 reload 清空工作台选择。
+- [x] AppState 持久化重载测试：`ServerManagementServiceTests.testAppStateReloadsPersistedServerProfilesAfterDatabaseReopen` 使用临时 SQLite 文件创建服务器，重新打开数据库并创建新的 `AppState` 后验证服务器配置仍能恢复，凭据仍只从 Keychain 读取。
 - [x] HostKeyTrustStore 测试：`HostKeyTrustStoreTests` 覆盖首次未知指纹、已信任匹配和指纹变化阻断。
 - [x] SSH 状态机测试：`ServerWorkspaceViewModelTests` 覆盖连接成功、连接失败、未知 host key 等待/拒绝、重复连接防抖和断开连接状态。
 - [x] 可选真实 SSH 集成测试：`SSHIntegrationTests.testRealPrivateKeySmokeTestWhenEnvironmentIsConfigured` 已使用真实腾讯云服务器验证 host key trust 和 `printf hhc-ssh-ok` smoke test；2026-06-26 已重新用当前代码验证通过。部署类真实集成测试需要额外设置 `HHC_TEST_DEPLOYMENT_REAL=1`，避免普通 CI 误改服务器。
@@ -556,7 +557,7 @@ HHC_TEST_SSH_PASSPHRASE=optional
 - [ ] 确认后连接成功。
 - [ ] Smoke test 返回 `hhc-ssh-ok`。
 - [ ] 断开连接成功。
-- [ ] 重启应用后服务器配置仍在。
+- [x] 重启应用后服务器配置仍在：`testAppStateReloadsPersistedServerProfilesAfterDatabaseReopen` 覆盖文件数据库关闭/重开后的服务器配置恢复。
 - [ ] 第二次连接不再询问相同主机指纹。
 - [ ] 修改远端 host key 或模拟不同 fingerprint 时阻断连接。
 - [ ] 删除服务器后 DB 记录、trusted host key、Keychain 凭据被清理。
