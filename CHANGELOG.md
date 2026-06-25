@@ -104,6 +104,7 @@ All notable changes to this project will be documented in this file.
 - Started Phase 7 advanced cloud resources with Tencent Cloud CBS disk and snapshot read APIs, billing/expiry state extraction, SQLite persistence, provider capability matrix, and unified resource search.
 - Added a macOS Cloud Resources center for account/region scoped sync, cross-resource filtering, provider capability matrix display, and resource detail inspection.
 - Added Alibaba Cloud and Huawei Cloud read-only adapters for signed region/project discovery and ECS instance discovery, with fixture-backed request signing and field mapping tests.
+- Made Cloud Resources dangerous-operation confirmation previews provider-aware across Tencent Cloud, Alibaba Cloud, and Huawei Cloud instead of showing Tencent API names for every provider.
 - Added Alibaba Cloud ECS `DescribeDisks` support for read-only cloud disk synchronization and Cloud Resources display.
 - Added Alibaba Cloud ECS `DescribeSnapshots` support for read-only snapshot synchronization and Cloud Resources display.
 - Added Alibaba Cloud ECS `DescribeSecurityGroups` and `DescribeSecurityGroupAttribute` support for read-only security group and rule inspection.
@@ -218,6 +219,7 @@ All notable changes to this project will be documented in this file.
 - 启动 Phase 7 高级云资源能力，加入腾讯云 CBS 云盘/快照只读 API、计费/到期状态提取、SQLite 持久化、provider capability matrix 和统一资源搜索。
 - 添加 macOS 云资源中心，支持按账号/地域同步、跨资源过滤、provider capability matrix 展示和资源详情查看。
 - 添加阿里云和华为云只读 adapter，支持签名后的地域/项目发现、ECS 实例发现，并补充请求签名和字段映射 fixture 测试。
+- 将云资源中心危险操作确认预览改为按腾讯云、阿里云、华为云分别展示对应 API/action，避免所有 provider 都显示腾讯云 API 名称。
 - 添加阿里云 ECS `DescribeDisks` 云盘只读同步能力，可在云资源中心展示阿里云云盘。
 - 添加阿里云 ECS `DescribeSnapshots` 快照只读同步能力，可在云资源中心展示阿里云快照。
 - 添加阿里云 ECS `DescribeSecurityGroups` 和 `DescribeSecurityGroupAttribute` 安全组只读同步能力，可查看安全组和规则。

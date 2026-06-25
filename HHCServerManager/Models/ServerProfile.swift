@@ -829,7 +829,7 @@ enum RemoteOperationRiskFactory {
             level: .high,
             title: "Create Cloud Snapshot",
             target: "\(resource.displayName) (\(resource.resourceId))",
-            commandPreview: "CreateSnapshot DiskId=\(resource.resourceId) SnapshotName=\(snapshotName)",
+            commandPreview: cloudSnapshotCreatePreview(resource: resource, snapshotName: snapshotName),
             impact: [
                 "The cloud provider will create a new disk snapshot.",
                 "Snapshot creation may incur storage cost and can take time to become usable.",
@@ -846,7 +846,7 @@ enum RemoteOperationRiskFactory {
             level: .critical,
             title: "Delete Cloud Snapshot",
             target: "\(resource.displayName) (\(resource.resourceId))",
-            commandPreview: "DeleteSnapshots SnapshotIds=[\(resource.resourceId)]",
+            commandPreview: cloudSnapshotDeletePreview(resource: resource),
             impact: [
                 "The selected cloud snapshot will be deleted from the provider account.",
                 "Deleted snapshots cannot be used for future disk recovery.",
@@ -863,7 +863,7 @@ enum RemoteOperationRiskFactory {
             level: .high,
             title: "Attach Cloud Disk",
             target: "\(resource.displayName) (\(resource.resourceId))",
-            commandPreview: "AttachDisks DiskIds=[\(resource.resourceId)] InstanceId=\(instanceId)",
+            commandPreview: cloudDiskAttachPreview(resource: resource, instanceId: instanceId),
             impact: [
                 "The disk will be attached to the selected cloud instance.",
                 "The instance may expose the disk as a new block device that still needs OS-side mounting.",
@@ -880,7 +880,7 @@ enum RemoteOperationRiskFactory {
             level: .critical,
             title: "Detach Cloud Disk",
             target: "\(resource.displayName) (\(resource.resourceId))",
-            commandPreview: "DetachDisks DiskIds=[\(resource.resourceId)]",
+            commandPreview: cloudDiskDetachPreview(resource: resource),
             impact: [
                 "The disk will be detached from its current cloud instance.",
                 "Applications using this disk may fail if the filesystem is still mounted or actively written.",
@@ -897,12 +897,67 @@ enum RemoteOperationRiskFactory {
             level: action == .start ? .high : .critical,
             title: "\(action.displayName) Cloud Instance",
             target: "\(resource.displayName) (\(resource.resourceId))",
-            commandPreview: "\(action.tencentAPIAction) InstanceIds=[\(resource.resourceId)]",
+            commandPreview: cloudInstancePowerPreview(resource: resource, action: action),
             impact: action.impact,
             recovery: action.recovery,
             auditTargetType: "cloud_instance",
             auditAction: action.auditAction
         )
+    }
+
+    private static func cloudSnapshotCreatePreview(resource: CloudUnifiedResource, snapshotName: String) -> String {
+        switch resource.providerId {
+        case .tencentCloud:
+            "CreateSnapshot DiskId=\(resource.resourceId) SnapshotName=\(snapshotName)"
+        case .alibabaCloud:
+            "CreateSnapshot DiskId=\(resource.resourceId) SnapshotName=\(snapshotName)"
+        case .huaweiCloud:
+            "POST /v2/{project_id}/cloudsnapshots volume_id=\(resource.resourceId) name=\(snapshotName)"
+        }
+    }
+
+    private static func cloudSnapshotDeletePreview(resource: CloudUnifiedResource) -> String {
+        switch resource.providerId {
+        case .tencentCloud:
+            "DeleteSnapshots SnapshotIds=[\(resource.resourceId)]"
+        case .alibabaCloud:
+            "DeleteSnapshot SnapshotId=\(resource.resourceId)"
+        case .huaweiCloud:
+            "DELETE /v2/{project_id}/cloudsnapshots/\(resource.resourceId)"
+        }
+    }
+
+    private static func cloudDiskAttachPreview(resource: CloudUnifiedResource, instanceId: String) -> String {
+        switch resource.providerId {
+        case .tencentCloud:
+            "AttachDisks DiskIds=[\(resource.resourceId)] InstanceId=\(instanceId)"
+        case .alibabaCloud:
+            "AttachDisk DiskId=\(resource.resourceId) InstanceId=\(instanceId)"
+        case .huaweiCloud:
+            "POST /v2.1/{project_id}/cloudvolumes/\(resource.resourceId)/action os-attach server_id=\(instanceId)"
+        }
+    }
+
+    private static func cloudDiskDetachPreview(resource: CloudUnifiedResource) -> String {
+        switch resource.providerId {
+        case .tencentCloud:
+            "DetachDisks DiskIds=[\(resource.resourceId)]"
+        case .alibabaCloud:
+            "DetachDisk DiskId=\(resource.resourceId)"
+        case .huaweiCloud:
+            "POST /v2.1/{project_id}/cloudvolumes/\(resource.resourceId)/action os-detach"
+        }
+    }
+
+    private static func cloudInstancePowerPreview(resource: CloudUnifiedResource, action: CloudInstancePowerAction) -> String {
+        switch resource.providerId {
+        case .tencentCloud:
+            "\(action.tencentAPIAction) InstanceIds=[\(resource.resourceId)]"
+        case .alibabaCloud:
+            "\(action.alibabaAPIAction) InstanceId=\(resource.resourceId)"
+        case .huaweiCloud:
+            "POST /v2.1/{project_id}/servers/\(resource.resourceId)/action \(action.huaweiAction)"
+        }
     }
 }
 
@@ -962,6 +1017,28 @@ enum CloudInstancePowerAction: String, Codable, CaseIterable, Identifiable, Send
             "StopInstances"
         case .reboot:
             "RebootInstances"
+        }
+    }
+
+    var alibabaAPIAction: String {
+        switch self {
+        case .start:
+            "StartInstance"
+        case .stop:
+            "StopInstance"
+        case .reboot:
+            "RebootInstance"
+        }
+    }
+
+    var huaweiAction: String {
+        switch self {
+        case .start:
+            "os-start"
+        case .stop:
+            "os-stop"
+        case .reboot:
+            "reboot"
         }
     }
 

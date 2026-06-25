@@ -112,6 +112,7 @@ CREATE TABLE cloud_billing_states (
 - 已统一云资源操作状态门禁，服务层和云资源中心 UI 共用 provider-aware 策略，避免阿里云 `Available` / `In_use`、华为云 `ACTIVE` / `SHUTOFF` / `in-use` 等状态被腾讯云状态规则误禁用。
 - 已为阿里云 ECS 接入安全组单条规则新增/删除操作，云资源中心会按 `securityGroupActions` capability 展示操作；规则参数复用统一预览模型，`443` 这类单端口会自动转为 `443/443`，执行后刷新规则快照并复用远程变更审计。
 - 已为华为云 VPC 接入安全组单条规则创建/删除操作，云资源中心会按 `securityGroupActions` capability 展示操作；规则读取会保留 `providerRuleId`，删除时使用华为云 rule id 精确定位，执行后刷新规则快照并复用远程变更审计。
+- 已将云资源中心危险操作的确认预览改为 provider-aware：腾讯云、阿里云、华为云分别展示对应 API/action 形态，避免跨云操作确认时误显示腾讯云命令名。
 
 ## 6. UI 范围
 
@@ -194,9 +195,9 @@ CREATE TABLE cloud_billing_states (
 - [x] 高级资源详情页。
 - [x] capability matrix 展示。
 - [x] 三家云账号导入入口。
-- [x] 腾讯云快照操作风险确认。
-- [x] 腾讯云云盘挂载/卸载风险确认。
-- [x] 腾讯云实例电源操作风险确认。
+- [x] 三家云快照操作风险确认：确认弹窗包含 provider-aware API/action 预览。
+- [x] 三家云云盘挂载/卸载风险确认：确认弹窗包含 provider-aware API/action 预览。
+- [x] 三家云实例电源操作风险确认：确认弹窗包含 provider-aware API/action 预览。
 
 ### Task 7：测试
 
@@ -207,6 +208,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 腾讯云快照危险操作确认和审计测试。
 - [x] 腾讯云云盘挂载/卸载请求、状态缓存和审计测试。
 - [x] 腾讯云实例电源操作请求、状态缓存和审计测试。
+- [x] 三家云危险操作风险确认文案测试，覆盖阿里云快照/云盘和华为云实例电源操作的 provider-aware 预览。
 
 ### Task 8：手动验收
 

@@ -152,6 +152,63 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(startInstanceRisk.level, .high)
         XCTAssertEqual(startInstanceRisk.auditAction, "start_instance")
         XCTAssertTrue(startInstanceRisk.confirmationMessage.contains("StartInstances InstanceIds=[ins-123]"))
+
+        let alibabaDiskResource = CloudUnifiedResource(
+            id: "disk:account:cn-hangzhou:d-123",
+            kind: .disk,
+            accountId: UUID(),
+            providerId: .alibabaCloud,
+            regionId: "cn-hangzhou",
+            resourceId: "d-123",
+            displayName: "ali-data",
+            status: "Available",
+            primaryAddress: nil,
+            secondaryText: nil,
+            lastSyncedAt: nil
+        )
+        XCTAssertTrue(
+            RemoteOperationRiskFactory.attachCloudDisk(resource: alibabaDiskResource, instanceId: "i-123")
+                .confirmationMessage
+                .contains("AttachDisk DiskId=d-123 InstanceId=i-123")
+        )
+
+        let alibabaSnapshotResource = CloudUnifiedResource(
+            id: "snapshot:account:cn-hangzhou:s-123",
+            kind: .snapshot,
+            accountId: UUID(),
+            providerId: .alibabaCloud,
+            regionId: "cn-hangzhou",
+            resourceId: "s-123",
+            displayName: "ali-snapshot",
+            status: "accomplished",
+            primaryAddress: nil,
+            secondaryText: nil,
+            lastSyncedAt: nil
+        )
+        XCTAssertTrue(
+            RemoteOperationRiskFactory.deleteCloudSnapshot(resource: alibabaSnapshotResource)
+                .confirmationMessage
+                .contains("DeleteSnapshot SnapshotId=s-123")
+        )
+
+        let huaweiInstanceResource = CloudUnifiedResource(
+            id: "instance:account:ap-southeast-1:server-123",
+            kind: .instance,
+            accountId: UUID(),
+            providerId: .huaweiCloud,
+            regionId: "ap-southeast-1",
+            resourceId: "server-123",
+            displayName: "hw-prod",
+            status: "ACTIVE",
+            primaryAddress: "10.0.0.5",
+            secondaryText: "s6.small.1",
+            lastSyncedAt: nil
+        )
+        XCTAssertTrue(
+            RemoteOperationRiskFactory.cloudInstancePower(resource: huaweiInstanceResource, action: .reboot)
+                .confirmationMessage
+                .contains("POST /v2.1/{project_id}/servers/server-123/action reboot")
+        )
     }
 
     func testCloudSecurityGroupRuleChangePreviewBuildsDiffAndRisk() {
