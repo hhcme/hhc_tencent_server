@@ -3711,6 +3711,83 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].queryValue("offset"), "1")
     }
 
+    func testHuaweiCloudAdapterFetchesSnapshotsUsesSignedEVSAPI() async throws {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let firstPageSnapshots = (1...10).map { index in
+            """
+                  {
+                    "id": "snap-\(index)",
+                    "name": "backup-\(index)",
+                    "volume_id": "vol-\(index)",
+                    "size": \(index * 10),
+                    "status": "available",
+                    "created_at": "2026-07-01T00:00:00.000000"
+                  }
+            """
+        }.joined(separator: ",\n")
+        let transport = MockHuaweiCloudTransport(responses: [
+            """
+            {
+              "snapshots": [
+            \(firstPageSnapshots)
+              ]
+            }
+            """,
+            """
+            {
+              "snapshots": [
+                {
+                  "id": "snap-11",
+                  "name": "manual-backup",
+                  "volume_id": "vol-11",
+                  "size": "110",
+                  "status": "creating",
+                  "created_at": "2026-07-02T00:00:00Z"
+                }
+              ]
+            }
+            """,
+        ])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        let snapshots = try await adapter.fetchSnapshots(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-southeast-1|project-1",
+            capturedAt: capturedAt
+        )
+
+        XCTAssertEqual(snapshots.count, 11)
+        XCTAssertEqual(snapshots.first?.snapshotId, "snap-1")
+        XCTAssertEqual(snapshots.first?.accountId, accountId)
+        XCTAssertEqual(snapshots.first?.providerId, .huaweiCloud)
+        XCTAssertEqual(snapshots.first?.regionId, "ap-southeast-1|project-1")
+        XCTAssertEqual(snapshots.first?.diskId, "vol-1")
+        XCTAssertEqual(snapshots.first?.name, "backup-1")
+        XCTAssertEqual(snapshots.first?.status, "available")
+        XCTAssertEqual(snapshots.first?.sizeGB, 10)
+        XCTAssertNotNil(snapshots.first?.createdAtProvider)
+        XCTAssertEqual(snapshots.first?.lastSyncedAt, capturedAt)
+        XCTAssertEqual(snapshots.last?.snapshotId, "snap-11")
+        XCTAssertEqual(snapshots.last?.sizeGB, 110)
+        XCTAssertNotNil(snapshots.last?.createdAtProvider)
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "evs.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[0].url?.path, "/v5/project-1/snapshots/detail")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-Sdk-Date"), "20231114T221320Z")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("SDK-HMAC-SHA256 Access=HUAWEIAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("limit"), "10")
+        XCTAssertEqual(transport.requests[0].queryValue("offset"), "0")
+        XCTAssertEqual(transport.requests[1].queryValue("offset"), "10")
+    }
+
     private final class Harness {
         let repository: ServerRepository
         let keychain: KeychainService

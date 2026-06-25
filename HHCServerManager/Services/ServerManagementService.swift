@@ -6353,6 +6353,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .instanceDiscovery,
         .instanceMetadata,
         .cloudDisks,
+        .cloudSnapshots,
     ]
 
     private let transport: HuaweiCloudHTTPTransport
@@ -6511,7 +6512,46 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         capturedAt: Date
     ) async throws -> [CloudSnapshot] {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudSnapshots)
+        let region = Self.decodeRegionId(regionId)
+        var offset = 0
+        let limit = 10
+        var lastPageCount = 0
+        var snapshots: [CloudSnapshot] = []
+
+        repeat {
+            let response: HuaweiSnapshotsDetailResponse = try await request(
+                credential: credential,
+                host: "evs.\(region.regionName).myhuaweicloud.com",
+                path: "/v5/\(CloudSignature.percentEncode(region.projectId))/snapshots/detail",
+                queryItems: [
+                    URLQueryItem(name: "limit", value: "\(limit)"),
+                    URLQueryItem(name: "offset", value: "\(offset)"),
+                ]
+            )
+            guard !response.snapshots.isEmpty else {
+                break
+            }
+            lastPageCount = response.snapshots.count
+            snapshots.append(contentsOf: response.snapshots.map { snapshot in
+                CloudSnapshot(
+                    id: UUID(),
+                    accountId: accountId,
+                    providerId: .huaweiCloud,
+                    regionId: regionId,
+                    snapshotId: snapshot.id,
+                    diskId: snapshot.volumeId,
+                    name: snapshot.name,
+                    status: snapshot.status,
+                    sizeGB: snapshot.size,
+                    createdAtProvider: snapshot.createdAt.flatMap(Self.parseHuaweiDate),
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                )
+            })
+            offset += response.snapshots.count
+        } while lastPageCount == limit
+
+        return snapshots
     }
 
     func fetchBillingStates(
@@ -6701,6 +6741,25 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         return formatter.string(from: date)
+    }
+
+    private static func parseHuaweiDate(_ text: String) -> Date? {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso.date(from: text) {
+            return date
+        }
+        iso.formatOptions = [.withInternetDateTime]
+        if let date = iso.date(from: text) {
+            return date
+        }
+        let normalized = text.contains("Z") || text.contains("+") ? text : "\(text)Z"
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso.date(from: normalized) {
+            return date
+        }
+        iso.formatOptions = [.withInternetDateTime]
+        return iso.date(from: normalized)
     }
 }
 
@@ -6947,6 +7006,44 @@ private struct HuaweiServersDetailResponse: Decodable {
 private struct HuaweiVolumesDetailResponse: Decodable {
     var count: Int?
     var volumes: [HuaweiVolume]
+}
+
+private struct HuaweiSnapshotsDetailResponse: Decodable {
+    var snapshots: [HuaweiSnapshot]
+}
+
+private struct HuaweiSnapshot: Decodable {
+    var id: String
+    var name: String?
+    var volumeId: String?
+    var size: Int?
+    var status: String?
+    var createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case volumeId = "volume_id"
+        case size
+        case status
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        volumeId = try container.decodeIfPresent(String.self, forKey: .volumeId)
+        if let intSize = try? container.decodeIfPresent(Int.self, forKey: .size) {
+            size = intSize
+        } else if let stringSize = try? container.decodeIfPresent(String.self, forKey: .size) {
+            size = Int(stringSize)
+        } else {
+            size = nil
+        }
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+    }
 }
 
 private struct HuaweiVolume: Decodable {
