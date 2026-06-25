@@ -268,7 +268,11 @@ final class DashboardService: @unchecked Sendable {
         self.now = now
     }
 
-    func loadSnapshot(profile: ServerProfile, sshClient: SSHClient) async throws -> ServerDashboardSnapshot {
+    func loadSnapshot(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        cloudMetricService: CloudMetricService? = nil
+    ) async throws -> ServerDashboardSnapshot {
         async let osRelease = runDashboardCommand("cat /etc/os-release 2>/dev/null || true", profile: profile, sshClient: sshClient)
         async let kernel = runDashboardCommand("uname -r", profile: profile, sshClient: sshClient)
         async let proc = runDashboardCommand("test -d /proc && echo yes || echo no", profile: profile, sshClient: sshClient)
@@ -295,7 +299,7 @@ final class DashboardService: @unchecked Sendable {
             network,
             processes,
         ]
-        let warnings = optionalResults.compactMap(\.warning)
+        var warnings = optionalResults.compactMap(\.warning)
 
         let detectedAt = now()
         let capabilities = ServerCapabilities(
@@ -326,6 +330,13 @@ final class DashboardService: @unchecked Sendable {
         }
         if let processSummary = Self.parseProcessSummary(optionalResults[5].stdout) {
             metrics.append(DashboardMetric(name: "Processes", value: processSummary, unit: "total / running / zombie", source: "SSH"))
+        }
+        if let cloudMetricService {
+            do {
+                metrics.append(contentsOf: try await cloudMetricService.loadMetrics(for: profile))
+            } catch {
+                warnings.append(DashboardWarning(source: "Cloud API", message: error.localizedDescription))
+            }
         }
 
         return ServerDashboardSnapshot(capabilities: capabilities, metrics: metrics, warnings: warnings, capturedAt: detectedAt)
@@ -463,6 +474,63 @@ final class DashboardService: @unchecked Sendable {
 private struct DashboardCommandOutput: Sendable {
     var stdout: String
     var warning: DashboardWarning?
+}
+
+final class CloudMetricService: @unchecked Sendable {
+    private let repository: ServerRepository
+    private let keychain: KeychainService
+    private let registry: CloudProviderRegistry
+    private let now: @Sendable () -> Date
+
+    init(
+        repository: ServerRepository,
+        keychain: KeychainService,
+        registry: CloudProviderRegistry,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.repository = repository
+        self.keychain = keychain
+        self.registry = registry
+        self.now = now
+    }
+
+    func loadMetrics(for profile: ServerProfile) async throws -> [DashboardMetric] {
+        guard let link = try repository.fetchCloudInstanceLinks().first(where: { $0.serverId == profile.id }) else {
+            return []
+        }
+        guard let account = try repository.fetchCloudProviderAccounts().first(where: { $0.id == link.accountId && $0.enabled }) else {
+            return []
+        }
+        try registry.require(.cloudMetrics, providerId: account.providerId)
+        guard let credential = try keychain.readCloudCredential(keychainRef: account.keychainRef) else {
+            throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
+        }
+
+        let end = now()
+        let start = end.addingTimeInterval(-30 * 60)
+        let series = try await registry.adapter(for: account.providerId).fetchMetricSeries(
+            credential: credential,
+            query: CloudMetricQuery(
+                namespace: "QCE/CVM",
+                metricName: "CPUUsage",
+                instanceId: link.instanceId,
+                regionId: link.regionId,
+                period: 300,
+                startTime: start,
+                endTime: end
+            )
+        )
+
+        guard let latest = series.values.last else { return [] }
+        return [
+            DashboardMetric(
+                name: "Cloud CPU",
+                value: String(format: "%.1f", latest),
+                unit: series.unit ?? "%",
+                source: "Cloud API"
+            )
+        ]
+    }
 }
 
 final class RemoteFileService: @unchecked Sendable {
@@ -810,6 +878,7 @@ protocol CloudProviderAdapter: Sendable {
     func validateCredential(_ credential: CloudProviderCredential) async throws
     func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion]
     func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance]
+    func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries
 }
 
 enum CloudProviderError: LocalizedError, Equatable {
@@ -928,7 +997,7 @@ final class URLSessionTencentCloudHTTPTransport: TencentCloudHTTPTransport, @unc
 final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     let providerId: CloudProviderID = .tencentCloud
     let displayName = "Tencent Cloud"
-    let capabilities: Set<CloudCapability> = [.regions, .instanceDiscovery, .instanceMetadata]
+    let capabilities: Set<CloudCapability> = [.regions, .instanceDiscovery, .instanceMetadata, .cloudMetrics]
 
     private let transport: TencentCloudHTTPTransport
     private let now: @Sendable () -> Date
@@ -1015,6 +1084,42 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         } while offset < (totalCount ?? 0) && offset > 0
 
         return instances
+    }
+
+    func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
+        let payload = TencentGetMonitorDataPayload(
+            namespace: query.namespace,
+            metricName: query.metricName,
+            instances: [
+                TencentMonitorInstance(dimensions: [
+                    TencentMonitorDimension(name: "InstanceId", value: query.instanceId)
+                ])
+            ],
+            period: query.period,
+            startTime: Self.iso8601String(query.startTime),
+            endTime: Self.iso8601String(query.endTime)
+        )
+        let response: TencentCloudEnvelope<TencentGetMonitorDataResponse> = try await request(
+            credential: credential,
+            endpoint: TencentCloudEndpoint(
+                host: "monitor.intl.tencentcloudapi.com",
+                service: "monitor",
+                action: "GetMonitorData",
+                version: "2018-07-24",
+                region: query.regionId
+            ),
+            payload: payload
+        )
+        try throwIfNeeded(response.response.error)
+        let dataPoint = response.response.dataPoints?.first
+        return CloudMetricSeries(
+            metricName: query.metricName,
+            instanceId: query.instanceId,
+            regionId: query.regionId,
+            unit: response.response.metricName == "CPUUsage" ? "%" : nil,
+            values: dataPoint?.values ?? [],
+            timestamps: (dataPoint?.timestamps ?? []).map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        )
     }
 
     private func request<Payload: Encodable, Response: Decodable>(
@@ -1133,6 +1238,13 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
     }
 
+    private static func iso8601String(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
     private static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
@@ -1172,6 +1284,42 @@ private struct TencentDescribeInstancesPayload: Encodable {
     enum CodingKeys: String, CodingKey {
         case offset = "Offset"
         case limit = "Limit"
+    }
+}
+
+private struct TencentGetMonitorDataPayload: Encodable {
+    var namespace: String
+    var metricName: String
+    var instances: [TencentMonitorInstance]
+    var period: Int
+    var startTime: String
+    var endTime: String
+
+    enum CodingKeys: String, CodingKey {
+        case namespace = "Namespace"
+        case metricName = "MetricName"
+        case instances = "Instances"
+        case period = "Period"
+        case startTime = "StartTime"
+        case endTime = "EndTime"
+    }
+}
+
+private struct TencentMonitorInstance: Encodable {
+    var dimensions: [TencentMonitorDimension]
+
+    enum CodingKeys: String, CodingKey {
+        case dimensions = "Dimensions"
+    }
+}
+
+private struct TencentMonitorDimension: Encodable {
+    var name: String
+    var value: String
+
+    enum CodingKeys: String, CodingKey {
+        case name = "Name"
+        case value = "Value"
     }
 }
 
@@ -1226,6 +1374,40 @@ private struct TencentDescribeInstancesResponse: Decodable {
         case totalCount = "TotalCount"
         case instanceSet = "InstanceSet"
         case error = "Error"
+    }
+}
+
+private struct TencentGetMonitorDataResponse: Decodable {
+    var metricName: String?
+    var dataPoints: [TencentMonitorDataPoint]?
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case metricName = "MetricName"
+        case dataPoints = "DataPoints"
+        case error = "Error"
+    }
+}
+
+private struct TencentMonitorDataPoint: Decodable {
+    var dimensions: [TencentMonitorDimensionValue]?
+    var timestamps: [Int]
+    var values: [Double]
+
+    enum CodingKeys: String, CodingKey {
+        case dimensions = "Dimensions"
+        case timestamps = "Timestamps"
+        case values = "Values"
+    }
+}
+
+private struct TencentMonitorDimensionValue: Decodable {
+    var name: String
+    var value: String
+
+    enum CodingKeys: String, CodingKey {
+        case name = "Name"
+        case value = "Value"
     }
 }
 

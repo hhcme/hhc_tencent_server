@@ -101,10 +101,10 @@ export HHC_TEST_SSH_PASSPHRASE=""
 
 - 当前 SSH 适配层是 bootstrap OpenSSH adapter，用于先打通真实服务器、主机指纹信任、smoke test、单条命令执行和取消；取消运行中命令时会 terminate 对应 OpenSSH 子进程。
 - 命令面板只持久化 command、exit code、duration 和 created at；stdout/stderr 默认只保留在本次工作台会话中，分开展示但不写入 SQLite，避免把敏感输出落盘。
-- Dashboard 当前为 Phase 3 bootstrap：指标通过 SSH 即时采集，支持手动刷新和自动刷新；单项可选指标失败会以 warning 降级展示，尚未写入 `dashboard_snapshots` 缓存表，也尚未接入云监控。
+- Dashboard 当前为 Phase 3 bootstrap：指标通过 SSH 即时采集，支持手动刷新和自动刷新；已关联腾讯云 CVM 时会通过 Cloud Monitor `GetMonitorData` 拉取 Cloud CPU 指标并标记来源为 Cloud API；单项可选指标失败会以 warning 降级展示，尚未写入 `dashboard_snapshots` 缓存表，更多云监控指标仍待扩展。
 - 文件管理当前为 bootstrap：目录浏览通过 SSH `find` 命令实现，上传/下载通过本机 OpenSSH `scp` 实现排队单文件传输，并在 UI 中记录最近传输任务的 pending/running/succeeded/failed/cancelled 状态；当前运行中的传输可取消，待传队列可清空。重命名使用 `mv -n`，权限修改使用经过八进制校验的 `chmod`，删除入口会二次确认并移动到 `~/.hhc-server-manager-trash`；小型 UTF-8 文本文件可通过 SSH/base64 读取和保存，限制 256 KiB，保存前会生成 `*.hhc-backup-*` 备份，另存为默认不覆盖已有文件，并通过临时文件替换。已在真实 Linux 服务器上验证 `sftp` 命令存在以及 scp 上传/下载往返可用；尚未完成 SwiftNIO SSH/libssh2 正式 SFTP 替换、进度百分比、批量/并发传输和队列持久化。
-- 云账号当前已实现本地元数据、云实例关联表、Keychain 云凭据命名空间、Tencent Cloud 只读 adapter、云实例同步服务和基础导入 UI；真实腾讯云账号手动验收仍在后续任务中。
-- TencentCloudAdapter 已接入腾讯云 API 3.0 TC3-HMAC-SHA256 签名流程，并实现 Region 与 CVM instance 只读查询；默认测试使用 mock transport，不提交真实 SecretId/SecretKey。
+- 云账号当前已实现本地元数据、云实例关联表、Keychain 云凭据命名空间、Tencent Cloud adapter、云实例同步服务、基础导入 UI 和已关联 CVM 的 CPU 云监控查询；真实腾讯云账号手动验收仍在后续任务中。
+- TencentCloudAdapter 已接入腾讯云 API 3.0 TC3-HMAC-SHA256 签名流程，并实现 Region、CVM instance 只读查询和 Cloud Monitor `GetMonitorData` CPU 指标查询；默认测试使用 mock transport，不提交真实 SecretId/SecretKey。
 - `SSHClient` 协议已经隔离 UI/ViewModel 与具体 SSH 实现，后续可以替换为 SwiftNIO SSH。
 - OpenSSH adapter 当前支持私钥认证，也支持通过临时 `SSH_ASKPASS` 脚本进行 password 认证。密码从 Keychain 读出后只注入当前 SSH 子进程环境，脚本执行后立即删除。
 - 后续仍需要把 bootstrap OpenSSH adapter 替换或补齐为 SwiftNIO SSH 正式实现。

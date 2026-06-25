@@ -7,6 +7,7 @@ final class AppState: ObservableObject {
     let cloudAccountService: CloudAccountService
     let cloudInstanceSyncService: CloudInstanceSyncService
     let cloudProviderRegistry: CloudProviderRegistry
+    let cloudMetricService: CloudMetricService
     let dashboardService: DashboardService
     let remoteFileService: RemoteFileService
     let sshClient: OpenSSHClient
@@ -28,6 +29,7 @@ final class AppState: ObservableObject {
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
             cloudProviderRegistry = registry
+            cloudMetricService = CloudMetricService(repository: repository, keychain: keychain, registry: registry)
             dashboardService = DashboardService()
             remoteFileService = RemoteFileService()
             cloudInstanceSyncService = CloudInstanceSyncService(
@@ -48,6 +50,7 @@ final class AppState: ObservableObject {
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
             cloudProviderRegistry = registry
+            cloudMetricService = CloudMetricService(repository: repository, keychain: keychain, registry: registry)
             dashboardService = DashboardService()
             remoteFileService = RemoteFileService()
             cloudInstanceSyncService = CloudInstanceSyncService(

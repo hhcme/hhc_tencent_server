@@ -78,6 +78,25 @@ struct DashboardMetric: Identifiable, Equatable, Hashable, Sendable {
     var source: String
 }
 
+struct CloudMetricQuery: Equatable, Hashable, Sendable {
+    var namespace: String
+    var metricName: String
+    var instanceId: String
+    var regionId: String
+    var period: Int
+    var startTime: Date
+    var endTime: Date
+}
+
+struct CloudMetricSeries: Equatable, Hashable, Sendable {
+    var metricName: String
+    var instanceId: String
+    var regionId: String
+    var unit: String?
+    var values: [Double]
+    var timestamps: [Date]
+}
+
 struct DashboardWarning: Identifiable, Equatable, Hashable, Sendable {
     var id: String { source }
     var source: String

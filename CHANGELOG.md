@@ -50,6 +50,7 @@ All notable changes to this project will be documented in this file.
 - Added visible remote transfer job records with pending/running/succeeded/failed/cancelled states, serial single-file queueing, current-transfer cancellation, and pending-queue clearing coverage.
 - Added remote text Save As and chmod-based permission changes with validation, refreshed listings, UI sheets, and tests.
 - Added Dashboard auto-refresh toggle with immediate refresh, periodic refresh, cancellation on disable/disappear, and ViewModel coverage.
+- Added Tencent Cloud Monitor `GetMonitorData` support for linked CVM Cloud CPU metrics, with Cloud API source labeling and dashboard aggregation tests.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -95,3 +96,4 @@ All notable changes to this project will be documented in this file.
 - 添加可见的远程传输任务记录，支持 pending/running/succeeded/failed/cancelled 状态、串行单文件队列、当前传输取消和待传队列清空测试。
 - 添加远程文本另存为和基于 chmod 的权限修改，包含校验、列表刷新、UI sheet 和测试。
 - 添加 Dashboard 自动刷新开关，支持立即刷新、周期刷新、关闭/离开时取消，并补充 ViewModel 覆盖。
+- 添加腾讯云云监控 `GetMonitorData` 支持，可为已关联 CVM 展示 Cloud CPU 指标，并补充 Cloud API 来源标记和 Dashboard 聚合测试。

@@ -233,7 +233,8 @@ struct ServerWorkspaceView: View {
                         viewModel.refreshDashboard(
                             profile: profile,
                             sshClient: appState.sshClient,
-                            dashboardService: appState.dashboardService
+                            dashboardService: appState.dashboardService,
+                            cloudMetricService: appState.cloudMetricService
                         )
                     } label: {
                         if viewModel.isRefreshingDashboard {
@@ -785,7 +786,8 @@ struct ServerWorkspaceView: View {
                     enabled,
                     profile: profile,
                     sshClient: appState.sshClient,
-                    dashboardService: appState.dashboardService
+                    dashboardService: appState.dashboardService,
+                    cloudMetricService: appState.cloudMetricService
                 )
             }
         )

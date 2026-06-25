@@ -25,9 +25,9 @@ Target users include:
 - Real OpenSSH smoke test, cancellable single-command panel, persisted command metadata history, stdout/stderr split output, and history reruns.
 - Cloud account metadata and cloud credential storage foundation.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper.
-- Tencent Cloud read-only adapter with TC3 request signing plus Region and CVM instance query parsing.
+- Tencent Cloud adapter with TC3 request signing plus Region, CVM instance query parsing, and Cloud Monitor CPU metric query support.
 - Cloud import sheet for verifying Tencent Cloud accounts, loading regions, syncing CVM instances, and importing instances as SSH profiles.
-- Dashboard foundations with SSH-based OS/capability detection plus load, memory, disk, CPU, network, process summary metric cards, manual refresh, and auto-refresh.
+- Dashboard foundations with SSH-based OS/capability detection plus load, memory, disk, CPU, network, process summary metric cards, linked Tencent Cloud CVM CPU metrics, manual refresh, and auto-refresh.
 - Remote file browser foundations with path navigation, directory listing, file metadata display, queued single-file upload/download through OpenSSH/scp, visible transfer states, current-transfer cancellation, pending-queue clearing, rename, chmod-based permission changes, recoverable move-to-trash, and lightweight UTF-8 text editing with backup-on-save and Save As.
 - Optional cloud account integration through provider adapters.
 - Cloud instance discovery, resource metadata, cloud metrics, security groups, and power operations.
@@ -56,7 +56,7 @@ Target users include:
 2. **Phase 2: Cloud provider foundation and simplified command panel**
    Cloud accounts, provider adapters, Tencent Cloud read-only instance discovery, and command history.
 3. **Phase 3: Dashboard and file manager**
-   Combine SSH metrics with cloud metrics; ship SSH-bootstrap directory browsing, lightweight editing, and queued single-file transfers first, then harden SFTP, progress reporting, and batch transfer workflows.
+   Combine SSH metrics with linked Tencent Cloud CVM CPU metrics first; ship SSH-bootstrap directory browsing, lightweight editing, and queued single-file transfers, then harden SFTP, progress reporting, more cloud metrics, and batch transfer workflows.
 4. **Phase 4: Security groups and environment configuration**
    Security group viewing/updating, systemd, Nginx, firewall, cron, and environment variables.
 5. **Phase 5: GitLab deployment**

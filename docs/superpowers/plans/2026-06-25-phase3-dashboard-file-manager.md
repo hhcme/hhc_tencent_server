@@ -110,9 +110,9 @@ CREATE TABLE file_transfer_jobs (
 
 ### Task 3：云监控接入
 
-- [ ] 在腾讯云 adapter 中补基础云监控查询。
-- [ ] 将云监控指标与 SSH 指标分开展示。
-- [ ] 无云账号或无权限时隐藏云指标入口。
+- [x] 在腾讯云 adapter 中补基础云监控查询：已接入 Cloud Monitor `GetMonitorData` 的 CVM `CPUUsage`。
+- [x] 将云监控指标与 SSH 指标分开展示：DashboardMetric 使用 `Cloud API` 来源标记，当前先聚合显示 Cloud CPU。
+- [x] 无云账号或无关联实例时隐藏云指标入口；权限或凭据错误以 warning 降级。
 
 ### Task 4：Dashboard UI
 
@@ -162,9 +162,9 @@ CREATE TABLE file_transfer_jobs (
 
 ### Task 8：手动验收
 
-- [ ] 连接一台 Linux 服务器后 Dashboard 能展示基础指标。
+- [x] 连接一台 Linux 服务器后 Dashboard 能展示基础指标。
 - [ ] 无 `/proc` 或命令缺失时 UI 不崩溃。
-- [ ] 已关联腾讯云实例时能展示云侧指标。
+- [ ] 已关联腾讯云实例时能展示云侧指标。当前已有 mock/contract 测试，真实云账号手动验收待补。
 - [x] 文件列表能浏览目录。
 - [x] 小文件上传、下载、重命名成功。
 - [ ] 删除会二次确认并进入可恢复路径。
@@ -173,7 +173,7 @@ CREATE TABLE file_transfer_jobs (
 ## 8. 完成标志
 
 1. Dashboard 可稳定展示 SSH 指标。
-2. 云监控指标在有云账号时可用，并正确标明来源。
+2. 云监控指标在有云账号和已关联实例时可用，并正确标明来源。
 3. SFTP 技术路径已验证并落地。
 4. 文件管理器基本操作可用。
 5. 所有高风险文件操作有确认和恢复策略。

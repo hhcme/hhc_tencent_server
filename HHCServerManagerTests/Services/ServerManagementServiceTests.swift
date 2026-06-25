@@ -222,6 +222,68 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(disk, "10.0 GiB / 20.0 GiB")
     }
 
+    func testDashboardServiceAppendsCloudMetricsWhenLinked() async throws {
+        let harness = try Harness(adapters: [
+            MockCloudProviderAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudMetrics]
+            )
+        ])
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "203.0.113.1",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        try harness.repository.upsertCloudInstanceLink(CloudInstanceLink(
+            id: UUID(),
+            serverId: profile.id,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "prod",
+            publicIp: "203.0.113.1",
+            privateIp: "10.0.0.2",
+            status: "RUNNING",
+            instanceType: "mock",
+            zoneId: "ap-guangzhou-1",
+            vpcId: "vpc-123",
+            rawJSON: nil,
+            lastSyncedAt: Date()
+        ))
+        let registry = CloudProviderRegistry(adapters: [
+            MockCloudProviderAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudMetrics]
+            )
+        ])
+        let cloudMetricService = CloudMetricService(
+            repository: harness.repository,
+            keychain: harness.keychain,
+            registry: registry,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        let dashboardService = DashboardService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let snapshot = try await dashboardService.loadSnapshot(
+            profile: profile,
+            sshClient: DashboardServiceMockSSHClient(),
+            cloudMetricService: cloudMetricService
+        )
+
+        XCTAssertTrue(snapshot.metrics.contains(DashboardMetric(name: "Cloud CPU", value: "21.2", unit: "%", source: "Cloud API")))
+        XCTAssertTrue(snapshot.metrics.contains { $0.source == "SSH" })
+    }
+
     func testRemoteFileServiceParsesFindListingAndPaths() {
         let entries = RemoteFileService.parseFindListing("""
         z.log\tf\t2048\t1700000010.5\t-rw-r--r--
@@ -656,6 +718,122 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].jsonBody?["Offset"] as? Int, 1)
     }
 
+    func testTencentCloudAdapterFetchMetricSeriesUsesMonitorAPI() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "MetricName": "CPUUsage",
+                "DataPoints": [
+                  {
+                    "Dimensions": [{"Name": "InstanceId", "Value": "ins-1"}],
+                    "Timestamps": [1700000000, 1700000300],
+                    "Values": [12.5, 18.75]
+                  }
+                ],
+                "RequestId": "request-monitor"
+              }
+            }
+            """
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+
+        let series = try await adapter.fetchMetricSeries(
+            credential: CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE"),
+            query: CloudMetricQuery(
+                namespace: "QCE/CVM",
+                metricName: "CPUUsage",
+                instanceId: "ins-1",
+                regionId: "ap-guangzhou",
+                period: 300,
+                startTime: Date(timeIntervalSince1970: 1_700_000_000),
+                endTime: Date(timeIntervalSince1970: 1_700_000_300)
+            )
+        )
+
+        XCTAssertEqual(series.metricName, "CPUUsage")
+        XCTAssertEqual(series.values, [12.5, 18.75])
+        XCTAssertEqual(series.unit, "%")
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.url?.host, "monitor.intl.tencentcloudapi.com")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-TC-Action"), "GetMonitorData")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-TC-Version"), "2018-07-24")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-TC-Region"), "ap-guangzhou")
+        XCTAssertTrue(request.value(forHTTPHeaderField: "Authorization")?.contains(
+            "Credential=AKIDEXAMPLE/2019-02-25/monitor/tc3_request"
+        ) == true)
+        let payload = try XCTUnwrap(request.jsonBody)
+        XCTAssertEqual(payload["Namespace"] as? String, "QCE/CVM")
+        XCTAssertEqual(payload["MetricName"] as? String, "CPUUsage")
+        XCTAssertEqual(payload["Period"] as? Int, 300)
+    }
+
+    func testCloudMetricServiceLoadsLinkedTencentCloudCPUMetric() async throws {
+        let harness = try Harness(adapters: [
+            MockCloudProviderAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudMetrics]
+            )
+        ], now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "203.0.113.1",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        var link = CloudInstanceLink(
+            id: UUID(),
+            serverId: profile.id,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "prod",
+            publicIp: "203.0.113.1",
+            privateIp: "10.0.0.2",
+            status: "RUNNING",
+            instanceType: "mock",
+            zoneId: "ap-guangzhou-1",
+            vpcId: "vpc-123",
+            rawJSON: nil,
+            lastSyncedAt: Date()
+        )
+        try harness.repository.upsertCloudInstanceLink(link)
+        let service = CloudMetricService(
+            repository: harness.repository,
+            keychain: harness.keychain,
+            registry: CloudProviderRegistry(adapters: [
+                MockCloudProviderAdapter(
+                    providerId: .tencentCloud,
+                    capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudMetrics]
+                )
+            ]),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let metrics = try await service.loadMetrics(for: profile)
+
+        XCTAssertEqual(metrics, [
+            DashboardMetric(name: "Cloud CPU", value: "21.2", unit: "%", source: "Cloud API")
+        ])
+        link.serverId = nil
+        try harness.repository.upsertCloudInstanceLink(link)
+        let metricsAfterUnlink = try await service.loadMetrics(for: profile)
+        XCTAssertEqual(metricsAfterUnlink, [])
+    }
+
     func testTencentCloudAdapterMapsProviderErrors() async {
         let transport = MockTencentCloudTransport(responses: [
             """
@@ -744,6 +922,17 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
             ),
         ]
     }
+
+    func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
+        CloudMetricSeries(
+            metricName: query.metricName,
+            instanceId: query.instanceId,
+            regionId: query.regionId,
+            unit: "%",
+            values: [18.5, 21.25],
+            timestamps: [query.startTime, query.endTime]
+        )
+    }
 }
 
 private func makeServiceTestProfile() -> ServerProfile {
@@ -781,6 +970,40 @@ private final class RecordingSSHClient: SSHClient, @unchecked Sendable {
             return response
         }
         return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class DashboardServiceMockSSHClient: SSHClient, @unchecked Sendable {
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        let stdout: String
+        if command.contains("/etc/os-release") {
+            stdout = #"PRETTY_NAME="Ubuntu 24.04.2 LTS""#
+        } else if command == "uname -r" {
+            stdout = "6.8.0\n"
+        } else if command.contains("test -d /proc") || command.contains("systemctl") || command.contains("sftp") {
+            stdout = "yes\n"
+        } else if command.contains("/proc/loadavg") {
+            stdout = "0.10 0.20 0.30 1/100 12345\n"
+        } else if command.contains("/proc/meminfo") {
+            stdout = "MemTotal: 2048000 kB\nMemAvailable: 1024000 kB\n"
+        } else if command.contains("df -kP") {
+            stdout = "/dev/vda1 20971520 10485760 10485760 50% /\n"
+        } else if command.contains("_NPROCESSORS_ONLN") {
+            stdout = "4\n"
+        } else if command.contains("/proc/net/dev") {
+            stdout = "eth0: 1048576 0 0 0 0 0 0 0 2097152 0 0 0 0 0 0 0\n"
+        } else if command.contains("ps -eo stat=") {
+            stdout = "total=120 running=2 sleeping=117 stopped=0 zombie=1\n"
+        } else {
+            stdout = ""
+        }
+        return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
