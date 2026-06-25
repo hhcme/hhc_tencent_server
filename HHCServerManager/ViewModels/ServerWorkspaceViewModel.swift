@@ -134,16 +134,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
     private var deploymentLogRefreshTask: Task<Void, Never>?
     private var runningCommand: String?
     private var dashboardAutoRefreshTask: Task<Void, Never>?
-    private var transferTask: Task<Void, Never>?
-    private var runningTransferJobId: UUID?
     private var transferQueue: [QueuedRemoteFileTransfer] = []
+    private var transferTasksByJobId: [UUID: Task<Void, Never>] = [:]
+    private var runningTransferRequestsByJobId: [UUID: QueuedRemoteFileTransfer] = [:]
+    private let maximumConcurrentRemoteFileTransfers = 2
 
     deinit {
         dashboardAutoRefreshTask?.cancel()
         commandTask?.cancel()
         deploymentTask?.cancel()
         deploymentLogRefreshTask?.cancel()
-        transferTask?.cancel()
+        transferTasksByJobId.values.forEach { $0.cancel() }
     }
 
     func configure(initialState: SSHConnectionState) {
@@ -736,10 +737,15 @@ final class ServerWorkspaceViewModel: ObservableObject {
 
     func cancelRemoteFileTransfer() {
         guard isTransferringRemoteFile else { return }
-        transferTask?.cancel()
-        transferTask = nil
-        if let runningTransferJobId {
-            cancelRemoteFileTransferJob(runningTransferJobId)
+        let runningRequests = runningTransferRequestsByJobId
+        let runningTasks = transferTasksByJobId
+        for (jobId, task) in runningTasks {
+            task.cancel()
+            cancelRemoteFileTransferJobIfRunning(jobId)
+            if let request = runningRequests[jobId] {
+                persistRemoteFileTransferJob(jobId, profile: request.profile, repository: request.repository)
+            }
+            finishRunningRemoteFileTransfer(jobId)
         }
     }
 
@@ -2745,36 +2751,37 @@ final class ServerWorkspaceViewModel: ObservableObject {
     }
 
     private func startNextRemoteFileTransferIfNeeded() {
-        guard !isTransferringRemoteFile, transferTask == nil, !transferQueue.isEmpty else { return }
-        let request = transferQueue.removeFirst()
-        runningTransferJobId = request.jobId
-        isTransferringRemoteFile = true
-        markRemoteFileTransferJobRunning(request.jobId)
-        persistRemoteFileTransferJob(request.jobId, profile: request.profile, repository: request.repository)
+        while transferTasksByJobId.count < maximumConcurrentRemoteFileTransfers, !transferQueue.isEmpty {
+            let request = transferQueue.removeFirst()
+            isTransferringRemoteFile = true
+            runningTransferRequestsByJobId[request.jobId] = request
+            markRemoteFileTransferJobRunning(request.jobId)
+            persistRemoteFileTransferJob(request.jobId, profile: request.profile, repository: request.repository)
 
-        transferTask = Task {
-            switch request {
-            case let .upload(jobId, localURL, directoryPath, profile, sshClient, transferClient, remoteFileService, repository):
-                await self.runUploadTransfer(
-                    jobId: jobId,
-                    localURL: localURL,
-                    directoryPath: directoryPath,
-                    profile: profile,
-                    sshClient: sshClient,
-                    transferClient: transferClient,
-                    remoteFileService: remoteFileService,
-                    repository: repository
-                )
-            case let .download(jobId, entry, localURL, profile, transferClient, remoteFileService, repository):
-                await self.runDownloadTransfer(
-                    jobId: jobId,
-                    entry: entry,
-                    localURL: localURL,
-                    profile: profile,
-                    transferClient: transferClient,
-                    remoteFileService: remoteFileService,
-                    repository: repository
-                )
+            transferTasksByJobId[request.jobId] = Task {
+                switch request {
+                case let .upload(jobId, localURL, directoryPath, profile, sshClient, transferClient, remoteFileService, repository):
+                    await self.runUploadTransfer(
+                        jobId: jobId,
+                        localURL: localURL,
+                        directoryPath: directoryPath,
+                        profile: profile,
+                        sshClient: sshClient,
+                        transferClient: transferClient,
+                        remoteFileService: remoteFileService,
+                        repository: repository
+                    )
+                case let .download(jobId, entry, localURL, profile, transferClient, remoteFileService, repository):
+                    await self.runDownloadTransfer(
+                        jobId: jobId,
+                        entry: entry,
+                        localURL: localURL,
+                        profile: profile,
+                        transferClient: transferClient,
+                        remoteFileService: remoteFileService,
+                        repository: repository
+                    )
+                }
             }
         }
     }
@@ -2818,29 +2825,39 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 sshClient: sshClient
             )
             await MainActor.run {
+                guard self.remoteFileTransferJobStatus(jobId) == .running else {
+                    self.finishRunningRemoteFileTransfer(jobId)
+                    return
+                }
                 self.remoteDirectoryListing = listing
                 self.remoteFilePath = listing.path
                 self.remoteFileActionMessage = "Uploaded \(localURL.lastPathComponent) to \(result.remotePath)."
                 self.finishRemoteFileTransferJob(jobId, status: .succeeded, result: result, message: self.remoteFileActionMessage)
                 self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
-                self.finishRunningRemoteFileTransfer()
+                self.finishRunningRemoteFileTransfer(jobId)
             }
         } catch is CancellationError {
             await MainActor.run {
                 self.cancelRemoteFileTransferJobIfRunning(jobId)
                 self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
+                self.finishRunningRemoteFileTransfer(jobId)
             }
         } catch SSHClientError.cancelled {
             await MainActor.run {
                 self.cancelRemoteFileTransferJobIfRunning(jobId)
                 self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
+                self.finishRunningRemoteFileTransfer(jobId)
             }
         } catch {
             await MainActor.run {
+                guard self.remoteFileTransferJobStatus(jobId) == .running else {
+                    self.finishRunningRemoteFileTransfer(jobId)
+                    return
+                }
                 self.remoteFileErrorMessage = error.localizedDescription
                 self.finishRemoteFileTransferJob(jobId, status: .failed, message: error.localizedDescription)
                 self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
-                self.finishRunningRemoteFileTransfer()
+                self.finishRunningRemoteFileTransfer(jobId)
             }
         }
     }
@@ -2878,27 +2895,37 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 }
             )
             await MainActor.run {
+                guard self.remoteFileTransferJobStatus(jobId) == .running else {
+                    self.finishRunningRemoteFileTransfer(jobId)
+                    return
+                }
                 self.remoteFileActionMessage = "Downloaded \(entry.name) to \(result.localPath)."
                 self.finishRemoteFileTransferJob(jobId, status: .succeeded, result: result, message: self.remoteFileActionMessage)
                 self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
-                self.finishRunningRemoteFileTransfer()
+                self.finishRunningRemoteFileTransfer(jobId)
             }
         } catch is CancellationError {
             await MainActor.run {
                 self.cancelRemoteFileTransferJobIfRunning(jobId)
                 self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
+                self.finishRunningRemoteFileTransfer(jobId)
             }
         } catch SSHClientError.cancelled {
             await MainActor.run {
                 self.cancelRemoteFileTransferJobIfRunning(jobId)
                 self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
+                self.finishRunningRemoteFileTransfer(jobId)
             }
         } catch {
             await MainActor.run {
+                guard self.remoteFileTransferJobStatus(jobId) == .running else {
+                    self.finishRunningRemoteFileTransfer(jobId)
+                    return
+                }
                 self.remoteFileErrorMessage = error.localizedDescription
                 self.finishRemoteFileTransferJob(jobId, status: .failed, message: error.localizedDescription)
                 self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
-                self.finishRunningRemoteFileTransfer()
+                self.finishRunningRemoteFileTransfer(jobId)
             }
         }
     }
@@ -2910,11 +2937,15 @@ final class ServerWorkspaceViewModel: ObservableObject {
         remoteFileTransferJobs[index].startedAt = Date()
     }
 
-    private func finishRunningRemoteFileTransfer() {
-        isTransferringRemoteFile = false
-        transferTask = nil
-        runningTransferJobId = nil
+    private func finishRunningRemoteFileTransfer(_ id: UUID) {
+        transferTasksByJobId[id] = nil
+        runningTransferRequestsByJobId[id] = nil
+        isTransferringRemoteFile = !transferTasksByJobId.isEmpty
         startNextRemoteFileTransferIfNeeded()
+    }
+
+    private func remoteFileTransferJobStatus(_ id: UUID) -> RemoteFileTransferStatus? {
+        remoteFileTransferJobs.first(where: { $0.id == id })?.status
     }
 
     private func finishRemoteFileTransferJob(
@@ -2982,7 +3013,6 @@ final class ServerWorkspaceViewModel: ObservableObject {
         remoteFileErrorMessage = nil
         remoteFileActionMessage = "Transfer cancelled."
         finishRemoteFileTransferJob(id, status: .cancelled, message: "Transfer cancelled.")
-        finishRunningRemoteFileTransfer()
     }
 
     private func cancelRemoteFileTransferJobIfRunning(_ id: UUID) {

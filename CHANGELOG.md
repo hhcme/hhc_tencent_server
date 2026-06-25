@@ -121,6 +121,7 @@ All notable changes to this project will be documented in this file.
 - Persisted remote file transfer history with progress state restoration in the macOS workspace.
 - Added remote file transfer progress callbacks with persisted running progress updates.
 - Added rsync-backed remote file transfers with parsed byte progress, partial-file retention, and scp fallback.
+- Added limited-concurrency remote file transfer scheduling so rsync/scp-backed batch uploads and downloads can run up to two active jobs while overflow jobs remain pending.
 - Added limited Firewall rule add/delete actions with validation, risk confirmation, refreshed snapshots, and remote change audit logs.
 - Added Tencent Cloud security group single-rule add/remove actions with provider capability gating, risk confirmation, refreshed policy snapshots, RequestId capture, and remote change audit logs.
 - Added Alibaba Cloud security group single-rule add/remove actions for ingress and egress CIDR rules with provider capability gating, signed ECS API fixtures, RequestId capture, and the shared risk confirmation/audit flow.
@@ -240,6 +241,7 @@ All notable changes to this project will be documented in this file.
 - 添加远程文件传输历史持久化，macOS 工作台可恢复最近传输记录和进度状态。
 - 添加远程文件传输进度回调，运行中进度可更新 UI 并持久化。
 - 添加基于 rsync 的远程文件传输路径，支持字节进度解析、部分文件保留和 scp 回退。
+- 添加远程文件传输有限并发调度，基于 rsync/scp 的批量上传/下载最多两个任务同时运行，超出的任务保持 pending。
 - 添加受限防火墙规则新增/删除动作，包含输入校验、风险确认、规则快照刷新和远程变更审计日志。
 - 添加腾讯云安全组单条规则新增/删除动作，包含 provider capability 门禁、风险确认、规则快照刷新、RequestId 捕获和远程变更审计日志。
 - 添加阿里云安全组单条 ingress/egress CIDR 规则新增/删除动作，包含 provider capability 门禁、ECS 签名请求 fixture、RequestId 捕获和统一风险确认/审计流程。
