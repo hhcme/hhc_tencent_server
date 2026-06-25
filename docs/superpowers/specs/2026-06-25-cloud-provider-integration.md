@@ -260,6 +260,7 @@ Keychain 建议：
 - **Phase 5**：GitLab 部署。
 - **Phase 6**：私有包仓库。
 - **Phase 7**：更多云厂商、快照、云盘、计费和高级资源管理。
+- **Phase 8**：Windows 原生版技术验证，复用云 provider adapter 的领域模型。
 
 ## 12. 参考 API
 

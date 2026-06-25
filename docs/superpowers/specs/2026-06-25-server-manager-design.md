@@ -35,6 +35,8 @@
 | 最低系统版本 | macOS 14 (Sonoma) |
 
 > SwiftNIO SSH 的新版本已进入 Swift 6.x 生态。为了避免依赖解析到需要更高 Swift 版本的包，项目应在 `Package.resolved` 中锁定版本，并在 CI 中固定 Xcode/Swift 工具链。
+>
+> 当前实现优先级是 macOS 原生版。Windows 原生版在 macOS 核心功能稳定后启动，推荐技术方向为 WinUI 3 + Windows App SDK + .NET/C#，详见 [Windows 原生客户端技术选型](2026-06-25-windows-native-client-strategy.md)。
 
 ## 2. 整体架构
 
@@ -615,6 +617,12 @@ CREATE TABLE package_services (
 - 阿里云、华为云 adapter
 - 云盘、快照、备份、计费/到期状态
 - 多云资源搜索与高级过滤
+
+### Phase 8：Windows 原生版
+- WinUI 3 + Windows App SDK + .NET/C# 技术验证
+- Windows Credential Manager / DPAPI 凭据存储
+- Windows 版真实 SSH MVP（服务器 CRUD、凭据、主机指纹、`printf hhc-ssh-ok`）
+- 复用 macOS 版的领域模型和云 provider adapter 设计
 
 ## 9. 依赖库
 

@@ -226,6 +226,7 @@ The app should recommend read-only credentials by default. Dangerous operations 
 - **Phase 5**: GitLab deployment.
 - **Phase 6**: private package registries.
 - **Phase 7**: more providers, snapshots, disks, billing, and advanced resource management.
+- **Phase 8**: Windows native technical validation, reusing the cloud provider adapter domain model.
 
 ## 12. Reference APIs
 

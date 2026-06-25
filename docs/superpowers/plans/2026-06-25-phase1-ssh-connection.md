@@ -554,3 +554,4 @@ Phase 1 只有在以下条件都满足时才算完成：
 - **Phase 5:** GitLab 部署。先做手动部署日志，再做 webhook。
 - **Phase 6:** 私有包仓库。Verdaccio/unpub 安装前做版本和系统依赖检测。
 - **Phase 7:** 更多云厂商、高级云资源管理、快照、云盘和计费信息。
+- **Phase 8:** Windows 原生版技术验证。WinUI 3 + Windows App SDK + .NET/C#，先复刻真实 SSH MVP。

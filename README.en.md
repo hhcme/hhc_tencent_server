@@ -58,15 +58,19 @@ Target users include:
    Verdaccio and Dart/Flutter private package registry management.
 7. **Phase 7: Advanced cloud resource management**
    More providers, snapshots, disks, billing status, and advanced cloud operations.
+8. **Phase 8: Windows native technical validation**
+   WinUI 3, Windows App SDK, .NET, Windows Credential Manager, and real SSH smoke test.
 
 ## Documentation
 
 - [Documentation index](docs/README.md)
 - [Design document](docs/en/2026-06-25-server-manager-design.md)
 - [Cloud provider API enhancement](docs/en/2026-06-25-cloud-provider-integration.md)
+- [Windows native client strategy](docs/en/2026-06-25-windows-native-client-strategy.md)
 - [Phase 1 implementation plan](docs/en/2026-06-25-phase1-ssh-connection.md)
 - [中文设计文档](docs/superpowers/specs/2026-06-25-server-manager-design.md)
 - [中文云厂商 API 增强层设计](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)
+- [中文 Windows 原生版技术选型](docs/superpowers/specs/2026-06-25-windows-native-client-strategy.md)
 - [中文 Phase 1 计划](docs/superpowers/plans/2026-06-25-phase1-ssh-connection.md)
 
 ## Development Status

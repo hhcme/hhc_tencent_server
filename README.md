@@ -33,6 +33,8 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - [Design document, English](docs/en/2026-06-25-server-manager-design.md)
 - [Cloud Provider API enhancement, Chinese / 云厂商 API 增强层中文](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)
 - [Cloud Provider API enhancement, English](docs/en/2026-06-25-cloud-provider-integration.md)
+- [Windows native client strategy, Chinese / Windows 原生版技术选型中文](docs/superpowers/specs/2026-06-25-windows-native-client-strategy.md)
+- [Windows native client strategy, English](docs/en/2026-06-25-windows-native-client-strategy.md)
 - [Phase 1 plan, Chinese / Phase 1 中文计划](docs/superpowers/plans/2026-06-25-phase1-ssh-connection.md)
 - [Phase 1 plan, English](docs/en/2026-06-25-phase1-ssh-connection.md)
 
@@ -45,6 +47,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 5. Phase 5: GitLab deployment workflows.
 6. Phase 6: private npm and Dart/Flutter package registries.
 7. Phase 7: additional cloud providers, snapshots, disks, billing, and advanced cloud resource management.
+8. Phase 8: Windows native client technical validation with WinUI 3, Windows App SDK, and .NET.
 
 ## Contributing / 参与贡献
 

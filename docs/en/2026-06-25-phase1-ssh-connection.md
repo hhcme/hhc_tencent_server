@@ -261,3 +261,4 @@ Phase 1 is complete only when:
 - **Phase 5:** GitLab deployment.
 - **Phase 6:** private package registries.
 - **Phase 7:** more cloud providers, advanced cloud resource management, snapshots, disks, and billing data.
+- **Phase 8:** Windows native technical validation with WinUI 3, Windows App SDK, and .NET/C#, starting by recreating the real SSH MVP.

@@ -45,6 +45,8 @@ Phase 1 does not include the full terminal, SFTP file manager, dashboard, cloud 
 
 SwiftNIO SSH versioning matters. Newer releases have different Swift toolchain requirements, so the project should commit `Package.resolved` and pin the Xcode/Swift toolchain in CI.
 
+The current implementation priority is the macOS native client. A Windows native client should start after the macOS core features stabilize. The recommended Windows direction is WinUI 3 + Windows App SDK + .NET/C#. See [Windows native client strategy](2026-06-25-windows-native-client-strategy.md).
+
 ## 3. Architecture
 
 Recommended service boundaries:
@@ -266,6 +268,7 @@ Verdaccio should be installed with an explicit stable version, not a floating pr
 5. Phase 5: GitLab deployment.
 6. Phase 6: private package registries.
 7. Phase 7: more providers, snapshots, disks, billing, and advanced cloud resource management.
+8. Phase 8: Windows native client with WinUI 3, Windows App SDK, .NET/C#, Windows Credential Manager, and a real SSH MVP.
 
 ## 10. Non-functional requirements
 

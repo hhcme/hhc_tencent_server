@@ -2,6 +2,7 @@
 
 - [项目设计文档](../superpowers/specs/2026-06-25-server-manager-design.md)
 - [云厂商 API 增强层设计](../superpowers/specs/2026-06-25-cloud-provider-integration.md)
+- [Windows 原生版技术选型](../superpowers/specs/2026-06-25-windows-native-client-strategy.md)
 - [Phase 1 实施计划：项目骨架 + 真实 SSH 最小闭环](../superpowers/plans/2026-06-25-phase1-ssh-connection.md)
 - [English documentation](../en/README.md)
 

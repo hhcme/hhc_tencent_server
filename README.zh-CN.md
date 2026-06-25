@@ -58,15 +58,19 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
    Verdaccio 和 Dart/Flutter 私有仓库管理。
 7. **Phase 7：高级云资源管理**
    更多云厂商、快照、云盘、计费状态和高级资源操作。
+8. **Phase 8：Windows 原生版技术验证**
+   WinUI 3、Windows App SDK、.NET、Windows Credential Manager、真实 SSH smoke test。
 
 ## 文档
 
 - [文档索引](docs/README.md)
 - [设计文档](docs/superpowers/specs/2026-06-25-server-manager-design.md)
 - [云厂商 API 增强层设计](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)
+- [Windows 原生版技术选型](docs/superpowers/specs/2026-06-25-windows-native-client-strategy.md)
 - [Phase 1 实施计划](docs/superpowers/plans/2026-06-25-phase1-ssh-connection.md)
 - [English design document](docs/en/2026-06-25-server-manager-design.md)
 - [English cloud provider API enhancement](docs/en/2026-06-25-cloud-provider-integration.md)
+- [English Windows native client strategy](docs/en/2026-06-25-windows-native-client-strategy.md)
 - [English Phase 1 plan](docs/en/2026-06-25-phase1-ssh-connection.md)
 
 ## 开发状态
