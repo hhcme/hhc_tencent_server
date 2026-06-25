@@ -660,6 +660,132 @@ final class SSHIntegrationTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testRealFirewallTemporaryRuleAuditsAndCleansUpWhenExplicitlyEnabled() async throws {
+        guard Self.testEnvironment()["HHC_TEST_FIREWALL_REAL"] == "1" else {
+            throw XCTSkip("Set HHC_TEST_FIREWALL_REAL=1 with the real SSH environment to run the guarded firewall write integration test.")
+        }
+
+        let harness = try makeRealSSHHarness()
+        defer { try? harness.service.deleteServer(harness.profile) }
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+
+        let userCheck = try await harness.sshClient.execute("id -u", profile: harness.profile)
+        guard userCheck.exitCode == 0,
+              userCheck.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "0"
+        else {
+            throw XCTSkip("Real firewall write test requires a root SSH session because HHC does not invoke sudo.")
+        }
+
+        let manager = FirewallManager()
+        let initialSnapshot: FirewallSnapshot
+        do {
+            initialSnapshot = try await manager.loadSnapshot(profile: harness.profile, sshClient: harness.sshClient)
+        } catch {
+            throw XCTSkip("Real firewall write test requires a supported firewall backend: \(error.localizedDescription)")
+        }
+        if initialSnapshot.backend == .firewalld,
+           !initialSnapshot.status.localizedCaseInsensitiveContains("running") {
+            throw XCTSkip("Real firewalld write test requires a running firewalld service.")
+        }
+
+        let port = Int.random(in: 43_000...49_000)
+        let addDraft = FirewallRuleDraft(
+            mutation: .add,
+            direction: .ingress,
+            action: .allow,
+            proto: .tcp,
+            port: port,
+            cidr: "127.0.0.1/32"
+        )
+        let deleteDraft = FirewallRuleDraft(
+            mutation: .delete,
+            direction: .ingress,
+            action: .allow,
+            proto: .tcp,
+            port: port,
+            cidr: "127.0.0.1/32"
+        )
+        let targetIdFragment = "tcp:\(port):127.0.0.1/32"
+
+        do {
+            _ = try FirewallManager.command(for: addDraft, snapshot: initialSnapshot)
+        } catch {
+            throw XCTSkip("Real firewall backend is readable but not safely editable by HHC: \(error.localizedDescription)")
+        }
+
+        let viewModel = ServerWorkspaceViewModel()
+        var addedRule = false
+        do {
+            viewModel.loadFirewallSnapshot(
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                firewallManager: manager
+            )
+            try await Self.waitUntil(timeout: 20) {
+                viewModel.isLoadingFirewall == false && viewModel.firewallSnapshot != nil
+            }
+            XCTAssertNil(viewModel.firewallErrorMessage)
+
+            viewModel.applyFirewallRule(
+                addDraft,
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                firewallManager: manager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil(timeout: 20) {
+                viewModel.isMutatingFirewall == false && viewModel.firewallActionMessage != nil
+            }
+            XCTAssertNil(viewModel.firewallErrorMessage)
+            XCTAssertEqual(viewModel.firewallActionMessage, "Add firewall rule succeeded.")
+            addedRule = true
+
+            viewModel.applyFirewallRule(
+                deleteDraft,
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                firewallManager: manager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil(timeout: 20) {
+                viewModel.isMutatingFirewall == false
+                    && viewModel.firewallActionMessage == "Delete firewall rule succeeded."
+            }
+            XCTAssertNil(viewModel.firewallErrorMessage)
+            addedRule = false
+
+            let logs = try harness.repository.fetchRemoteChangeLogs(serverId: harness.profile.id)
+            var sawAddLog = false
+            var sawDeleteLog = false
+            for log in logs {
+                if log.targetType == "firewall",
+                   log.status == "success",
+                   log.targetId?.contains(targetIdFragment) == true {
+                    if log.action == "add" {
+                        sawAddLog = true
+                    }
+                    if log.action == "delete" {
+                        sawDeleteLog = true
+                    }
+                }
+            }
+            XCTAssertTrue(sawAddLog)
+            XCTAssertTrue(sawDeleteLog)
+        } catch {
+            if addedRule,
+               let snapshot = try? await manager.loadSnapshot(profile: harness.profile, sshClient: harness.sshClient) {
+                _ = try? await manager.applyRule(
+                    deleteDraft,
+                    snapshot: snapshot,
+                    profile: harness.profile,
+                    sshClient: harness.sshClient
+                )
+            }
+            throw error
+        }
+    }
+
     func testRealVerdaccioLifecycleWhenExplicitlyEnabled() async throws {
         guard ProcessInfo.processInfo.environment["HHC_TEST_VERDACCIO_REAL"] == "1" else {
             throw XCTSkip("Set HHC_TEST_VERDACCIO_REAL=1 with the real SSH environment to run the Verdaccio lifecycle integration test.")
