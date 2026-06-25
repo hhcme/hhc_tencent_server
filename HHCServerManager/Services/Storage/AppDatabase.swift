@@ -177,6 +177,29 @@ final class AppDatabase: @unchecked Sendable {
             ON operation_logs(created_at DESC)
         """)
         try execute("""
+            CREATE TABLE IF NOT EXISTS remote_change_logs (
+                id TEXT PRIMARY KEY NOT NULL,
+                server_id TEXT REFERENCES server_profiles(id) ON DELETE SET NULL,
+                provider_id TEXT,
+                target_type TEXT NOT NULL,
+                target_id TEXT,
+                action TEXT NOT NULL,
+                before_snapshot TEXT,
+                after_snapshot TEXT,
+                status TEXT NOT NULL,
+                message TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_remote_change_logs_created_at
+            ON remote_change_logs(created_at DESC)
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_remote_change_logs_server_created_at
+            ON remote_change_logs(server_id, created_at DESC)
+        """)
+        try execute("""
             CREATE TABLE IF NOT EXISTS cloud_provider_accounts (
                 id TEXT PRIMARY KEY NOT NULL,
                 provider_id TEXT NOT NULL,

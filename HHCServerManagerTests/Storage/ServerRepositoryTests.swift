@@ -127,6 +127,53 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertEqual(logs[1].message, "exit_code=0")
     }
 
+    func testRemoteChangeLogsPersistFilterAndCascadeServerToNull() throws {
+        let repository = try makeRepository()
+        let server = makeServer()
+        try repository.upsert(server)
+        let older = RemoteChangeLogEntry(
+            id: UUID(),
+            serverId: server.id,
+            providerId: nil,
+            targetType: "cron",
+            targetId: "0 2 * * * /usr/bin/backup",
+            action: "disable",
+            beforeSnapshot: "0 2 * * * /usr/bin/backup",
+            afterSnapshot: "# HHC_DISABLED 0 2 * * * /usr/bin/backup",
+            status: "success",
+            message: "disabled",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let newer = RemoteChangeLogEntry(
+            id: UUID(),
+            serverId: nil,
+            providerId: .tencentCloud,
+            targetType: "security_group",
+            targetId: "sg-123",
+            action: "add_rule",
+            beforeSnapshot: "[]",
+            afterSnapshot: "[rule]",
+            status: "failed",
+            message: "permission denied",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_020)
+        )
+
+        try repository.saveRemoteChangeLog(older)
+        try repository.saveRemoteChangeLog(newer)
+
+        let all = try repository.fetchRemoteChangeLogs()
+        XCTAssertEqual(all.map(\.targetType), ["security_group", "cron"])
+        XCTAssertEqual(all[0].providerId, .tencentCloud)
+        XCTAssertEqual(all[1].beforeSnapshot, "0 2 * * * /usr/bin/backup")
+
+        let serverLogs = try repository.fetchRemoteChangeLogs(serverId: server.id)
+        XCTAssertEqual(serverLogs.map(\.action), ["disable"])
+
+        try repository.deleteServer(id: server.id)
+        let afterDelete = try XCTUnwrap(repository.fetchRemoteChangeLogs().first { $0.id == older.id })
+        XCTAssertNil(afterDelete.serverId)
+    }
+
     func testCloudProviderAccountsPersistUpdateAndDelete() throws {
         let repository = try makeRepository()
         let account = CloudProviderAccount(

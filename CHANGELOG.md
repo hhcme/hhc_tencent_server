@@ -53,6 +53,7 @@ All notable changes to this project will be documented in this file.
 - Added Tencent Cloud Monitor `GetMonitorData` support for linked CVM Cloud CPU metrics, with Cloud API source labeling and dashboard aggregation tests.
 - Started Phase 4 Services with systemd unit listing, strict `.service` unit validation, journal reading, confirmed start/stop/restart/reload actions, UI wiring, tests, and read-only real-server validation.
 - Added Cron workspace foundations with crontab reading, entry parsing, add/enable/disable/delete flows, pre-install remote backups, confirmation UI, tests, and read-only real-server validation.
+- Added `remote_change_logs` persistence for remote environment changes and wired systemd/Cron write actions to before/after/status audit records.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -101,3 +102,4 @@ All notable changes to this project will be documented in this file.
 - 添加腾讯云云监控 `GetMonitorData` 支持，可为已关联 CVM 展示 Cloud CPU 指标，并补充 Cloud API 来源标记和 Dashboard 聚合测试。
 - 启动 Phase 4 Services，加入 systemd 服务列表、严格 `.service` 单元校验、journal 读取、带确认的 start/stop/restart/reload 操作、UI 接入、测试和真实服务器只读验证。
 - 添加 Cron 工作台基础，支持 crontab 读取、任务解析、添加/启用/禁用/删除流程、写入前远端备份、确认 UI、测试和真实服务器只读验证。
+- 添加 `remote_change_logs` 远程变更持久化，并将 systemd/Cron 写操作接入 before/after/status 审计记录。

@@ -90,7 +90,8 @@ struct ServerWorkspaceView: View {
                         unitName: request.unit.name,
                         profile: profile,
                         sshClient: appState.sshClient,
-                        systemdServiceManager: appState.systemdServiceManager
+                        systemdServiceManager: appState.systemdServiceManager,
+                        repository: appState.repository
                     )
                 },
                 secondaryButton: .cancel()
@@ -961,7 +962,8 @@ struct ServerWorkspaceView: View {
             command: cronCommandText,
             profile: profile,
             sshClient: appState.sshClient,
-            cronManager: appState.cronManager
+            cronManager: appState.cronManager,
+            repository: appState.repository
         )
         cronCommandText = ""
     }
@@ -972,7 +974,8 @@ struct ServerWorkspaceView: View {
             entry: request.entry,
             profile: profile,
             sshClient: appState.sshClient,
-            cronManager: appState.cronManager
+            cronManager: appState.cronManager,
+            repository: appState.repository
         )
     }
 

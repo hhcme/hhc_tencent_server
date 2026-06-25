@@ -605,6 +605,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
 
     func testSystemdUnitsLoadSelectAndPerformAction() async throws {
         let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
         let client = SystemdViewModelMockSSHClient()
         let viewModel = ServerWorkspaceViewModel()
         let manager = SystemdServiceManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
@@ -621,16 +622,25 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         try await waitUntil { viewModel.systemdJournalLog?.unitName == "ssh.service" }
         XCTAssertTrue(viewModel.systemdJournalLog?.text.contains("ssh ready") == true)
 
-        viewModel.performSystemdAction(.restart, unitName: "ssh.service", profile: profile, sshClient: client, systemdServiceManager: manager)
+        viewModel.performSystemdAction(.restart, unitName: "ssh.service", profile: profile, sshClient: client, systemdServiceManager: manager, repository: repository)
         try await waitUntil { viewModel.isPerformingSystemdAction == false && viewModel.systemdActionMessage != nil }
 
         XCTAssertEqual(viewModel.systemdActionMessage, "Restart requested for ssh.service.")
         XCTAssertTrue(client.commands.contains("systemctl restart -- 'ssh.service'"))
         XCTAssertEqual(viewModel.selectedSystemdUnit?.name, "ssh.service")
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.count, 1)
+        XCTAssertEqual(logs[0].targetType, "systemd")
+        XCTAssertEqual(logs[0].targetId, "ssh.service")
+        XCTAssertEqual(logs[0].action, "restart")
+        XCTAssertEqual(logs[0].status, "success")
+        XCTAssertTrue(logs[0].beforeSnapshot?.contains("name=ssh.service") == true)
     }
 
     func testCronEntriesLoadAddDisableAndDelete() async throws {
         let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
         let client = CronViewModelMockSSHClient()
         let viewModel = ServerWorkspaceViewModel()
         let manager = CronManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
@@ -641,21 +651,27 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.cronSnapshot?.entries.map(\.command), ["/usr/bin/backup"])
         XCTAssertNil(viewModel.cronErrorMessage)
 
-        viewModel.addCronEntry(schedule: "*/5 * * * *", command: "/usr/bin/health", profile: profile, sshClient: client, cronManager: manager)
+        viewModel.addCronEntry(schedule: "*/5 * * * *", command: "/usr/bin/health", profile: profile, sshClient: client, cronManager: manager, repository: repository)
         try await waitUntil { viewModel.isMutatingCron == false && viewModel.cronSnapshot?.entries.count == 2 }
 
         XCTAssertEqual(viewModel.cronActionMessage, "Added cron entry.")
         let health = try XCTUnwrap(viewModel.cronSnapshot?.entries.first { $0.command == "/usr/bin/health" })
         XCTAssertTrue(health.isEnabled)
 
-        viewModel.performCronEntryAction(.disable, entry: health, profile: profile, sshClient: client, cronManager: manager)
+        viewModel.performCronEntryAction(.disable, entry: health, profile: profile, sshClient: client, cronManager: manager, repository: repository)
         try await waitUntil { viewModel.cronSnapshot?.entries.first { $0.command == "/usr/bin/health" }?.isEnabled == false }
         XCTAssertEqual(viewModel.cronActionMessage, "Disable requested for cron entry.")
 
         let disabled = try XCTUnwrap(viewModel.cronSnapshot?.entries.first { $0.command == "/usr/bin/health" })
-        viewModel.performCronEntryAction(.delete, entry: disabled, profile: profile, sshClient: client, cronManager: manager)
+        viewModel.performCronEntryAction(.delete, entry: disabled, profile: profile, sshClient: client, cronManager: manager, repository: repository)
         try await waitUntil { viewModel.cronSnapshot?.entries.count == 1 }
         XCTAssertEqual(viewModel.cronSnapshot?.entries.map(\.command), ["/usr/bin/backup"])
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.map(\.action), ["delete", "disable", "add"])
+        XCTAssertEqual(logs.map(\.targetType), ["cron", "cron", "cron"])
+        XCTAssertTrue(logs[0].beforeSnapshot?.contains("# HHC_DISABLED */5 * * * * /usr/bin/health") == true)
+        XCTAssertFalse(logs[0].afterSnapshot?.contains("/usr/bin/health") == true)
     }
 
     private func makeProfile() -> ServerProfile {
@@ -671,6 +687,12 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             createdAt: Date(),
             updatedAt: Date()
         )
+    }
+
+    private func makeRepository(with profile: ServerProfile) throws -> ServerRepository {
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        return repository
     }
 
     private func waitUntil(

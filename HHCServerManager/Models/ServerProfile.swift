@@ -285,6 +285,20 @@ struct OperationLogEntry: Identifiable, Codable, Equatable, Hashable {
     var createdAt: Date
 }
 
+struct RemoteChangeLogEntry: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var serverId: UUID?
+    var providerId: CloudProviderID?
+    var targetType: String
+    var targetId: String?
+    var action: String
+    var beforeSnapshot: String?
+    var afterSnapshot: String?
+    var status: String
+    var message: String?
+    var createdAt: Date
+}
+
 enum CloudProviderID: String, Codable, CaseIterable, Identifiable {
     case tencentCloud = "tencent_cloud"
 

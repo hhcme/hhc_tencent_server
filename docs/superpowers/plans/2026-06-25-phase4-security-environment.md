@@ -85,8 +85,8 @@ CREATE TABLE environment_profiles (
 ### Task 1：危险操作框架
 
 - [ ] 定义 `RemoteOperationRisk` 和确认模型。
-- [ ] 所有写操作写入 `remote_change_logs`。
-- [ ] 操作失败时保存 stderr 和上下文。
+- [x] 所有写操作写入 `remote_change_logs`：当前 systemd 和 Cron 写操作已记录 before/after/status/message，安全组、Nginx、防火墙待接入。
+- [x] 操作失败时保存 stderr 和上下文：当前 systemd 和 Cron 失败会记录 before snapshot 与错误 message。
 - [ ] UI 展示操作预览和风险说明。
 
 ### Task 2：安全组
@@ -133,7 +133,7 @@ CREATE TABLE environment_profiles (
 - [ ] 风险确认 ViewModel 测试。
 - [ ] Nginx 配置测试/回滚逻辑测试。
 - [ ] Firewall adapter 能力探测测试。
-- [ ] RemoteChangeLogStore 测试。
+- [x] RemoteChangeLogStore 测试：已覆盖保存、倒序查询、按 server 过滤和 server 删除后的 SET NULL。
 
 ### Task 8：手动验收
 

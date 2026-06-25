@@ -82,7 +82,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 
 ## 开发状态
 
-macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础大体落地，Phase 3 Dashboard/文件浏览基础已经启动，Phase 4 Services/Cron 也已开始：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、云实例同步/导入 UI 基础、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、基于 SSH 的 Dashboard 能力和指标采集（含网络与进程摘要）、Dashboard 单项指标失败 warning 降级、手动刷新和自动刷新、远程目录浏览、带可见任务状态、当前任务取消和待传队列清空的排队单文件上传/下载、重命名、基于 chmod 的权限修改、可恢复移入回收目录、带保存前备份和另存为的轻量 UTF-8 文本编辑、systemd 服务列表/日志/操作、crontab 读取和 Cron 任务管理、操作日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。SFTP 固化、进度百分比、批量传输、安全组、Nginx、防火墙、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
+macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础大体落地，Phase 3 Dashboard/文件浏览基础已经启动，Phase 4 Services/Cron 也已开始：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、云实例同步/导入 UI 基础、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、基于 SSH 的 Dashboard 能力和指标采集（含网络与进程摘要）、Dashboard 单项指标失败 warning 降级、手动刷新和自动刷新、远程目录浏览、带可见任务状态、当前任务取消和待传队列清空的排队单文件上传/下载、重命名、基于 chmod 的权限修改、可恢复移入回收目录、带保存前备份和另存为的轻量 UTF-8 文本编辑、systemd 服务列表/日志/操作、crontab 读取和 Cron 任务管理、远程变更审计日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。SFTP 固化、进度百分比、批量传输、安全组、Nginx、防火墙、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
 
 ## 参与贡献
 

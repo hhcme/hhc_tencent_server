@@ -592,11 +592,13 @@ final class ServerWorkspaceViewModel: ObservableObject {
         unitName: String,
         profile: ServerProfile,
         sshClient: SSHClient,
-        systemdServiceManager: SystemdServiceManager
+        systemdServiceManager: SystemdServiceManager,
+        repository: ServerRepository? = nil
     ) {
         isPerformingSystemdAction = true
         systemdErrorMessage = nil
         systemdActionMessage = nil
+        let beforeSnapshot = selectedSystemdUnit.map(Self.systemdSnapshot)
 
         Task {
             do {
@@ -612,14 +614,37 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     profile: profile,
                     sshClient: sshClient
                 )
+                let afterUnit = list.units.first(where: { $0.name == unitName })
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "systemd",
+                    targetId: unitName,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: afterUnit.map(Self.systemdSnapshot),
+                    status: "success",
+                    message: "\(action.displayName) requested for \(unitName)."
+                )
                 await MainActor.run {
                     self.systemdUnitList = list
-                    self.selectedSystemdUnit = list.units.first(where: { $0.name == unitName })
+                    self.selectedSystemdUnit = afterUnit
                     self.systemdJournalLog = journal ?? self.systemdJournalLog
                     self.systemdActionMessage = "\(action.displayName) requested for \(unitName)."
                     self.isPerformingSystemdAction = false
                 }
             } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "systemd",
+                    targetId: unitName,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
                 await MainActor.run {
                     self.systemdErrorMessage = error.localizedDescription
                     self.isPerformingSystemdAction = false
@@ -687,22 +712,46 @@ final class ServerWorkspaceViewModel: ObservableObject {
         command: String,
         profile: ServerProfile,
         sshClient: SSHClient,
-        cronManager: CronManager
+        cronManager: CronManager,
+        repository: ServerRepository? = nil
     ) {
         isMutatingCron = true
         cronErrorMessage = nil
         cronActionMessage = nil
+        let beforeSnapshot = cronSnapshot?.rawText
 
         Task {
             do {
                 try await cronManager.add(schedule: schedule, command: command, profile: profile, sshClient: sshClient)
                 let snapshot = try await cronManager.load(profile: profile, sshClient: sshClient)
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "cron",
+                    targetId: try? CronManager.makeEntryLine(schedule: schedule, command: command),
+                    action: "add",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: snapshot.rawText,
+                    status: "success",
+                    message: "Added cron entry."
+                )
                 await MainActor.run {
                     self.cronSnapshot = snapshot
                     self.cronActionMessage = "Added cron entry."
                     self.isMutatingCron = false
                 }
             } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "cron",
+                    targetId: "\(schedule) \(command)",
+                    action: "add",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
                 await MainActor.run {
                     self.cronErrorMessage = error.localizedDescription
                     self.isMutatingCron = false
@@ -716,28 +765,93 @@ final class ServerWorkspaceViewModel: ObservableObject {
         entry: CronEntry,
         profile: ServerProfile,
         sshClient: SSHClient,
-        cronManager: CronManager
+        cronManager: CronManager,
+        repository: ServerRepository? = nil
     ) {
         isMutatingCron = true
         cronErrorMessage = nil
         cronActionMessage = nil
+        let beforeSnapshot = cronSnapshot?.rawText
 
         Task {
             do {
                 try await cronManager.perform(action, entry: entry, profile: profile, sshClient: sshClient)
                 let snapshot = try await cronManager.load(profile: profile, sshClient: sshClient)
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "cron",
+                    targetId: entry.originalLine,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: snapshot.rawText,
+                    status: "success",
+                    message: "\(action.displayName) requested for cron entry."
+                )
                 await MainActor.run {
                     self.cronSnapshot = snapshot
                     self.cronActionMessage = "\(action.displayName) requested for cron entry."
                     self.isMutatingCron = false
                 }
             } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "cron",
+                    targetId: entry.originalLine,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
                 await MainActor.run {
                     self.cronErrorMessage = error.localizedDescription
                     self.isMutatingCron = false
                 }
             }
         }
+    }
+
+    private func saveRemoteChangeLog(
+        repository: ServerRepository?,
+        profile: ServerProfile,
+        targetType: String,
+        targetId: String?,
+        action: String,
+        beforeSnapshot: String?,
+        afterSnapshot: String?,
+        status: String,
+        message: String?
+    ) {
+        guard let repository else { return }
+        do {
+            try repository.saveRemoteChangeLog(RemoteChangeLogEntry(
+                id: UUID(),
+                serverId: profile.id,
+                providerId: nil,
+                targetType: targetType,
+                targetId: targetId,
+                action: action,
+                beforeSnapshot: beforeSnapshot,
+                afterSnapshot: afterSnapshot,
+                status: status,
+                message: message,
+                createdAt: Date()
+            ))
+        } catch {
+            assertionFailure("Could not save remote change log: \(error.localizedDescription)")
+        }
+    }
+
+    private static func systemdSnapshot(_ unit: SystemdUnit) -> String {
+        [
+            "name=\(unit.name)",
+            "load=\(unit.loadState)",
+            "active=\(unit.activeState)",
+            "sub=\(unit.subState)",
+            "description=\(unit.description)",
+        ].joined(separator: "\n")
     }
 
     private func runSmokeTest(

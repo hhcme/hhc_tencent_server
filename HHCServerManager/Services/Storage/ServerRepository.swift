@@ -150,6 +150,57 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func saveRemoteChangeLog(_ entry: RemoteChangeLogEntry) throws {
+        try database.execute("""
+            INSERT INTO remote_change_logs (
+                id, server_id, provider_id, target_type, target_id, action,
+                before_snapshot, after_snapshot, status, message, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, bindings: [
+            .text(entry.id.uuidString),
+            entry.serverId.map { .text($0.uuidString) } ?? .null,
+            entry.providerId.map { .text($0.rawValue) } ?? .null,
+            .text(entry.targetType),
+            entry.targetId.map(SQLiteValue.text) ?? .null,
+            .text(entry.action),
+            entry.beforeSnapshot.map(SQLiteValue.text) ?? .null,
+            entry.afterSnapshot.map(SQLiteValue.text) ?? .null,
+            .text(entry.status),
+            entry.message.map(SQLiteValue.text) ?? .null,
+            .text(AppDatabase.string(from: entry.createdAt)),
+        ])
+    }
+
+    func fetchRemoteChangeLogs(serverId: UUID? = nil, limit: Int = 100) throws -> [RemoteChangeLogEntry] {
+        if let serverId {
+            return try database.query("""
+                SELECT id, server_id, provider_id, target_type, target_id, action,
+                       before_snapshot, after_snapshot, status, message, created_at
+                FROM remote_change_logs
+                WHERE server_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, bindings: [
+                .text(serverId.uuidString),
+                .int(max(1, limit)),
+            ]) { statement in
+                try Self.mapRemoteChangeLogEntry(statement)
+            }
+        }
+
+        return try database.query("""
+            SELECT id, server_id, provider_id, target_type, target_id, action,
+                   before_snapshot, after_snapshot, status, message, created_at
+            FROM remote_change_logs
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, bindings: [
+            .int(max(1, limit)),
+        ]) { statement in
+            try Self.mapRemoteChangeLogEntry(statement)
+        }
+    }
+
     func fetchCloudProviderAccounts() throws -> [CloudProviderAccount] {
         try database.query("""
             SELECT id, provider_id, display_name, keychain_ref, enabled, created_at, updated_at
@@ -337,6 +388,22 @@ final class ServerRepository: @unchecked Sendable {
             status: string(statement, 4),
             message: optionalString(statement, 5),
             createdAt: date(statement, 6)
+        )
+    }
+
+    private static func mapRemoteChangeLogEntry(_ statement: OpaquePointer) throws -> RemoteChangeLogEntry {
+        RemoteChangeLogEntry(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            serverId: optionalUUID(statement, 1),
+            providerId: optionalString(statement, 2).flatMap(CloudProviderID.init(rawValue:)),
+            targetType: string(statement, 3),
+            targetId: optionalString(statement, 4),
+            action: string(statement, 5),
+            beforeSnapshot: optionalString(statement, 6),
+            afterSnapshot: optionalString(statement, 7),
+            status: string(statement, 8),
+            message: optionalString(statement, 9),
+            createdAt: date(statement, 10)
         )
     }
 
