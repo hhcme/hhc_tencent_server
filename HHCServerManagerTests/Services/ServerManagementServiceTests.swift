@@ -3528,7 +3528,7 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(regions[0].id, "ap-southeast-1|project-1")
         XCTAssertEqual(instances.map(\.id), ["server-1"])
         XCTAssertEqual(instances[0].providerId, .huaweiCloud)
-        XCTAssertEqual(instances[0].regionId, "ap-southeast-1")
+        XCTAssertEqual(instances[0].regionId, "ap-southeast-1|project-1")
         XCTAssertEqual(instances[0].publicIp, "203.0.113.55")
         XCTAssertEqual(instances[0].privateIp, "10.0.1.5")
         XCTAssertEqual(instances[0].instanceType, "s6.large.2")
@@ -3544,6 +3544,89 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].url?.path, "/v1.1/project-1/cloudservers/detail")
         XCTAssertEqual(transport.requests[1].queryValue("limit"), "100")
         XCTAssertEqual(transport.requests[1].queryValue("offset"), "0")
+    }
+
+    func testHuaweiCloudAdapterFetchesDisksUsesSignedEVSAPI() async throws {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockHuaweiCloudTransport(responses: [
+            """
+            {
+              "count": 2,
+              "volumes": [
+                {
+                  "id": "vol-1",
+                  "name": "prod-system",
+                  "size": 80,
+                  "status": "in-use",
+                  "volume_type": "SSD",
+                  "attachments": [
+                    {"server_id": "server-1"}
+                  ],
+                  "metadata": {
+                    "charging_mode": "prePaid",
+                    "orderID": "order-1"
+                  }
+                }
+              ]
+            }
+            """,
+            """
+            {
+              "count": 2,
+              "volumes": [
+                {
+                  "id": "vol-2",
+                  "name": "prod-data",
+                  "size": 200,
+                  "status": "available",
+                  "volume_type": "SAS",
+                  "attachments": [],
+                  "metadata": {
+                    "billingMode": "postPaid"
+                  }
+                }
+              ]
+            }
+            """,
+        ])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        let disks = try await adapter.fetchDisks(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-southeast-1|project-1",
+            capturedAt: capturedAt
+        )
+
+        XCTAssertEqual(disks.map(\.diskId), ["vol-1", "vol-2"])
+        XCTAssertEqual(disks[0].accountId, accountId)
+        XCTAssertEqual(disks[0].providerId, .huaweiCloud)
+        XCTAssertEqual(disks[0].regionId, "ap-southeast-1|project-1")
+        XCTAssertEqual(disks[0].instanceId, "server-1")
+        XCTAssertEqual(disks[0].name, "prod-system")
+        XCTAssertEqual(disks[0].diskType, "SSD")
+        XCTAssertEqual(disks[0].sizeGB, 80)
+        XCTAssertEqual(disks[0].status, "in-use")
+        XCTAssertEqual(disks[0].billingType, "prePaid")
+        XCTAssertEqual(disks[0].lastSyncedAt, capturedAt)
+        XCTAssertNil(disks[1].instanceId)
+        XCTAssertEqual(disks[1].diskType, "SAS")
+        XCTAssertEqual(disks[1].billingType, "postPaid")
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "evs.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[0].url?.path, "/v2/project-1/cloudvolumes/detail")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-Sdk-Date"), "20231114T221320Z")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("SDK-HMAC-SHA256 Access=HUAWEIAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("limit"), "100")
+        XCTAssertEqual(transport.requests[0].queryValue("offset"), "0")
+        XCTAssertEqual(transport.requests[1].queryValue("offset"), "1")
     }
 
     private final class Harness {

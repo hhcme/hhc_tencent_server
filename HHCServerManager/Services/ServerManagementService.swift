@@ -6311,6 +6311,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .regions,
         .instanceDiscovery,
         .instanceMetadata,
+        .cloudDisks,
     ]
 
     private let transport: HuaweiCloudHTTPTransport
@@ -6371,7 +6372,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
                 CloudProviderInstance(
                     id: server.id,
                     providerId: .huaweiCloud,
-                    regionId: region.regionName,
+                    regionId: regionId,
                     displayName: server.name,
                     publicIp: server.addresses?.firstAddress(type: "floating"),
                     privateIp: server.addresses?.firstAddress(type: "fixed"),
@@ -6417,7 +6418,50 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         capturedAt: Date
     ) async throws -> [CloudDisk] {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudDisks)
+        let region = Self.decodeRegionId(regionId)
+        var offset = 0
+        let limit = 100
+        var totalCount: Int?
+        var lastPageCount = 0
+        var disks: [CloudDisk] = []
+
+        repeat {
+            let response: HuaweiVolumesDetailResponse = try await request(
+                credential: credential,
+                host: "evs.\(region.regionName).myhuaweicloud.com",
+                path: "/v2/\(CloudSignature.percentEncode(region.projectId))/cloudvolumes/detail",
+                queryItems: [
+                    URLQueryItem(name: "limit", value: "\(limit)"),
+                    URLQueryItem(name: "offset", value: "\(offset)"),
+                ]
+            )
+            guard !response.volumes.isEmpty else {
+                break
+            }
+            lastPageCount = response.volumes.count
+            disks.append(contentsOf: response.volumes.map { volume in
+                CloudDisk(
+                    id: UUID(),
+                    accountId: accountId,
+                    providerId: .huaweiCloud,
+                    regionId: regionId,
+                    diskId: volume.id,
+                    instanceId: volume.attachments?.first?.serverId,
+                    name: volume.name,
+                    diskType: volume.volumeType,
+                    sizeGB: volume.size,
+                    status: volume.status,
+                    billingType: volume.metadata?.billingType,
+                    expiredTime: nil,
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                )
+            })
+            totalCount = response.count
+            offset += response.volumes.count
+        } while totalCount.map({ offset < $0 }) ?? (lastPageCount == limit)
+
+        return disks
     }
 
     func fetchSnapshots(
@@ -6815,6 +6859,64 @@ private struct HuaweiProject: Decodable {
 private struct HuaweiServersDetailResponse: Decodable {
     var count: Int?
     var servers: [HuaweiServer]
+}
+
+private struct HuaweiVolumesDetailResponse: Decodable {
+    var count: Int?
+    var volumes: [HuaweiVolume]
+}
+
+private struct HuaweiVolume: Decodable {
+    var id: String
+    var name: String?
+    var size: Int?
+    var status: String?
+    var volumeType: String?
+    var attachments: [HuaweiVolumeAttachment]?
+    var metadata: HuaweiVolumeMetadata?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case size
+        case status
+        case volumeType = "volume_type"
+        case attachments
+        case metadata
+    }
+}
+
+private struct HuaweiVolumeAttachment: Decodable {
+    var serverId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case serverId = "server_id"
+    }
+}
+
+private struct HuaweiVolumeMetadata: Decodable {
+    var chargingMode: String?
+    var billingMode: String?
+    var orderId: String?
+
+    var billingType: String? {
+        if let chargingMode, !chargingMode.isEmpty {
+            return chargingMode
+        }
+        if let billingMode, !billingMode.isEmpty {
+            return billingMode
+        }
+        if let orderId, !orderId.isEmpty {
+            return "prePaid"
+        }
+        return nil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case chargingMode = "charging_mode"
+        case billingMode
+        case orderId = "orderID"
+    }
 }
 
 private struct HuaweiServer: Decodable {
