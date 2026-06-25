@@ -89,10 +89,12 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var deploymentActionMessage: String?
     @Published var registryDraft = VerdaccioInstallDraft()
     @Published var registryPreflightReport: RegistryPreflightReport?
+    @Published var verdaccioInstallResult: VerdaccioInstallResult?
     @Published var verdaccioStatusSnapshot: VerdaccioStatusSnapshot?
     @Published var verdaccioPackages: [VerdaccioPackageSummary] = []
     @Published var verdaccioBackupResult: VerdaccioRegistryBackupResult?
     @Published var isRunningRegistryPreflight = false
+    @Published var isInstallingVerdaccio = false
     @Published var isLoadingVerdaccioStatus = false
     @Published var isLoadingVerdaccioPackages = false
     @Published var isCreatingVerdaccioBackup = false
@@ -1760,6 +1762,49 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isLoadingVerdaccioStatus = false
+                }
+            }
+        }
+    }
+
+    func installVerdaccio(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioInstaller: VerdaccioInstaller,
+        verdaccioManager: VerdaccioManager? = nil
+    ) {
+        guard !isInstallingVerdaccio else { return }
+        isInstallingVerdaccio = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+
+        Task {
+            do {
+                let result = try await verdaccioInstaller.install(
+                    draft: registryDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                var snapshot: VerdaccioStatusSnapshot?
+                if let verdaccioManager {
+                    snapshot = try? await verdaccioManager.loadStatus(
+                        draft: registryDraft,
+                        profile: profile,
+                        sshClient: sshClient
+                    )
+                }
+                await MainActor.run {
+                    self.verdaccioInstallResult = result
+                    if let snapshot {
+                        self.verdaccioStatusSnapshot = snapshot
+                    }
+                    self.registryActionMessage = "Installed Verdaccio. Health check: \(result.healthCheckOutput)."
+                    self.isInstallingVerdaccio = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isInstallingVerdaccio = false
                 }
             }
         }

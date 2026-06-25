@@ -20,6 +20,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingNginxSave = false
     @State private var pendingEnvironmentSave = false
     @State private var pendingDeploymentRollback: DeploymentRollbackRequest?
+    @State private var pendingVerdaccioInstall = false
     @State private var securityGroupDraftDirection: CloudSecurityGroupRuleDirection = .ingress
     @State private var securityGroupDraftProtocol = "TCP"
     @State private var securityGroupDraftPort = "22"
@@ -185,6 +186,19 @@ struct ServerWorkspaceView: View {
                 },
                 secondaryButton: .cancel()
             )
+        }
+        .alert("Install Verdaccio?", isPresented: $pendingVerdaccioInstall) {
+            Button("Cancel", role: .cancel) {}
+            Button("Install", role: .destructive) {
+                viewModel.installVerdaccio(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    verdaccioInstaller: appState.verdaccioInstaller,
+                    verdaccioManager: appState.verdaccioManager
+                )
+            }
+        } message: {
+            Text(verdaccioInstallConfirmationMessage)
         }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
@@ -651,6 +665,17 @@ struct ServerWorkspaceView: View {
                             }
                         }
                         .disabled(isRegistryBusy)
+
+                        Button {
+                            pendingVerdaccioInstall = true
+                        } label: {
+                            if viewModel.isInstallingVerdaccio {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Install", systemImage: "arrow.down.circle")
+                            }
+                        }
+                        .disabled(isRegistryBusy || !isRegistryPreflightReady)
 
                         Button {
                             viewModel.loadVerdaccioStatus(
@@ -2745,9 +2770,22 @@ struct ServerWorkspaceView: View {
 
     private var isRegistryBusy: Bool {
         viewModel.isRunningRegistryPreflight ||
+            viewModel.isInstallingVerdaccio ||
             viewModel.isLoadingVerdaccioStatus ||
             viewModel.isLoadingVerdaccioPackages ||
             viewModel.isCreatingVerdaccioBackup
+    }
+
+    private var isRegistryPreflightReady: Bool {
+        viewModel.registryPreflightReport?.isReady == true
+    }
+
+    private var verdaccioInstallConfirmationMessage: String {
+        """
+        This will create or reuse the \(viewModel.registryDraft.serviceName) system user, write \(viewModel.registryDraft.installPath)/config.yaml, write /etc/systemd/system/\(viewModel.registryDraft.serviceName).service, enable and restart the service, then run a health check.
+
+        Run this only after preflight passes and you are ready to change the remote server.
+        """
     }
 
     private var isNginxDraftDirty: Bool {

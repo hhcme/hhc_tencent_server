@@ -1182,6 +1182,31 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("tar -czf") })
     }
 
+    func testPrivateRegistriesWorkspaceInstallsVerdaccioAndRefreshesStatus() async throws {
+        let profile = makeProfile()
+        let viewModel = ServerWorkspaceViewModel()
+        let client = RegistryViewModelMockSSHClient()
+        let installer = VerdaccioInstaller()
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.installVerdaccio(
+            profile: profile,
+            sshClient: client,
+            verdaccioInstaller: installer,
+            verdaccioManager: manager
+        )
+        try await waitUntil { viewModel.isInstallingVerdaccio == false && viewModel.verdaccioInstallResult != nil }
+
+        XCTAssertEqual(viewModel.verdaccioInstallResult?.configPath, "/srv/verdaccio/config.yaml")
+        XCTAssertEqual(viewModel.verdaccioInstallResult?.servicePath, "/etc/systemd/system/verdaccio.service")
+        XCTAssertEqual(viewModel.verdaccioInstallResult?.healthCheckOutput, #"{"ok":"verdaccio"}"#)
+        XCTAssertTrue(viewModel.verdaccioStatusSnapshot?.isRunning == true)
+        XCTAssertTrue(viewModel.registryActionMessage?.contains("Installed Verdaccio") == true)
+        XCTAssertTrue(client.commands.contains { $0.contains("systemctl enable --now 'verdaccio.service'") })
+        XCTAssertTrue(client.commands.contains { $0.contains("curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'") })
+        XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_ACTIVE_STATE__") })
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -1939,6 +1964,12 @@ private final class RegistryViewModelMockSSHClient: SSHClient, @unchecked Sendab
 
     func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
         commands.append(command)
+        if command.contains("systemctl enable --now 'verdaccio.service'") {
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'") {
+            return CommandResult(command: command, stdout: #"{"ok":"verdaccio"}"#, stderr: "", exitCode: 0, duration: 0)
+        }
         if command.contains("__HHC_REGISTRY_NODE_VERSION__") {
             return CommandResult(
                 command: command,
