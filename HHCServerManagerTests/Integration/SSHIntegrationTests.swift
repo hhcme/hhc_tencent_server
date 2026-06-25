@@ -312,6 +312,105 @@ final class SSHIntegrationTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testRealEnvironmentFileSaveAuditsAndCleanupWhenExplicitlyEnabled() async throws {
+        guard Self.testEnvironment()["HHC_TEST_SECURITY_REAL"] == "1" else {
+            throw XCTSkip("Set HHC_TEST_SECURITY_REAL=1 with the real SSH environment to run the guarded environment file write integration test.")
+        }
+
+        let harness = try makeRealSSHHarness()
+        defer { try? harness.service.deleteServer(harness.profile) }
+        try await Self.trustHostKeyIfNeeded(harness.sshClient, profile: harness.profile)
+
+        let homeResult = try await harness.sshClient.execute("printf '%s' \"$HOME\"", profile: harness.profile)
+        XCTAssertEqual(homeResult.exitCode, 0, homeResult.stderr)
+        let homePath = homeResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard homePath.hasPrefix("/") else {
+            throw XCTSkip("Real environment file write test requires an absolute remote HOME path.")
+        }
+
+        let token = "hhc-phase4-env-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12))"
+        let envBasePath = "\(homePath)/\(token)"
+        let envPath = "\(envBasePath)/.env"
+        let cleanup = "rm -rf -- \(Self.shellQuote(envBasePath))"
+
+        do {
+            _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+            let setup = """
+            mkdir -p -- \(Self.shellQuote(envBasePath)); \
+            printf 'HHC_VALUE=before\\n' > \(Self.shellQuote(envPath))
+            """
+            let setupResult = try await harness.sshClient.execute(setup, profile: harness.profile)
+            XCTAssertEqual(setupResult.exitCode, 0, setupResult.stderr)
+
+            let viewModel = ServerWorkspaceViewModel()
+            let manager = EnvironmentFileManager()
+            viewModel.loadEnvironmentFiles(
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                environmentFileManager: manager
+            )
+            try await Self.waitUntil(timeout: 20) {
+                viewModel.isLoadingEnvironmentFiles == false
+                    && viewModel.environmentFileList?.files.contains { $0.path == envPath } == true
+            }
+            let file = try XCTUnwrap(viewModel.environmentFileList?.files.first { $0.path == envPath })
+
+            viewModel.selectEnvironmentFile(
+                file,
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                environmentFileManager: manager
+            )
+            try await Self.waitUntil {
+                viewModel.isLoadingEnvironmentFileContent == false
+                    && viewModel.environmentFileContent?.file.path == envPath
+            }
+            XCTAssertEqual(viewModel.environmentFileDraft, "HHC_VALUE=before\n")
+
+            viewModel.environmentFileDraft = "HHC_VALUE=after\n"
+            viewModel.saveEnvironmentFile(
+                profile: harness.profile,
+                sshClient: harness.sshClient,
+                environmentFileManager: manager,
+                repository: harness.repository
+            )
+            try await Self.waitUntil {
+                viewModel.isSavingEnvironmentFile == false
+                    && viewModel.environmentActionMessage?.contains("Saved environment file") == true
+            }
+            XCTAssertNil(viewModel.environmentErrorMessage)
+            XCTAssertEqual(viewModel.environmentFileContent?.content, "HHC_VALUE=after\n")
+
+            let remoteContent = try await harness.sshClient.execute("cat -- \(Self.shellQuote(envPath))", profile: harness.profile)
+            XCTAssertEqual(remoteContent.exitCode, 0, remoteContent.stderr)
+            XCTAssertEqual(remoteContent.stdout, "HHC_VALUE=after\n")
+
+            let backupCheck = try await harness.sshClient.execute(
+                "find \(Self.shellQuote(envBasePath)) -maxdepth 1 -name '.env.hhc-backup-*' -type f | wc -l",
+                profile: harness.profile
+            )
+            XCTAssertEqual(backupCheck.exitCode, 0, backupCheck.stderr)
+            XCTAssertEqual(backupCheck.stdout.trimmingCharacters(in: .whitespacesAndNewlines), "1")
+
+            let logs = try harness.repository.fetchRemoteChangeLogs(serverId: harness.profile.id)
+            XCTAssertTrue(logs.contains {
+                $0.targetType == "environment"
+                    && $0.targetId == envPath
+                    && $0.action == "save"
+                    && $0.status == "success"
+                    && $0.beforeSnapshot == "HHC_VALUE=before"
+                    && $0.afterSnapshot == "HHC_VALUE=after"
+            })
+
+            let cleanupResult = try await harness.sshClient.execute(cleanup, profile: harness.profile)
+            XCTAssertEqual(cleanupResult.exitCode, 0, cleanupResult.stderr)
+        } catch {
+            _ = try? await harness.sshClient.execute(cleanup, profile: harness.profile)
+            throw error
+        }
+    }
+
     func testRealVerdaccioLifecycleWhenExplicitlyEnabled() async throws {
         guard ProcessInfo.processInfo.environment["HHC_TEST_VERDACCIO_REAL"] == "1" else {
             throw XCTSkip("Set HHC_TEST_VERDACCIO_REAL=1 with the real SSH environment to run the Verdaccio lifecycle integration test.")
