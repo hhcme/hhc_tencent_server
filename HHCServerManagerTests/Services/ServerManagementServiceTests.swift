@@ -617,6 +617,110 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(response?.contains("Content-Length: 2") == true)
     }
 
+    func testVerdaccioConfigurationBuilderGeneratesPinnedConfigAndService() throws {
+        let draft = VerdaccioInstallDraft(
+            name: "Team Registry",
+            installPath: "/srv/verdaccio",
+            dataPath: "/srv/verdaccio/storage",
+            listenHost: "127.0.0.1",
+            listenPort: 4873,
+            serviceName: "verdaccio",
+            version: "5.31.1"
+        )
+
+        let yaml = try VerdaccioConfigurationBuilder.configurationYAML(for: draft)
+        let service = try VerdaccioConfigurationBuilder.systemdService(for: draft)
+
+        XCTAssertTrue(yaml.contains("storage: /srv/verdaccio/storage"))
+        XCTAssertTrue(yaml.contains("- 127.0.0.1:4873"))
+        XCTAssertTrue(yaml.contains("proxy: npmjs"))
+        XCTAssertTrue(service.contains("verdaccio@5.31.1"))
+        XCTAssertTrue(service.contains("ReadWritePaths=/srv/verdaccio /srv/verdaccio/storage"))
+    }
+
+    func testVerdaccioConfigurationBuilderRejectsUnsafeDrafts() {
+        var draft = VerdaccioInstallDraft()
+
+        draft.version = "latest"
+        XCTAssertThrowsError(try VerdaccioConfigurationBuilder.configurationYAML(for: draft)) { error in
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidVersion)
+        }
+
+        draft.version = "5.31.1"
+        draft.installPath = "/etc/verdaccio"
+        XCTAssertThrowsError(try VerdaccioConfigurationBuilder.configurationYAML(for: draft)) { error in
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidPath("/etc/verdaccio"))
+        }
+
+        draft.installPath = "/srv/verdaccio"
+        draft.dataPath = "/srv/verdaccio/storage;rm"
+        XCTAssertThrowsError(try VerdaccioConfigurationBuilder.configurationYAML(for: draft)) { error in
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidPath("/srv/verdaccio/storage;rm"))
+        }
+
+        draft.dataPath = "/srv/verdaccio/storage"
+        draft.listenPort = 80
+        XCTAssertThrowsError(try VerdaccioConfigurationBuilder.configurationYAML(for: draft)) { error in
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidPort)
+        }
+
+        draft.listenPort = 4873
+        draft.serviceName = "verdaccio;rm"
+        XCTAssertThrowsError(try VerdaccioConfigurationBuilder.configurationYAML(for: draft)) { error in
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidServiceName)
+        }
+    }
+
+    func testRegistryPreflightCheckerParsesReadyReport() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(
+                command: "",
+                stdout: """
+                __HHC_REGISTRY_NODE_VERSION__v20.11.1
+                __HHC_REGISTRY_PACKAGE_MANAGER__npm 10.2.4
+                __HHC_REGISTRY_SYSTEMD__yes
+                __HHC_REGISTRY_PORT_BUSY__no
+                __HHC_REGISTRY_INSTALL_PARENT_WRITABLE__yes
+                __HHC_REGISTRY_DATA_PARENT_WRITABLE__yes
+                __HHC_REGISTRY_DISK_AVAILABLE_KB__1048576
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            ),
+        ])
+        let checker = RegistryPreflightChecker(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let report = try await checker.run(draft: VerdaccioInstallDraft(), profile: profile, sshClient: client)
+
+        XCTAssertTrue(report.isReady)
+        XCTAssertEqual(report.checks.map(\.status), [.passed, .passed, .passed, .passed, .passed, .passed])
+        XCTAssertTrue(client.commands[0].contains("node --version"))
+        XCTAssertTrue(client.commands[0].contains("port=4873"))
+        XCTAssertEqual(report.capturedAt, Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    func testRegistryPreflightCheckerFlagsMissingDependenciesAndBusyPort() {
+        let report = RegistryPreflightChecker.parseReport("""
+        __HHC_REGISTRY_NODE_VERSION__
+        __HHC_REGISTRY_PACKAGE_MANAGER__
+        __HHC_REGISTRY_SYSTEMD__no
+        __HHC_REGISTRY_PORT_BUSY__yes
+        __HHC_REGISTRY_INSTALL_PARENT_WRITABLE__no
+        __HHC_REGISTRY_DATA_PARENT_WRITABLE__yes
+        __HHC_REGISTRY_DISK_AVAILABLE_KB__128000
+        """)
+
+        XCTAssertFalse(report.isReady)
+        XCTAssertEqual(report.checks.first { $0.id == "node" }?.status, .failed)
+        XCTAssertEqual(report.checks.first { $0.id == "package_manager" }?.status, .failed)
+        XCTAssertEqual(report.checks.first { $0.id == "systemd" }?.status, .failed)
+        XCTAssertEqual(report.checks.first { $0.id == "port" }?.status, .failed)
+        XCTAssertEqual(report.checks.first { $0.id == "paths" }?.status, .failed)
+        XCTAssertEqual(report.checks.first { $0.id == "disk" }?.status, .warning)
+    }
+
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
         let os = DashboardService.parseOSRelease("""
         NAME="Ubuntu"

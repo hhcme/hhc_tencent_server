@@ -1096,6 +1096,322 @@ final class DeploymentWebhookHTTPServer: @unchecked Sendable {
     }
 }
 
+enum RegistryKind: String, Equatable, Sendable {
+    case verdaccio
+}
+
+enum RegistryPreflightStatus: String, Equatable, Sendable {
+    case passed
+    case warning
+    case failed
+}
+
+struct RegistryPreflightCheck: Equatable, Sendable {
+    var id: String
+    var title: String
+    var status: RegistryPreflightStatus
+    var detail: String
+    var remediation: String?
+}
+
+struct RegistryPreflightReport: Equatable, Sendable {
+    var checks: [RegistryPreflightCheck]
+    var rawOutput: String
+    var capturedAt: Date
+
+    var isReady: Bool {
+        checks.allSatisfy { $0.status != .failed }
+    }
+}
+
+struct VerdaccioInstallDraft: Equatable, Sendable {
+    var name: String
+    var installPath: String
+    var dataPath: String
+    var listenHost: String
+    var listenPort: Int
+    var serviceName: String
+    var version: String
+
+    static let defaultVersion = "5.31.1"
+
+    init(
+        name: String = "Verdaccio",
+        installPath: String = "/srv/verdaccio",
+        dataPath: String = "/srv/verdaccio/storage",
+        listenHost: String = "127.0.0.1",
+        listenPort: Int = 4873,
+        serviceName: String = "verdaccio",
+        version: String = Self.defaultVersion
+    ) {
+        self.name = name
+        self.installPath = installPath
+        self.dataPath = dataPath
+        self.listenHost = listenHost
+        self.listenPort = listenPort
+        self.serviceName = serviceName
+        self.version = version
+    }
+}
+
+enum RegistryConfigurationError: LocalizedError, Equatable {
+    case invalidName
+    case invalidPath(String)
+    case invalidHost
+    case invalidPort
+    case invalidServiceName
+    case invalidVersion
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidName:
+            "Registry name cannot be empty or contain line breaks."
+        case let .invalidPath(path):
+            "Registry path \(path) must be under /srv, /opt, /var/lib, or /home and cannot contain line breaks."
+        case .invalidHost:
+            "Listen host must be a local, private, or explicit IP address without line breaks."
+        case .invalidPort:
+            "Listen port must be between 1024 and 65535."
+        case .invalidServiceName:
+            "Service name can only contain letters, numbers, underscore, dot, at sign, and dash."
+        case .invalidVersion:
+            "Verdaccio version must be pinned to a stable semver version such as 5.31.1."
+        }
+    }
+}
+
+enum VerdaccioConfigurationBuilder {
+    static func validate(_ draft: VerdaccioInstallDraft) throws {
+        guard !draft.name.trimmed.isEmpty,
+              !draft.name.contains("\n"),
+              !draft.name.contains("\r"),
+              !draft.name.contains("\0")
+        else {
+            throw RegistryConfigurationError.invalidName
+        }
+        try validatePath(draft.installPath)
+        try validatePath(draft.dataPath)
+        guard isValidListenHost(draft.listenHost.trimmed) else {
+            throw RegistryConfigurationError.invalidHost
+        }
+        guard (1024...65535).contains(draft.listenPort) else {
+            throw RegistryConfigurationError.invalidPort
+        }
+        guard draft.serviceName.trimmed.range(
+            of: #"^[A-Za-z0-9_.@-]+$"#,
+            options: .regularExpression
+        ) != nil else {
+            throw RegistryConfigurationError.invalidServiceName
+        }
+        guard isStablePinnedVersion(draft.version.trimmed) else {
+            throw RegistryConfigurationError.invalidVersion
+        }
+    }
+
+    static func configurationYAML(for draft: VerdaccioInstallDraft) throws -> String {
+        try validate(draft)
+        return """
+        storage: \(draft.dataPath.trimmed)
+
+        listen:
+          - \(draft.listenHost.trimmed):\(draft.listenPort)
+
+        uplinks:
+          npmjs:
+            url: https://registry.npmjs.org/
+
+        packages:
+          '@*/*':
+            access: $all
+            publish: $authenticated
+            proxy: npmjs
+          '**':
+            access: $all
+            publish: $authenticated
+            proxy: npmjs
+
+        logs:
+          - {type: stdout, format: pretty, level: http}
+
+        security:
+          api:
+            jwt:
+              sign:
+                expiresIn: 29d
+        """
+    }
+
+    static func systemdService(for draft: VerdaccioInstallDraft) throws -> String {
+        try validate(draft)
+        let installPath = draft.installPath.trimmed
+        let serviceName = draft.serviceName.trimmed
+        return """
+        [Unit]
+        Description=Verdaccio private npm registry (\(draft.name.trimmed))
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        User=\(serviceName)
+        Group=\(serviceName)
+        WorkingDirectory=\(installPath)
+        Environment=NODE_ENV=production
+        ExecStart=/usr/bin/env npx --yes verdaccio@\(draft.version.trimmed) --config \(installPath)/config.yaml
+        Restart=on-failure
+        RestartSec=5
+        NoNewPrivileges=true
+        PrivateTmp=true
+        ProtectSystem=full
+        ProtectHome=true
+        ReadWritePaths=\(installPath) \(draft.dataPath.trimmed)
+
+        [Install]
+        WantedBy=multi-user.target
+        """
+    }
+
+    private static func validatePath(_ path: String) throws {
+        let trimmed = path.trimmed
+        guard !trimmed.isEmpty,
+              trimmed.range(
+                  of: #"^/(srv|opt|var/lib|home)(/[A-Za-z0-9._@-]+)+$"#,
+                  options: .regularExpression
+              ) != nil
+        else {
+            throw RegistryConfigurationError.invalidPath(trimmed)
+        }
+    }
+
+    private static func isValidListenHost(_ host: String) -> Bool {
+        guard !host.isEmpty,
+              !host.contains("\n"),
+              !host.contains("\r"),
+              !host.contains("\0")
+        else { return false }
+        if ["127.0.0.1", "localhost", "0.0.0.0"].contains(host) {
+            return true
+        }
+        return host.range(
+            of: #"^(10(\.[0-9]{1,3}){3}|172\.(1[6-9]|2[0-9]|3[0-1])(\.[0-9]{1,3}){2}|192\.168(\.[0-9]{1,3}){2})$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func isStablePinnedVersion(_ version: String) -> Bool {
+        version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil
+    }
+}
+
+final class RegistryPreflightChecker: @unchecked Sendable {
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func run(
+        draft: VerdaccioInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> RegistryPreflightReport {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let command = Self.preflightCommand(for: draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Registry preflight check failed.")
+        }
+        return Self.parseReport(result.stdout, capturedAt: now())
+    }
+
+    static func parseReport(_ output: String, capturedAt: Date = Date()) -> RegistryPreflightReport {
+        let values = markerValues(from: output)
+        let nodeVersion = values["NODE_VERSION"]?.nilIfEmpty
+        let packageManager = values["PACKAGE_MANAGER"]?.nilIfEmpty
+        let diskAvailableKB = Int(values["DISK_AVAILABLE_KB"] ?? "") ?? 0
+
+        let checks = [
+            RegistryPreflightCheck(
+                id: "node",
+                title: "Node.js",
+                status: nodeVersion == nil ? .failed : .passed,
+                detail: nodeVersion ?? "Node.js was not found.",
+                remediation: nodeVersion == nil ? "Install Node.js LTS before installing Verdaccio." : nil
+            ),
+            RegistryPreflightCheck(
+                id: "package_manager",
+                title: "Package manager",
+                status: packageManager == nil ? .failed : .passed,
+                detail: packageManager ?? "npm, pnpm, or yarn was not found.",
+                remediation: packageManager == nil ? "Install npm, pnpm, or yarn on the server." : nil
+            ),
+            RegistryPreflightCheck(
+                id: "systemd",
+                title: "systemd",
+                status: values["SYSTEMD"] == "yes" ? .passed : .failed,
+                detail: values["SYSTEMD"] == "yes" ? "systemctl is available." : "systemctl was not found.",
+                remediation: values["SYSTEMD"] == "yes" ? nil : "Use a systemd-based distribution or add a separate service runner."
+            ),
+            RegistryPreflightCheck(
+                id: "port",
+                title: "Listen port",
+                status: values["PORT_BUSY"] == "yes" ? .failed : .passed,
+                detail: values["PORT_BUSY"] == "yes" ? "The configured listen port is already in use." : "The configured listen port is available.",
+                remediation: values["PORT_BUSY"] == "yes" ? "Choose another port or stop the existing service." : nil
+            ),
+            RegistryPreflightCheck(
+                id: "paths",
+                title: "Install and data paths",
+                status: values["INSTALL_PARENT_WRITABLE"] == "yes" && values["DATA_PARENT_WRITABLE"] == "yes" ? .passed : .failed,
+                detail: "Install parent writable: \(values["INSTALL_PARENT_WRITABLE"] ?? "unknown"); data parent writable: \(values["DATA_PARENT_WRITABLE"] ?? "unknown").",
+                remediation: values["INSTALL_PARENT_WRITABLE"] == "yes" && values["DATA_PARENT_WRITABLE"] == "yes" ? nil : "Create the parent directories or run with an account that has write permission."
+            ),
+            RegistryPreflightCheck(
+                id: "disk",
+                title: "Disk space",
+                status: diskAvailableKB >= 524_288 ? .passed : .warning,
+                detail: diskAvailableKB > 0 ? "\(diskAvailableKB / 1024) MiB available near the registry data path." : "Could not determine available disk space.",
+                remediation: diskAvailableKB >= 524_288 ? nil : "Keep at least 512 MiB free for package storage and cache."
+            ),
+        ]
+        return RegistryPreflightReport(checks: checks, rawOutput: output, capturedAt: capturedAt)
+    }
+
+    static func preflightCommand(for draft: VerdaccioInstallDraft) -> String {
+        let installPath = shellQuote(draft.installPath.trimmed)
+        let dataPath = shellQuote(draft.dataPath.trimmed)
+        let port = draft.listenPort
+        return """
+        install_path=\(installPath); data_path=\(dataPath); port=\(port); \
+        install_parent=$(dirname -- "$install_path"); data_parent=$(dirname -- "$data_path"); \
+        printf '__HHC_REGISTRY_NODE_VERSION__%s\\n' "$(node --version 2>/dev/null || true)"; \
+        if command -v npm >/dev/null 2>&1; then printf '__HHC_REGISTRY_PACKAGE_MANAGER__npm %s\\n' "$(npm --version 2>/dev/null || true)"; elif command -v pnpm >/dev/null 2>&1; then printf '__HHC_REGISTRY_PACKAGE_MANAGER__pnpm %s\\n' "$(pnpm --version 2>/dev/null || true)"; elif command -v yarn >/dev/null 2>&1; then printf '__HHC_REGISTRY_PACKAGE_MANAGER__yarn %s\\n' "$(yarn --version 2>/dev/null || true)"; else printf '__HHC_REGISTRY_PACKAGE_MANAGER__\\n'; fi; \
+        command -v systemctl >/dev/null 2>&1 && printf '__HHC_REGISTRY_SYSTEMD__yes\\n' || printf '__HHC_REGISTRY_SYSTEMD__no\\n'; \
+        if (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null || true) | awk '{print $4}' | grep -Eq "[:.]$port$"; then printf '__HHC_REGISTRY_PORT_BUSY__yes\\n'; else printf '__HHC_REGISTRY_PORT_BUSY__no\\n'; fi; \
+        test -d "$install_parent" && test -w "$install_parent" && printf '__HHC_REGISTRY_INSTALL_PARENT_WRITABLE__yes\\n' || printf '__HHC_REGISTRY_INSTALL_PARENT_WRITABLE__no\\n'; \
+        test -d "$data_parent" && test -w "$data_parent" && printf '__HHC_REGISTRY_DATA_PARENT_WRITABLE__yes\\n' || printf '__HHC_REGISTRY_DATA_PARENT_WRITABLE__no\\n'; \
+        printf '__HHC_REGISTRY_DISK_AVAILABLE_KB__%s\\n' "$(df -Pk "$data_parent" 2>/dev/null | awk 'NR==2 {print $4}' || echo 0)"
+        """
+    }
+
+    private static func markerValues(from output: String) -> [String: String] {
+        var values: [String: String] = [:]
+        for line in output.components(separatedBy: .newlines) where line.hasPrefix("__HHC_REGISTRY_") {
+            let keyStart = line.index(line.startIndex, offsetBy: "__HHC_REGISTRY_".count)
+            guard let markerEnd = line.range(of: "__", range: keyStart..<line.endIndex) else { continue }
+            let key = String(line[keyStart..<markerEnd.lowerBound])
+            values[key] = String(line[markerEnd.upperBound...]).trimmed
+        }
+        return values
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 final class DashboardService: @unchecked Sendable {
     private let now: @Sendable () -> Date
 

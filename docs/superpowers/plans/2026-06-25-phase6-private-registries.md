@@ -80,18 +80,18 @@ CREATE TABLE registry_backups (
 
 ### Task 1：安装前检查
 
-- [ ] 检查 Node.js 和包管理器。
-- [ ] 检查 systemd。
-- [ ] 检查端口占用。
-- [ ] 检查目录权限和磁盘空间。
-- [ ] 生成可读的检查报告。
+- [x] 检查 Node.js 和包管理器：已实现 SSH preflight marker 采集和报告解析。
+- [x] 检查 systemd：已实现 `systemctl` 可用性检查。
+- [x] 检查端口占用：已实现 `ss`/`netstat` 监听端口检测。
+- [x] 检查目录权限和磁盘空间：已实现安装目录/data 目录父级可写检查和 `df` 可用空间解析。
+- [x] 生成可读的检查报告：已输出 passed/warning/failed、detail 和 remediation。
 
 ### Task 2：Verdaccio 安装
 
-- [ ] 固定 Verdaccio 稳定版本。
+- [x] 固定 Verdaccio 稳定版本：当前默认固定为 `5.31.1`，并拒绝 `latest`、pre-release 和非 semver 版本。
 - [ ] 创建安装目录和数据目录。
-- [ ] 生成配置文件。
-- [ ] 创建 systemd service。
+- [x] 生成配置文件：已生成基础 `config.yaml` 模板，包含 storage、listen、npmjs uplink、package access/publish 和日志配置。
+- [x] 创建 systemd service：已生成 systemd unit 模板，包含固定 Verdaccio 版本、工作目录、重启策略和基础 hardening。
 - [ ] 启动并验证健康检查。
 
 ### Task 3：Verdaccio 管理
@@ -125,9 +125,9 @@ CREATE TABLE registry_backups (
 
 ### Task 7：测试
 
-- [ ] 安装前检查解析测试。
-- [ ] 配置生成测试。
-- [ ] systemd service 模板测试。
+- [x] 安装前检查解析测试。
+- [x] 配置生成测试。
+- [x] systemd service 模板测试。
 - [ ] 备份恢复状态机测试。
 - [ ] 日志脱敏测试。
 

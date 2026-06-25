@@ -72,6 +72,7 @@ All notable changes to this project will be documented in this file.
 - Added live deployment run/log refresh in the macOS Deployments workspace while manual deploys and rollbacks are running.
 - Added workspace-level deployment acceptance coverage for deploy path allowlist rejection and health-check failure surfacing.
 - Added workspace-level deployment acceptance coverage for build failure stopping later restart and health-check steps.
+- Started Phase 6 private registry foundations with Verdaccio draft validation, SSH preflight reporting, pinned config generation, and systemd service templates.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -139,3 +140,4 @@ All notable changes to this project will be documented in this file.
 - 添加 macOS Deployments 工作台运行中部署 run/log 自动刷新，手动部署和回滚执行时可持续看到日志推进。
 - 添加部署工作台验收覆盖，验证部署目录白名单拒绝和 health check 失败状态/日志展示。
 - 添加部署工作台验收覆盖，验证 build 失败后不会继续执行 restart 和 health check 后续步骤。
+- 启动 Phase 6 私有包仓库基础能力，添加 Verdaccio 安装草稿校验、SSH 安装前检查报告、固定版本配置生成和 systemd service 模板。
