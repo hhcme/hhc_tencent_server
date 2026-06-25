@@ -29,7 +29,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 - 腾讯云安全组基础：通过 VPC API 读取安全组和规则，并在已关联账号/地域下支持经过确认的单条规则新增/删除和审计记录。
 - 云导入 sheet：验证腾讯云账号、加载地域、同步 CVM 实例，并导入为 SSH profile。
 - Dashboard 基础：通过 SSH 探测 OS/能力，并展示负载、内存、磁盘、CPU、网络、进程摘要和已关联腾讯云 CVM 的 CPU 云监控指标，支持手动刷新和自动刷新。
-- 远程文件浏览基础：支持路径导航、目录列表、文件元信息展示、基于 OpenSSH/scp 的排队单文件上传/下载、可见传输状态、当前传输取消、待传队列清空、重命名、基于 chmod 的权限修改、可恢复移入回收目录，以及带保存前备份和另存为的轻量 UTF-8 文本编辑。
+- 远程文件浏览基础：支持路径导航、目录列表、文件元信息展示、基于 OpenSSH/scp 的排队批量上传/下载、可见传输状态、当前传输取消、待传队列清空、重命名、基于 chmod 的权限修改、可恢复移入回收目录，以及带保存前备份和另存为的轻量 UTF-8 文本编辑。
 - Services 基础：支持 systemd 服务列表、状态展示、journal 日志读取，以及带确认的 start/stop/restart/reload 操作。
 - Cron 基础：支持 crontab 读取、任务解析、添加/启用/禁用/删除流程，以及写入前远端备份。
 - Nginx 基础：支持动态探测配置路径、受保护编辑、远端备份、执行 `nginx -t`、测试失败自动回滚、确认后 reload，并写入远程变更审计记录。
@@ -62,7 +62,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 2. **Phase 2：云厂商基础层 + 简化命令面板**
    云账号管理、Provider Adapter、腾讯云只读实例发现、命令历史。
 3. **Phase 3：Dashboard + 文件管理器**
-   先聚合 SSH 指标和已关联腾讯云 CVM 的 CPU 云监控指标；交付基于 SSH bootstrap 的目录浏览、轻量编辑和排队单文件传输，再继续固化 SFTP、进度百分比、更多云监控指标和批量传输流程。
+   先聚合 SSH 指标和已关联腾讯云 CVM 的 CPU 云监控指标；交付基于 SSH bootstrap 的目录浏览、轻量编辑和排队批量传输，再继续固化 SFTP、字节级进度、更多云监控指标和并发/可恢复传输流程。
 4. **Phase 4：安全组 + 环境配置**
    安全组查看/修改、systemd、Nginx、防火墙、Cron、环境变量管理。
 5. **Phase 5：GitLab 部署**
@@ -86,7 +86,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 
 ## 开发状态
 
-macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础大体落地，Phase 3 Dashboard/文件浏览基础已经启动，Phase 4 Security Groups/Services/Cron/Nginx/Firewall/Environment 也已开始：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、云实例同步/导入 UI 基础、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、腾讯云安全组发现/规则查看和单条规则写操作、基于 SSH 的 Dashboard 能力和指标采集（含网络与进程摘要）、Dashboard 单项指标失败 warning 降级、手动刷新和自动刷新、远程目录浏览、带可见任务状态、当前任务取消和待传队列清空的排队单文件上传/下载、重命名、基于 chmod 的权限修改、可恢复移入回收目录、带保存前备份和另存为的轻量 UTF-8 文本编辑、systemd 服务列表/日志/操作、crontab 读取和 Cron 任务管理、Nginx 配置动态探测/读取/编辑/测试/reload/回滚、防火墙探测/规则展示和受限写操作、受保护的环境变量文件发现/编辑/备份、远程变更审计日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。SFTP 固化、进度百分比、批量传输、更多云厂商安全组写操作、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
+macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础大体落地，Phase 3 Dashboard/文件浏览基础已经启动，Phase 4 Security Groups/Services/Cron/Nginx/Firewall/Environment 也已开始：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、云实例同步/导入 UI 基础、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、腾讯云安全组发现/规则查看和单条规则写操作、基于 SSH 的 Dashboard 能力和指标采集（含网络与进程摘要）、Dashboard 单项指标失败 warning 降级、手动刷新和自动刷新、远程目录浏览、带可见任务状态、当前任务取消和待传队列清空的排队批量上传/下载、重命名、基于 chmod 的权限修改、可恢复移入回收目录、带保存前备份和另存为的轻量 UTF-8 文本编辑、systemd 服务列表/日志/操作、crontab 读取和 Cron 任务管理、Nginx 配置动态探测/读取/编辑/测试/reload/回滚、防火墙探测/规则展示和受限写操作、受保护的环境变量文件发现/编辑/备份、远程变更审计日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。SFTP 固化、字节级进度、并发/可恢复传输、更多云厂商安全组写操作、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
 
 ## 参与贡献
 

@@ -10,6 +10,7 @@ struct ServerWorkspaceView: View {
     @State private var remoteFileRenameEntry: RemoteFileEntry?
     @State private var remoteFileRenameText = ""
     @State private var remoteFileTrashEntry: RemoteFileEntry?
+    @State private var selectedRemoteFileIDs: Set<String> = []
     @State private var remoteFilePermissionsEntry: RemoteFileEntry?
     @State private var remoteFilePermissionsText = ""
     @State private var pendingSystemdAction: SystemdActionRequest?
@@ -1587,11 +1588,18 @@ struct ServerWorkspaceView: View {
 
                 HStack(spacing: 8) {
                     Button {
-                        chooseRemoteUploadFile()
+                        chooseRemoteUploadFiles()
                     } label: {
                         Label("Upload", systemImage: "square.and.arrow.up")
                     }
                     .disabled(isRemoteFileSelectionBusy)
+
+                    Button {
+                        chooseRemoteDownloadDirectory(for: selectedRemoteFileEntries)
+                    } label: {
+                        Label("Download Selected", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(isRemoteFileSelectionBusy || selectedRemoteFileEntries.isEmpty)
 
                     Button {
                         viewModel.loadRemoteParentDirectory(
@@ -1693,17 +1701,19 @@ struct ServerWorkspaceView: View {
         }
         .onChange(of: viewModel.remoteFilePath) { _, newPath in
             filePathText = newPath
+            selectedRemoteFileIDs = selectedRemoteFileIDs.intersection(Set(viewModel.remoteDirectoryListing?.entries.map(\.id) ?? []))
         }
     }
 
     private func remoteFileList(_ entries: [RemoteFileEntry]) -> some View {
-        List(entries) { entry in
+        List(entries, selection: $selectedRemoteFileIDs) { entry in
             Button {
                 openRemoteFileEntry(entry)
             } label: {
                 RemoteFileRow(entry: entry)
             }
             .buttonStyle(.plain)
+            .tag(entry.id)
             .contextMenu {
                 if entry.kind == .file {
                     Button {
@@ -2897,17 +2907,38 @@ struct ServerWorkspaceView: View {
         )
     }
 
-    private func chooseRemoteUploadFile() {
+    private func chooseRemoteUploadFiles() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.prompt = "Upload"
-        if panel.runModal() == .OK, let url = panel.url {
-            viewModel.uploadRemoteFile(
-                localURL: url,
+        if panel.runModal() == .OK {
+            viewModel.uploadRemoteFiles(
+                localURLs: panel.urls,
                 profile: profile,
                 sshClient: appState.sshClient,
+                transferClient: appState.sshClient,
+                remoteFileService: appState.remoteFileService,
+                repository: appState.repository
+            )
+        }
+    }
+
+    private func chooseRemoteDownloadDirectory(for entries: [RemoteFileEntry]) {
+        let files = entries.filter { $0.kind == .file }
+        guard !files.isEmpty else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Download"
+        if panel.runModal() == .OK, let url = panel.url {
+            viewModel.downloadRemoteFiles(
+                files,
+                toDirectory: url,
+                profile: profile,
                 transferClient: appState.sshClient,
                 remoteFileService: appState.remoteFileService,
                 repository: appState.repository
@@ -2961,6 +2992,11 @@ struct ServerWorkspaceView: View {
     private func startChangingPermissions(_ entry: RemoteFileEntry) {
         remoteFilePermissionsText = RemoteFilePermissionsSheet.octalMode(from: entry.permissions)
         remoteFilePermissionsEntry = entry
+    }
+
+    private var selectedRemoteFileEntries: [RemoteFileEntry] {
+        guard let entries = viewModel.remoteDirectoryListing?.entries else { return [] }
+        return entries.filter { selectedRemoteFileIDs.contains($0.id) && $0.kind == .file }
     }
 
     private func suggestedRemoteSaveAsPath(for path: String) -> String {

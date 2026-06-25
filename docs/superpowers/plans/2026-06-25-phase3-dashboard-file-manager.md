@@ -19,7 +19,7 @@
 - 不实现 systemd/Nginx/firewall/cron 管理。
 - 不实现部署系统。
 - 不实现大型二进制文件编辑。
-- 不实现多文件并发批量传输的高级队列；Phase 3 bootstrap 先支持串行单文件队列。
+- 不实现多文件并发传输的高级队列；Phase 3 bootstrap 先支持多选后的串行传输队列。
 
 ## 3. 技术约束
 
@@ -27,7 +27,7 @@
 - 指标命令必须有超时；解析失败时展示“能力不可用”而不是崩溃。
 - 云监控指标必须标明来源：Cloud API。
 - SSH 指标必须标明来源：SSH。
-- 正式 SFTP、进度百分比、批量/并发传输和队列持久化未落地前，文件管理器只能宣称支持 bootstrap 排队单文件传输。
+- 正式 SFTP、字节级进度百分比、并发传输和可恢复队列持久化未落地前，文件管理器只能宣称支持 bootstrap 排队批量传输。
 - 文件编辑保存必须先写临时文件，再原子替换或备份原文件。
 
 ## 4. 数据模型
@@ -123,12 +123,12 @@ CREATE TABLE file_transfer_jobs (
 ### Task 5：SFTP 技术验证
 
 - [ ] 验证 SwiftNIO SSH 是否能稳定接入 SFTP subsystem。
-- [x] 评估成熟 SFTP 库或 libssh2 wrapper，并暂定以 OpenSSH/scp bootstrap 先交付单文件传输。
+- [x] 评估成熟 SFTP 库或 libssh2 wrapper，并暂定以 OpenSSH/scp bootstrap 先交付串行队列传输。
 - [x] 验证目录列表、文件读取、上传、下载基础路径。
 - [ ] 验证权限、断线恢复和正式传输队列。
 - [x] 形成技术验证结论并写入设计文档。
 
-结论：当前 macOS bootstrap 继续使用系统 OpenSSH 工具链。目录浏览和文本读写走 `ssh` 命令，单文件上传/下载走 `scp`，已在真实 Linux 服务器上验证远端 `sftp` 命令存在以及 scp 上传/下载往返可用。SwiftNIO SSH/libssh2 的正式 SFTP 封装留到进度百分比、批量/并发传输和队列持久化阶段替换，避免在核心流程尚未稳定时引入额外 native binding 风险。
+结论：当前 macOS bootstrap 继续使用系统 OpenSSH 工具链。目录浏览和文本读写走 `ssh` 命令，文件上传/下载走 `scp` 串行队列，已在真实 Linux 服务器上验证远端 `sftp` 命令存在以及 scp 上传/下载往返可用。SwiftNIO SSH/libssh2 的正式 SFTP 封装留到字节级进度、并发传输和可恢复队列阶段替换，避免在核心流程尚未稳定时引入额外 native binding 风险。
 
 ### Task 6：文件管理器
 
@@ -136,8 +136,9 @@ CREATE TABLE file_transfer_jobs (
 - [x] 实现单文件上传、下载 bootstrap。
 - [x] 实现当前传输取消和任务状态记录。
 - [x] 实现串行单文件传输队列、pending 状态和待传队列清空。
+- [x] 实现多选批量上传和选中文件批量下载到目录，复用串行传输队列。
 - [x] 实现传输进度状态展示和完成/失败/取消历史持久化。
-- [ ] 实现字节级实时进度、批量/并发传输和可恢复队列持久化。
+- [ ] 实现字节级实时进度、并发传输和可恢复队列持久化。
 - [x] 实现重命名。
 - [x] 实现权限查看基础展示。
 - [x] 删除前二次确认，优先移动到远端应用回收目录。
@@ -156,7 +157,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 文件重命名和可恢复删除测试。
 - [x] 轻量文本读取、保存和备份测试。
 - [x] 另存为和权限修改 ViewModel/Service 测试。
-- [x] 单文件上传/下载服务和 ViewModel 测试。
+- [x] 单文件和批量上传/下载服务与 ViewModel 测试。
 - [x] 当前传输取消 ViewModel 测试。
 - [x] 串行传输队列和待传队列清空 ViewModel 测试。
 - [x] 传输历史 SQLite 持久化、恢复和级联删除测试。

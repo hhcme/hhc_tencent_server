@@ -616,6 +616,44 @@ final class ServerWorkspaceViewModel: ObservableObject {
         startNextRemoteFileTransferIfNeeded()
     }
 
+    func uploadRemoteFiles(
+        localURLs: [URL],
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
+    ) {
+        let urls = localURLs.filter { !$0.lastPathComponent.isEmpty }
+        guard !urls.isEmpty else { return }
+        let targetDirectoryPath = RemoteFileService.normalizedDirectoryPath(remoteFilePath)
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = "Queued \(urls.count) upload\(urls.count == 1 ? "" : "s")."
+
+        for localURL in urls {
+            let remotePath = RemoteFileService.joinedPath(
+                basePath: targetDirectoryPath,
+                name: localURL.lastPathComponent
+            )
+            let jobId = enqueueRemoteFileTransferJob(
+                direction: .upload,
+                remotePath: remotePath,
+                localPath: localURL.path
+            )
+            transferQueue.append(.upload(
+                jobId: jobId,
+                localURL: localURL,
+                directoryPath: targetDirectoryPath,
+                profile: profile,
+                sshClient: sshClient,
+                transferClient: transferClient,
+                remoteFileService: remoteFileService,
+                repository: repository
+            ))
+        }
+        startNextRemoteFileTransferIfNeeded()
+    }
+
     func downloadRemoteFile(
         _ entry: RemoteFileEntry,
         to localURL: URL,
@@ -640,6 +678,39 @@ final class ServerWorkspaceViewModel: ObservableObject {
             remoteFileService: remoteFileService,
             repository: repository
         ))
+        startNextRemoteFileTransferIfNeeded()
+    }
+
+    func downloadRemoteFiles(
+        _ entries: [RemoteFileEntry],
+        toDirectory localDirectoryURL: URL,
+        profile: ServerProfile,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
+    ) {
+        let files = entries.filter { $0.kind == .file }
+        guard !files.isEmpty else { return }
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = "Queued \(files.count) download\(files.count == 1 ? "" : "s")."
+
+        for entry in files {
+            let localURL = localDirectoryURL.appendingPathComponent(entry.name, isDirectory: false)
+            let jobId = enqueueRemoteFileTransferJob(
+                direction: .download,
+                remotePath: entry.path,
+                localPath: localURL.path
+            )
+            transferQueue.append(.download(
+                jobId: jobId,
+                entry: entry,
+                localURL: localURL,
+                profile: profile,
+                transferClient: transferClient,
+                remoteFileService: remoteFileService,
+                repository: repository
+            ))
+        }
         startNextRemoteFileTransferIfNeeded()
     }
 

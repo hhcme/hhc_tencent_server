@@ -48,6 +48,7 @@ All notable changes to this project will be documented in this file.
 - Added lightweight remote UTF-8 text editing with a 256 KiB guard, temporary-file replacement, backup-on-save, UI sheet, and tests.
 - Added single-file upload/download bootstrap through OpenSSH/scp with file picker/save panel UI, transfer state, tests, sandbox entitlement update, and real-server smoke validation.
 - Added visible remote transfer job records with pending/running/succeeded/failed/cancelled states, serial single-file queueing, current-transfer cancellation, and pending-queue clearing coverage.
+- Added batch remote file transfer flows with multi-file upload selection, selected-file download to a local directory, serial queue reuse, and ViewModel coverage.
 - Added remote text Save As and chmod-based permission changes with validation, refreshed listings, UI sheets, and tests.
 - Added Dashboard auto-refresh toggle with immediate refresh, periodic refresh, cancellation on disable/disappear, and ViewModel coverage.
 - Added Tencent Cloud Monitor `GetMonitorData` support for linked CVM Cloud CPU metrics, with Cloud API source labeling and dashboard aggregation tests.
@@ -144,6 +145,7 @@ All notable changes to this project will be documented in this file.
 - 添加轻量远程 UTF-8 文本编辑，包含 256 KiB 限制、临时文件替换、保存前备份、UI sheet 和测试。
 - 添加基于 OpenSSH/scp 的单文件上传/下载 bootstrap，包含文件选择/保存面板、传输状态、测试、沙盒权限更新和真实服务器 smoke 验证。
 - 添加可见的远程传输任务记录，支持 pending/running/succeeded/failed/cancelled 状态、串行单文件队列、当前传输取消和待传队列清空测试。
+- 添加远程文件批量传输流程，支持多文件上传选择、选中文件下载到本地目录、复用串行队列和 ViewModel 测试覆盖。
 - 添加远程文本另存为和基于 chmod 的权限修改，包含校验、列表刷新、UI sheet 和测试。
 - 添加 Dashboard 自动刷新开关，支持立即刷新、周期刷新、关闭/离开时取消，并补充 ViewModel 覆盖。
 - 添加腾讯云云监控 `GetMonitorData` 支持，可为已关联 CVM 展示 Cloud CPU 指标，并补充 Cloud API 来源标记和 Dashboard 聚合测试。

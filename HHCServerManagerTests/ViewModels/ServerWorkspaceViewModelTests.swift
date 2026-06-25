@@ -921,6 +921,68 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(persistedJobs.first?.progressFraction, 1)
     }
 
+    func testRemoteFileBatchUploadAndDownloadQueuesEachFile() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = RemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.loadRemoteFiles(
+            path: "/var/www",
+            profile: profile,
+            sshClient: client,
+            remoteFileService: service
+        )
+        try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["app.env"] }
+
+        viewModel.uploadRemoteFiles(
+            localURLs: [
+                URL(fileURLWithPath: "/tmp/alpha.env"),
+                URL(fileURLWithPath: "/tmp/beta.env"),
+            ],
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service,
+            repository: repository
+        )
+        try await waitUntil {
+            viewModel.remoteFileTransferJobs.count == 2 &&
+                viewModel.remoteFileTransferJobs.allSatisfy { $0.status == .succeeded }
+        }
+
+        XCTAssertEqual(client.uploads.map(\.remotePath), ["/var/www/alpha.env", "/var/www/beta.env"])
+        XCTAssertEqual(viewModel.remoteDirectoryListing?.entries.map(\.name), ["alpha.env", "app.env", "beta.env"])
+        XCTAssertFalse(viewModel.isTransferringRemoteFile)
+
+        let entries = try XCTUnwrap(viewModel.remoteDirectoryListing?.entries)
+        viewModel.downloadRemoteFiles(
+            entries + [
+                RemoteFileEntry(
+                    name: "logs",
+                    path: "/var/www/logs",
+                    kind: .directory,
+                    size: nil,
+                    modifiedAt: nil,
+                    permissions: "drwxr-xr-x"
+                ),
+            ],
+            toDirectory: URL(fileURLWithPath: "/tmp/downloads", isDirectory: true),
+            profile: profile,
+            transferClient: client,
+            remoteFileService: service,
+            repository: repository
+        )
+        try await waitUntil { client.downloads.count == 3 && viewModel.isTransferringRemoteFile == false }
+
+        XCTAssertEqual(client.downloads.map(\.remotePath), ["/var/www/alpha.env", "/var/www/app.env", "/var/www/beta.env"])
+        XCTAssertEqual(client.downloads.map(\.localURL.path), ["/tmp/downloads/alpha.env", "/tmp/downloads/app.env", "/tmp/downloads/beta.env"])
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.filter { $0.direction == .download }.count, 3)
+        XCTAssertTrue(viewModel.remoteFileTransferJobs.allSatisfy { $0.status == .succeeded })
+        XCTAssertEqual(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).count, 5)
+    }
+
     func testLoadRemoteFileTransferHistoryRestoresPersistedJobs() throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
