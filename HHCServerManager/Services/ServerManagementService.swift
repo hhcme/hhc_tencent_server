@@ -6432,6 +6432,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .instanceMetadata,
         .cloudDisks,
         .cloudSnapshots,
+        .securityGroups,
     ]
 
     private let transport: HuaweiCloudHTTPTransport
@@ -6521,7 +6522,45 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         accountId: UUID,
         regionId: String
     ) async throws -> [CloudSecurityGroup] {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .securityGroups)
+        let region = Self.decodeRegionId(regionId)
+        var marker: String?
+        let limit = 100
+        var groups: [CloudSecurityGroup] = []
+
+        repeat {
+            var queryItems = [
+                URLQueryItem(name: "limit", value: "\(limit)"),
+            ]
+            if let marker {
+                queryItems.append(URLQueryItem(name: "marker", value: marker))
+            }
+            let response: HuaweiSecurityGroupsResponse = try await request(
+                credential: credential,
+                host: "vpc.\(region.regionName).myhuaweicloud.com",
+                path: "/v1/\(CloudSignature.percentEncode(region.projectId))/security-groups",
+                queryItems: queryItems
+            )
+            guard !response.securityGroups.isEmpty else {
+                break
+            }
+            groups.append(contentsOf: response.securityGroups.map { group in
+                CloudSecurityGroup(
+                    accountId: accountId,
+                    providerId: .huaweiCloud,
+                    regionId: regionId,
+                    securityGroupId: group.id,
+                    name: group.name ?? group.id,
+                    description: group.description,
+                    projectId: group.enterpriseProjectId ?? region.projectId,
+                    isDefault: nil,
+                    createdTime: group.createdAt,
+                    updatedTime: group.updatedAt
+                )
+            })
+            marker = response.securityGroups.count == limit ? response.securityGroups.last?.id : nil
+        } while marker != nil
+
+        return groups
     }
 
     func fetchSecurityGroupPolicies(
@@ -6529,7 +6568,39 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         group: CloudSecurityGroup,
         capturedAt: Date
     ) async throws -> CloudSecurityGroupPolicySnapshot {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .securityGroups)
+        let region = Self.decodeRegionId(group.regionId)
+        var marker: String?
+        let limit = 100
+        var rules: [HuaweiSecurityGroupRule] = []
+
+        repeat {
+            var queryItems = [
+                URLQueryItem(name: "limit", value: "\(limit)"),
+                URLQueryItem(name: "security_group_id", value: group.securityGroupId),
+            ]
+            if let marker {
+                queryItems.append(URLQueryItem(name: "marker", value: marker))
+            }
+            let response: HuaweiSecurityGroupRulesResponse = try await request(
+                credential: credential,
+                host: "vpc.\(region.regionName).myhuaweicloud.com",
+                path: "/v1/\(CloudSignature.percentEncode(region.projectId))/security-group-rules",
+                queryItems: queryItems
+            )
+            guard !response.securityGroupRules.isEmpty else {
+                break
+            }
+            rules.append(contentsOf: response.securityGroupRules)
+            marker = response.securityGroupRules.count == limit ? response.securityGroupRules.last?.id : nil
+        } while marker != nil
+
+        return CloudSecurityGroupPolicySnapshot(
+            group: group,
+            version: nil,
+            ingress: Self.mapHuaweiSecurityGroupRules(rules, direction: .ingress),
+            egress: Self.mapHuaweiSecurityGroupRules(rules, direction: .egress),
+            capturedAt: capturedAt
+        )
     }
 
     func fetchDisks(
@@ -6819,6 +6890,29 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         return formatter.string(from: date)
+    }
+
+    private static func mapHuaweiSecurityGroupRules(
+        _ rules: [HuaweiSecurityGroupRule],
+        direction: CloudSecurityGroupRuleDirection
+    ) -> [CloudSecurityGroupRule] {
+        rules
+            .filter { $0.direction?.caseInsensitiveCompare(direction.rawValue) == .orderedSame }
+            .map { rule in
+                let isIPv6 = rule.remoteIpPrefix?.contains(":") == true
+                return CloudSecurityGroupRule(
+                    direction: direction,
+                    policyIndex: rule.priority,
+                    protocolName: rule.protocolName ?? rule.ethertype,
+                    port: rule.portRangeText,
+                    cidrBlock: isIPv6 ? nil : rule.remoteIpPrefix,
+                    ipv6CidrBlock: isIPv6 ? rule.remoteIpPrefix : nil,
+                    referencedSecurityGroupId: rule.remoteGroupId,
+                    action: rule.action,
+                    description: rule.description,
+                    modifiedTime: rule.updatedAt ?? rule.createdAt
+                )
+            }
     }
 
     private static func parseHuaweiDate(_ text: String) -> Date? {
@@ -7184,6 +7278,85 @@ private struct HuaweiVolumesDetailResponse: Decodable {
 
 private struct HuaweiSnapshotsDetailResponse: Decodable {
     var snapshots: [HuaweiSnapshot]
+}
+
+private struct HuaweiSecurityGroupsResponse: Decodable {
+    var securityGroups: [HuaweiSecurityGroup]
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroups = "security_groups"
+    }
+}
+
+private struct HuaweiSecurityGroupRulesResponse: Decodable {
+    var securityGroupRules: [HuaweiSecurityGroupRule]
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroupRules = "security_group_rules"
+    }
+}
+
+private struct HuaweiSecurityGroup: Decodable {
+    var id: String
+    var name: String?
+    var description: String?
+    var enterpriseProjectId: String?
+    var createdAt: String?
+    var updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case description
+        case enterpriseProjectId = "enterprise_project_id"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+private struct HuaweiSecurityGroupRule: Decodable {
+    var id: String?
+    var direction: String?
+    var ethertype: String?
+    var protocolName: String?
+    var portRangeMin: Int?
+    var portRangeMax: Int?
+    var remoteIpPrefix: String?
+    var remoteGroupId: String?
+    var action: String?
+    var priority: Int?
+    var description: String?
+    var createdAt: String?
+    var updatedAt: String?
+
+    var portRangeText: String? {
+        switch (portRangeMin, portRangeMax) {
+        case let (min?, max?):
+            return min == max ? "\(min)" : "\(min)/\(max)"
+        case let (min?, nil):
+            return "\(min)"
+        case let (nil, max?):
+            return "\(max)"
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case direction
+        case ethertype
+        case protocolName = "protocol"
+        case portRangeMin = "port_range_min"
+        case portRangeMax = "port_range_max"
+        case remoteIpPrefix = "remote_ip_prefix"
+        case remoteGroupId = "remote_group_id"
+        case action
+        case priority
+        case description
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
 }
 
 private struct HuaweiSnapshot: Decodable {

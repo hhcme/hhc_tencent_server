@@ -98,7 +98,7 @@ CREATE TABLE cloud_billing_states (
 - 已新增 `ProviderCapabilityMatrixBuilder` 和 `CloudResourceSearchService`。
 - 已扩展 `CloudInstanceSyncService`，支持腾讯云云盘、快照、计费状态同步入库，并从本地库加载统一云资源。
 - 已新增 macOS 云资源中心，支持按账号/地域同步、跨资源搜索过滤、能力矩阵展示和资源详情查看。
-- 已新增 `AlibabaCloudAdapter` 和 `HuaweiCloudAdapter`，支持签名后的只读地域/项目发现、ECS 实例发现、分页和核心字段映射，并通过 fixture 测试覆盖请求签名与解析；阿里云已补 ECS `DescribeDisks` 云盘只读同步、`DescribeSnapshots` 快照只读同步、`DescribeSecurityGroups` / `DescribeSecurityGroupAttribute` 安全组和规则只读同步，华为云已补 EVS `cloudvolumes/detail` 云盘只读同步和 EVS `snapshots/detail` 快照只读同步。
+- 已新增 `AlibabaCloudAdapter` 和 `HuaweiCloudAdapter`，支持签名后的只读地域/项目发现、ECS 实例发现、分页和核心字段映射，并通过 fixture 测试覆盖请求签名与解析；阿里云已补 ECS `DescribeDisks` 云盘只读同步、`DescribeSnapshots` 快照只读同步、`DescribeSecurityGroups` / `DescribeSecurityGroupAttribute` 安全组和规则只读同步，华为云已补 EVS `cloudvolumes/detail` 云盘只读同步、EVS `snapshots/detail` 快照只读同步、VPC `security-groups` / `security-group-rules` 安全组和规则只读同步。
 - 已泛化 macOS 云导入入口，三家云账号可在同一流程中选择 provider、验证凭据、加载地域/项目、同步实例并导入 SSH profile。
 - 已为腾讯云 CBS 接入快照创建/删除操作，云资源中心会按 `snapshotActions` capability 展示操作、执行风险确认、更新本地缓存，并写入 `remote_change_logs` 云端变更审计。
 - 已为腾讯云 CBS 接入云盘挂载/卸载操作，云资源中心会按 `diskAttachmentActions` capability 展示操作；挂载仅允许 `UNATTACHED`/`DETACHED` 云盘，卸载仅允许 `ATTACHED` 云盘，执行后本地缓存进入 `ATTACHING`/`DETACHING` 并写入云端变更审计。
@@ -141,6 +141,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 解析网络、状态和规格。
 - [x] 实现 EVS `cloudvolumes/detail` 云盘只读同步。
 - [x] 实现 EVS `snapshots/detail` 快照只读同步。
+- [x] 实现 VPC `security-groups` / `security-group-rules` 安全组和规则只读同步。
 - [x] 统一华为云实例/云盘落库 region id，确保云资源中心按项目地域筛选可见。
 - [x] 添加 fixture 测试。
 
@@ -154,7 +155,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 阿里云安全组按 capability 补只读同步。
 - [x] 华为云 EVS 云盘按 capability 补只读同步。
 - [x] 华为云 EVS 快照按 capability 补只读同步。
-- [ ] 华为云安全组按 capability 补同类只读能力。
+- [x] 华为云安全组按 capability 补同类只读能力。
 
 ### Task 5：高级操作
 

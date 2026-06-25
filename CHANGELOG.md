@@ -99,6 +99,7 @@ All notable changes to this project will be documented in this file.
 - Added Alibaba Cloud ECS `DescribeSecurityGroups` and `DescribeSecurityGroupAttribute` support for read-only security group and rule inspection.
 - Added Huawei Cloud EVS `cloudvolumes/detail` support for read-only cloud disk synchronization, plus project-scoped region IDs for Huawei resource-center filtering.
 - Added Huawei Cloud EVS `snapshots/detail` support for read-only snapshot synchronization and Cloud Resources display.
+- Added Huawei Cloud VPC `security-groups` and `security-group-rules` support for read-only security group and rule inspection.
 - Generalized the macOS cloud import sheet so Tencent Cloud, Alibaba Cloud, and Huawei Cloud accounts can be selected, verified, loaded, synced, and imported through one flow.
 - Added Tencent Cloud CBS snapshot create/delete actions with provider capability gating, risk confirmation, local cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Tencent Cloud CBS disk attach/detach actions with status gating, risk confirmation, local transition cache updates, remote change audit logs, and fixture-backed API tests.
@@ -201,6 +202,7 @@ All notable changes to this project will be documented in this file.
 - 添加阿里云 ECS `DescribeSecurityGroups` 和 `DescribeSecurityGroupAttribute` 安全组只读同步能力，可查看安全组和规则。
 - 添加华为云 EVS `cloudvolumes/detail` 云盘只读同步能力，并统一华为云项目级 region id 以支持云资源中心筛选。
 - 添加华为云 EVS `snapshots/detail` 快照只读同步能力，可在云资源中心展示华为云快照。
+- 添加华为云 VPC `security-groups` 和 `security-group-rules` 安全组只读同步能力，可查看安全组和规则。
 - 泛化 macOS 云导入入口，腾讯云、阿里云和华为云账号现在可通过同一流程选择、验证、加载地域/项目、同步实例并导入 SSH profile。
 - 添加腾讯云 CBS 快照创建/删除操作，包含 provider capability gating、风险确认、本地缓存更新、远程变更审计日志和 API fixture 测试。
 - 添加腾讯云 CBS 云盘挂载/卸载操作，包含状态门禁、风险确认、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。

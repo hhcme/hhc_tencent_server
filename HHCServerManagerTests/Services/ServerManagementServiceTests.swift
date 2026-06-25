@@ -3895,6 +3895,113 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].queryValue("offset"), "10")
     }
 
+    func testHuaweiCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedVPCAPI() async throws {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockHuaweiCloudTransport(responses: [
+            """
+            {
+              "security_groups": [
+                {
+                  "id": "sg-hw-1",
+                  "name": "web",
+                  "description": "web ingress",
+                  "enterprise_project_id": "0",
+                  "created_at": "2026-07-01T00:00:00Z",
+                  "updated_at": "2026-07-02T00:00:00Z"
+                }
+              ]
+            }
+            """,
+            """
+            {
+              "security_group_rules": [
+                {
+                  "id": "rule-ingress",
+                  "security_group_id": "sg-hw-1",
+                  "direction": "ingress",
+                  "ethertype": "IPv4",
+                  "protocol": "tcp",
+                  "port_range_min": 22,
+                  "port_range_max": 22,
+                  "remote_ip_prefix": "203.0.113.0/24",
+                  "action": "allow",
+                  "priority": 1,
+                  "description": "SSH",
+                  "created_at": "2026-07-01T00:00:00Z"
+                },
+                {
+                  "id": "rule-egress",
+                  "security_group_id": "sg-hw-1",
+                  "direction": "egress",
+                  "ethertype": "IPv6",
+                  "protocol": "any",
+                  "remote_ip_prefix": "2001:db8::/64",
+                  "remote_group_id": "sg-peer",
+                  "action": "allow",
+                  "priority": 2,
+                  "updated_at": "2026-07-03T00:00:00Z"
+                }
+              ]
+            }
+            """,
+        ])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        let groups = try await adapter.fetchSecurityGroups(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-southeast-1|project-1"
+        )
+        let snapshot = try await adapter.fetchSecurityGroupPolicies(
+            credential: credential,
+            group: try XCTUnwrap(groups.first),
+            capturedAt: capturedAt
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.securityGroups))
+        XCTAssertEqual(groups.map(\.securityGroupId), ["sg-hw-1"])
+        XCTAssertEqual(groups[0].accountId, accountId)
+        XCTAssertEqual(groups[0].providerId, .huaweiCloud)
+        XCTAssertEqual(groups[0].regionId, "ap-southeast-1|project-1")
+        XCTAssertEqual(groups[0].name, "web")
+        XCTAssertEqual(groups[0].description, "web ingress")
+        XCTAssertEqual(groups[0].projectId, "0")
+        XCTAssertEqual(groups[0].createdTime, "2026-07-01T00:00:00Z")
+        XCTAssertEqual(groups[0].updatedTime, "2026-07-02T00:00:00Z")
+        XCTAssertEqual(snapshot.ingress.count, 1)
+        XCTAssertEqual(snapshot.ingress[0].protocolName, "tcp")
+        XCTAssertEqual(snapshot.ingress[0].port, "22")
+        XCTAssertEqual(snapshot.ingress[0].cidrBlock, "203.0.113.0/24")
+        XCTAssertEqual(snapshot.ingress[0].action, "allow")
+        XCTAssertEqual(snapshot.ingress[0].description, "SSH")
+        XCTAssertEqual(snapshot.ingress[0].policyIndex, 1)
+        XCTAssertEqual(snapshot.egress.count, 1)
+        XCTAssertEqual(snapshot.egress[0].protocolName, "any")
+        XCTAssertNil(snapshot.egress[0].cidrBlock)
+        XCTAssertEqual(snapshot.egress[0].ipv6CidrBlock, "2001:db8::/64")
+        XCTAssertEqual(snapshot.egress[0].referencedSecurityGroupId, "sg-peer")
+        XCTAssertEqual(snapshot.egress[0].modifiedTime, "2026-07-03T00:00:00Z")
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "vpc.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[0].url?.path, "/v1/project-1/security-groups")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-Sdk-Date"), "20231114T221320Z")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("SDK-HMAC-SHA256 Access=HUAWEIAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("limit"), "100")
+        XCTAssertNil(transport.requests[0].queryValue("marker"))
+        XCTAssertEqual(transport.requests[1].url?.host, "vpc.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[1].url?.path, "/v1/project-1/security-group-rules")
+        XCTAssertEqual(transport.requests[1].queryValue("limit"), "100")
+        XCTAssertEqual(transport.requests[1].queryValue("security_group_id"), "sg-hw-1")
+        XCTAssertNil(transport.requests[1].queryValue("marker"))
+    }
+
     private final class Harness {
         let repository: ServerRepository
         let keychain: KeychainService
