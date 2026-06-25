@@ -63,6 +63,7 @@ All notable changes to this project will be documented in this file.
 - Added local Tencent Cloud security group rule diff previews with before/after counts, command previews, risk warnings, and disabled write-action affordance.
 - Started Phase 5 deployment persistence with deployment project, run, and log models plus SQLite repository coverage.
 - Added deployment command planning with repository URL, branch, deploy-path allowlist, single-line command validation, and controlled Git/build/restart/health-check previews.
+- Added a DeploymentRunner foundation with planned-step SSH execution, per-step logs, commit capture, failure stop, cancellation handling, and tests.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -121,3 +122,4 @@ All notable changes to this project will be documented in this file.
 - 添加腾讯云安全组规则本地 diff 预览，支持 before/after 计数、命令预览、风险警告和禁用状态的写操作入口。
 - 启动 Phase 5 部署持久化基础，加入部署项目、运行记录、日志模型和 SQLite repository 测试覆盖。
 - 添加部署命令规划能力，支持仓库 URL、分支、部署目录白名单、单行命令校验，以及受控 Git/build/restart/health check 命令预览。
+- 添加 DeploymentRunner 基础状态机，支持按计划 SSH 执行步骤、逐步日志、commit 捕获、失败停止、取消处理和测试覆盖。

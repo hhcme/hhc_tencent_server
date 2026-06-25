@@ -226,7 +226,7 @@ final class ServerManagementServiceTests: XCTestCase {
         ])
         XCTAssertTrue(plan.steps.first { $0.name == "checkout" }?.isDestructive == true)
         XCTAssertTrue(plan.commandPreview.contains("git clone --branch 'release/2026.06'"))
-        XCTAssertTrue(plan.commandPreview.contains("git reset --hard origin/release/2026.06"))
+        XCTAssertTrue(plan.commandPreview.contains("git reset --hard 'origin/release/2026.06'"))
         XCTAssertTrue(plan.commandPreview.contains("cd '/srv/site' && npm ci && npm run build"))
     }
 
@@ -269,6 +269,105 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertThrowsError(try DeploymentCommandBuilder.buildPlan(for: project)) { error in
             XCTAssertEqual(error as? DeploymentCommandBuilderError, .invalidCommand("Build"))
         }
+    }
+
+    func testDeploymentRunnerExecutesStepsAndPersistsLogs() async throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        let project = makeDeploymentProject(serverId: profile.id)
+        try harness.repository.upsertDeploymentProject(project)
+        let client = DeploymentRunnerMockSSHClient()
+        let runner = DeploymentRunner(
+            repository: harness.repository,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let run = try await runner.run(project: project, profile: profile, sshClient: client)
+
+        XCTAssertEqual(run.status, .succeeded)
+        XCTAssertEqual(run.previousCommit, "abc123")
+        XCTAssertEqual(run.targetCommit, "def456")
+        XCTAssertEqual(run.summary, "Deployment completed.")
+        XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'origin/main'") })
+
+        let persisted = try harness.repository.fetchDeploymentRuns(projectId: project.id)
+        XCTAssertEqual(persisted.map(\.status), [.succeeded])
+        XCTAssertEqual(persisted[0].previousCommit, "abc123")
+        XCTAssertEqual(persisted[0].targetCommit, "def456")
+
+        let logs = try harness.repository.fetchDeploymentLogs(runId: run.id)
+        XCTAssertTrue(logs.contains { $0.stepName == "current_commit" && $0.message == "abc123" })
+        XCTAssertTrue(logs.contains { $0.stepName == "target_commit" && $0.message == "def456" })
+        XCTAssertTrue(logs.contains { $0.stepName == "finish" && $0.message == "Deployment completed." })
+    }
+
+    func testDeploymentRunnerStopsOnFailedStep() async throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        var project = makeDeploymentProject(serverId: profile.id)
+        project.buildCommand = "npm run build"
+        try harness.repository.upsertDeploymentProject(project)
+        let client = DeploymentRunnerMockSSHClient(failingStep: "build")
+        let runner = DeploymentRunner(
+            repository: harness.repository,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let run = try await runner.run(project: project, profile: profile, sshClient: client)
+
+        XCTAssertEqual(run.status, .failed)
+        XCTAssertEqual(run.summary, "build failed with exit code 1.")
+        XCTAssertFalse(client.commands.contains { $0.contains("systemctl restart") })
+
+        let logs = try harness.repository.fetchDeploymentLogs(runId: run.id)
+        XCTAssertTrue(logs.contains { $0.stepName == "build" && $0.stream == .stderr && $0.message == "build failed" })
+        XCTAssertTrue(logs.contains { $0.stepName == "finish" && $0.message == "build failed with exit code 1." })
+    }
+
+    func testDeploymentRunnerPersistsCancellation() async throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        let project = makeDeploymentProject(serverId: profile.id)
+        try harness.repository.upsertDeploymentProject(project)
+        let client = DeploymentRunnerMockSSHClient(cancelledStep: "git_check")
+        let runner = DeploymentRunner(
+            repository: harness.repository,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let run = try await runner.run(project: project, profile: profile, sshClient: client)
+
+        XCTAssertEqual(run.status, .cancelled)
+        XCTAssertEqual(run.summary, SSHClientError.cancelled.localizedDescription)
+        XCTAssertFalse(client.commands.contains { $0.contains("git reset --hard") })
+
+        let logs = try harness.repository.fetchDeploymentLogs(runId: run.id)
+        XCTAssertTrue(logs.contains { $0.stepName == "git_check" && $0.stream == .stderr })
+        XCTAssertTrue(logs.contains { $0.stepName == "finish" && $0.message == SSHClientError.cancelled.localizedDescription })
     }
 
     func testDashboardServiceParsesLinuxCapabilityAndMetricOutputs() {
@@ -1452,6 +1551,24 @@ private func makeServiceTestProfile() -> ServerProfile {
     )
 }
 
+private func makeDeploymentProject(serverId: UUID) -> DeploymentProject {
+    DeploymentProject(
+        id: UUID(),
+        serverId: serverId,
+        name: "Website",
+        repositoryURL: "git@gitlab.com:hhc/site.git",
+        branch: "main",
+        deployPath: "/srv/site",
+        buildCommand: "npm run build",
+        restartCommand: "systemctl restart site.service",
+        healthCheckCommand: "curl -fsS http://127.0.0.1:3000/health",
+        webhookEnabled: false,
+        webhookSecretRef: nil,
+        createdAt: Date(),
+        updatedAt: Date()
+    )
+}
+
 private final class RecordingSSHClient: SSHClient, @unchecked Sendable {
     private(set) var commands: [String] = []
     private var responses: [CommandResult]
@@ -1475,6 +1592,72 @@ private final class RecordingSSHClient: SSHClient, @unchecked Sendable {
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class DeploymentRunnerMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+    private let failingStep: String?
+    private let cancelledStep: String?
+
+    init(failingStep: String? = nil, cancelledStep: String? = nil) {
+        self.failingStep = failingStep
+        self.cancelledStep = cancelledStep
+    }
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        let step = stepName(for: command)
+        if step == cancelledStep {
+            throw SSHClientError.cancelled
+        }
+        if step == failingStep {
+            return CommandResult(command: command, stdout: "", stderr: "\(step) failed", exitCode: 1, duration: 0.2)
+        }
+        switch step {
+        case "current_commit":
+            return CommandResult(command: command, stdout: "abc123\n", stderr: "", exitCode: 0, duration: 0.1)
+        case "target_commit":
+            return CommandResult(command: command, stdout: "def456\n", stderr: "", exitCode: 0, duration: 0.1)
+        case "build":
+            return CommandResult(command: command, stdout: "built\n", stderr: "", exitCode: 0, duration: 0.2)
+        default:
+            return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0.1)
+        }
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+
+    private func stepName(for command: String) -> String {
+        if command == "command -v git" {
+            return "git_check"
+        }
+        if command.contains("git rev-parse HEAD") && command.contains("if [ -d") {
+            return "current_commit"
+        }
+        if command.contains("git rev-parse HEAD") {
+            return "target_commit"
+        }
+        if command.contains("git clone") || command.contains("git fetch") {
+            return "clone_or_fetch"
+        }
+        if command.contains("git reset --hard") {
+            return "checkout"
+        }
+        if command.contains("npm run build") {
+            return "build"
+        }
+        if command.contains("systemctl restart") {
+            return "restart"
+        }
+        if command.contains("curl -fsS") {
+            return "health_check"
+        }
+        return "prepare"
+    }
 }
 
 private final class DashboardServiceMockSSHClient: SSHClient, @unchecked Sendable {

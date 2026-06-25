@@ -103,24 +103,24 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 
 ### Task 2：部署状态机
 
-- [ ] 定义部署步骤：prepare、fetch、checkout、install、build、restart、health check。
-- [ ] 每一步都记录日志和 exit code。
-- [ ] 支持取消运行。
-- [ ] 失败时标记 run 状态并停止后续步骤。
+- [x] 定义部署步骤：prepare、git_check、current_commit、clone_or_fetch、checkout、target_commit、build、restart、health check。
+- [x] 每一步都记录日志和 exit code。
+- [x] 支持取消运行：当前 Runner 在步骤间和 SSH 取消错误处落库为 cancelled。
+- [x] 失败时标记 run 状态并停止后续步骤。
 
 ### Task 3：Git 操作
 
-- [ ] 检查远端是否安装 git。
-- [ ] clone 或 fetch。
-- [ ] checkout 目标分支。
-- [ ] 记录 previous commit。
-- [ ] 限制 `reset --hard` 只在部署目录内执行。
+- [x] 检查远端是否安装 git。
+- [x] clone 或 fetch。
+- [x] checkout 目标分支。
+- [x] 记录 previous commit。
+- [x] 限制 `reset --hard` 只在部署目录内执行。
 
 ### Task 4：部署命令执行
 
-- [ ] 支持安装依赖、构建、重启服务命令。
+- [x] 支持构建、重启服务、health check 命令。
 - [ ] 命令环境变量脱敏。
-- [ ] 健康检查命令失败时标记部署失败。
+- [x] 健康检查命令失败时标记部署失败。
 - [ ] 支持用户复制日志。
 
 ### Task 5：回滚
@@ -141,7 +141,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 ### Task 7：测试
 
 - [x] DeploymentProjectStore 测试：已覆盖项目持久化、更新、按服务器过滤、删除级联运行和日志。
-- [ ] DeploymentRunner 状态机测试。
+- [x] DeploymentRunner 状态机测试：已覆盖成功执行、日志持久化、commit 捕获、步骤失败停止和取消落库。
 - [x] 命令构建和目录白名单测试：已覆盖受控 clone/fetch/checkout/build/restart/health check 命令预览、危险路径拒绝、非法 branch/URL/多行命令拒绝。
 - [ ] webhook secret 常量时间比较测试。
 - [ ] 日志脱敏测试。当前 deployment logs 仅完成持久化顺序测试，脱敏在 Runner/LogStore 阶段接入。

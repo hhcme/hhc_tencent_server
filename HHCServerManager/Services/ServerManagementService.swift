@@ -350,7 +350,7 @@ enum DeploymentCommandBuilder {
             ),
             DeploymentCommandStep(
                 name: "checkout",
-                command: "cd \(quotedPath) && git checkout \(quotedBranch) && git reset --hard origin/\(branch)",
+                command: "cd \(quotedPath) && git checkout \(quotedBranch) && git reset --hard \(shellQuote("origin/\(branch)"))",
                 isDestructive: true,
                 description: "Reset the deployment working tree to the selected branch."
             ),
@@ -452,6 +452,121 @@ enum DeploymentCommandBuilder {
 
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+    }
+}
+
+final class DeploymentRunner: @unchecked Sendable {
+    private let repository: ServerRepository
+    private let now: @Sendable () -> Date
+
+    init(
+        repository: ServerRepository,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.repository = repository
+        self.now = now
+    }
+
+    func run(
+        project: DeploymentProject,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        triggerType: DeploymentTriggerType = .manual,
+        requestedRef: String? = nil
+    ) async throws -> DeploymentRun {
+        let plan = try DeploymentCommandBuilder.buildPlan(for: project)
+        var run = DeploymentRun(
+            id: UUID(),
+            projectId: project.id,
+            triggerType: triggerType,
+            requestedRef: requestedRef ?? project.branch,
+            previousCommit: nil,
+            targetCommit: nil,
+            status: .running,
+            startedAt: now(),
+            finishedAt: nil,
+            summary: nil
+        )
+        try repository.saveDeploymentRun(run)
+        try saveLog(runId: run.id, stepName: "plan", stream: .system, message: "Starting deployment for \(project.name).")
+
+        for step in plan.steps {
+            if Task.isCancelled {
+                return try finish(run, status: .cancelled, summary: "Deployment cancelled before \(step.name).")
+            }
+
+            try saveLog(runId: run.id, stepName: step.name, stream: .system, message: step.description)
+            do {
+                let result = try await sshClient.execute(step.command, profile: profile)
+                try saveCommandOutput(result, runId: run.id, stepName: step.name)
+
+                if step.name == "current_commit" {
+                    run.previousCommit = result.stdout.firstLine?.trimmed.nilIfEmpty
+                    try repository.saveDeploymentRun(run)
+                } else if step.name == "target_commit" {
+                    run.targetCommit = result.stdout.firstLine?.trimmed.nilIfEmpty
+                    try repository.saveDeploymentRun(run)
+                }
+
+                guard result.exitCode == 0 else {
+                    return try finish(
+                        run,
+                        status: .failed,
+                        summary: "\(step.name) failed with exit code \(result.exitCode)."
+                    )
+                }
+            } catch {
+                let status: DeploymentRunStatus = Task.isCancelled || (error as? SSHClientError) == .cancelled ? .cancelled : .failed
+                try saveLog(runId: run.id, stepName: step.name, stream: .stderr, message: error.localizedDescription)
+                return try finish(run, status: status, summary: error.localizedDescription)
+            }
+        }
+
+        return try finish(run, status: .succeeded, summary: "Deployment completed.")
+    }
+
+    private func saveCommandOutput(
+        _ result: CommandResult,
+        runId: UUID,
+        stepName: String
+    ) throws {
+        if let stdout = result.stdout.trimmed.nilIfEmpty {
+            try saveLog(runId: runId, stepName: stepName, stream: .stdout, message: stdout)
+        }
+        if let stderr = result.stderr.trimmed.nilIfEmpty {
+            try saveLog(runId: runId, stepName: stepName, stream: .stderr, message: stderr)
+        }
+        try saveLog(runId: runId, stepName: stepName, stream: .system, message: "Exit \(result.exitCode) in \(String(format: "%.2f", result.duration))s.")
+    }
+
+    private func finish(
+        _ run: DeploymentRun,
+        status: DeploymentRunStatus,
+        summary: String
+    ) throws -> DeploymentRun {
+        var finished = run
+        finished.status = status
+        finished.finishedAt = now()
+        finished.summary = summary
+        try repository.saveDeploymentRun(finished)
+        try saveLog(runId: finished.id, stepName: "finish", stream: .system, message: summary)
+        return finished
+    }
+
+    private func saveLog(
+        runId: UUID,
+        stepName: String,
+        stream: DeploymentLogStream,
+        message: String
+    ) throws {
+        try repository.saveDeploymentLog(DeploymentLogEntry(
+            id: UUID(),
+            runId: runId,
+            stepName: stepName,
+            stream: stream,
+            message: message,
+            createdAt: now()
+        ))
     }
 }
 

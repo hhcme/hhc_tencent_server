@@ -1,6 +1,6 @@
 import Foundation
 
-enum SSHClientError: LocalizedError {
+enum SSHClientError: LocalizedError, Equatable {
     case unknownHostKey(HostKeyInfo)
     case hostKeyChanged(current: HostKeyInfo, trusted: TrustedHostKey)
     case missingPrivateKey
