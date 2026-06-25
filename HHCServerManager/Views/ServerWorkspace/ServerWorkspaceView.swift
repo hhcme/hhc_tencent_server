@@ -37,6 +37,8 @@ struct ServerWorkspaceView: View {
                     .tag("nginx")
                 Label("Firewall", systemImage: "firewall")
                     .tag("firewall")
+                Label("Security Groups", systemImage: "lock.shield")
+                    .tag("securityGroups")
                 Label("Environment", systemImage: "slider.horizontal.3")
                     .tag("environment")
                 Label("Cron", systemImage: "calendar.badge.clock")
@@ -248,6 +250,8 @@ struct ServerWorkspaceView: View {
             nginxPanel
         case "firewall":
             firewallPanel
+        case "securityGroups":
+            securityGroupsPanel
         case "environment":
             environmentPanel
         case "cron":
@@ -1143,6 +1147,152 @@ struct ServerWorkspaceView: View {
         }
     }
 
+    private var securityGroupsPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Security Groups")
+                        .font(.title2.weight(.semibold))
+                    Spacer()
+                    Button {
+                        viewModel.loadCloudSecurityGroups(
+                            profile: profile,
+                            cloudSecurityGroupService: appState.cloudSecurityGroupService
+                        )
+                    } label: {
+                        if viewModel.isLoadingCloudSecurityGroups {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isCloudSecurityGroupBusy)
+                }
+
+                if let list = viewModel.cloudSecurityGroupList {
+                    Text("Region \(list.regionId) · \(list.groups.count) groups · Last updated \(list.capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = viewModel.cloudSecurityGroupErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(20)
+
+            Divider()
+
+            Group {
+                if let groups = viewModel.cloudSecurityGroupList?.groups {
+                    HSplitView {
+                        cloudSecurityGroupList(groups)
+                            .frame(minWidth: 340, idealWidth: 420)
+                        cloudSecurityGroupDetailPanel
+                            .frame(minWidth: 500)
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Security Groups Loaded",
+                        systemImage: "lock.shield",
+                        description: Text("Refresh after linking this server to a cloud instance with a security-groups capable account.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .onAppear {
+            if viewModel.cloudSecurityGroupList == nil && !viewModel.isLoadingCloudSecurityGroups {
+                viewModel.loadCloudSecurityGroups(
+                    profile: profile,
+                    cloudSecurityGroupService: appState.cloudSecurityGroupService
+                )
+            }
+        }
+    }
+
+    private func cloudSecurityGroupList(_ groups: [CloudSecurityGroup]) -> some View {
+        List(groups, selection: cloudSecurityGroupSelectionBinding) { group in
+            CloudSecurityGroupRow(group: group)
+                .tag(group.id)
+        }
+        .overlay {
+            if groups.isEmpty {
+                ContentUnavailableView("No Security Groups", systemImage: "lock.shield")
+            }
+        }
+    }
+
+    private var cloudSecurityGroupDetailPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let group = viewModel.selectedCloudSecurityGroup {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(group.name)
+                        .font(.title3.weight(.semibold))
+                    Text(group.securityGroupId)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    if let description = group.description, !description.isEmpty {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if viewModel.isLoadingCloudSecurityGroupPolicies {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                if let snapshot = viewModel.cloudSecurityGroupPolicySnapshot,
+                   snapshot.group.id == group.id {
+                    HStack(spacing: 12) {
+                        FirewallSummaryTile(title: "Ingress", value: "\(snapshot.ingress.count)", systemImage: "arrow.down.to.line")
+                        FirewallSummaryTile(title: "Egress", value: "\(snapshot.egress.count)", systemImage: "arrow.up.to.line")
+                        FirewallSummaryTile(title: "Version", value: snapshot.version ?? "unknown", systemImage: "number")
+                    }
+
+                    cloudSecurityRuleSection(title: "Ingress", rules: snapshot.ingress)
+                    cloudSecurityRuleSection(title: "Egress", rules: snapshot.egress)
+                } else {
+                    ContentUnavailableView("No Rules Loaded", systemImage: "lock.shield")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else {
+                ContentUnavailableView("Select a Security Group", systemImage: "lock.shield")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .padding(20)
+    }
+
+    private func cloudSecurityRuleSection(title: String, rules: [CloudSecurityGroupRule]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            if rules.isEmpty {
+                Text("No rules.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(rules) { rule in
+                            CloudSecurityGroupRuleRow(rule: rule)
+                        }
+                    }
+                    .padding(10)
+                }
+                .frame(minHeight: 120, maxHeight: 240)
+                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
     private var environmentPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1690,6 +1840,21 @@ struct ServerWorkspaceView: View {
         )
     }
 
+    private var cloudSecurityGroupSelectionBinding: Binding<String?> {
+        Binding(
+            get: { viewModel.selectedCloudSecurityGroup?.id },
+            set: { groupId in
+                guard let groupId,
+                      let group = viewModel.cloudSecurityGroupList?.groups.first(where: { $0.id == groupId })
+                else { return }
+                viewModel.selectCloudSecurityGroup(
+                    group,
+                    cloudSecurityGroupService: appState.cloudSecurityGroupService
+                )
+            }
+        )
+    }
+
     private func nginxConfigText(for file: NginxConfigFile) -> String {
         guard viewModel.nginxConfigContent?.file.id == file.id else {
             return "Select Refresh to load this file."
@@ -1807,6 +1972,11 @@ struct ServerWorkspaceView: View {
             viewModel.isSavingEnvironmentFile
     }
 
+    private var isCloudSecurityGroupBusy: Bool {
+        viewModel.isLoadingCloudSecurityGroups ||
+            viewModel.isLoadingCloudSecurityGroupPolicies
+    }
+
     private var isNginxDraftDirty: Bool {
         viewModel.nginxConfigDraft != (viewModel.nginxConfigContent?.content ?? "")
     }
@@ -1903,6 +2073,76 @@ private struct EnvironmentFileRow: View {
             parts.append(modifiedAt.formatted(date: .abbreviated, time: .shortened))
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+private struct CloudSecurityGroupRow: View {
+    let group: CloudSecurityGroup
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: group.isDefault == true ? "lock.shield.fill" : "lock.shield")
+                .foregroundStyle(.blue)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(group.name)
+                    .font(.body)
+                    .lineLimit(1)
+                Text(group.securityGroupId)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if let description = group.description, !description.isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct CloudSecurityGroupRuleRow: View {
+    let rule: CloudSecurityGroupRule
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(rule.action ?? "unknown")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(rule.action == "ACCEPT" ? .green : .orange)
+                    .frame(width: 64, alignment: .leading)
+                Text(rule.protocolName ?? "ALL")
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 54, alignment: .leading)
+                Text(rule.port ?? "all")
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 90, alignment: .leading)
+                Text(targetText)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+            }
+
+            if let description = rule.description, !description.isEmpty {
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var targetText: String {
+        rule.cidrBlock ?? rule.ipv6CidrBlock ?? rule.referencedSecurityGroupId ?? "any"
     }
 }
 

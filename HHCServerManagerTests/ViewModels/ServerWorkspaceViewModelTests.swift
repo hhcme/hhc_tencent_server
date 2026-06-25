@@ -783,6 +783,66 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(logs[0].afterSnapshot, "APP_ENV=staging")
     }
 
+    func testCloudSecurityGroupsLoadSelectAndPolicies() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.security.\(UUID().uuidString)")
+        let account = CloudProviderAccount(
+            id: UUID(),
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            keychainRef: "cloud_test_\(UUID().uuidString)",
+            enabled: true,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try keychain.saveCloudCredential(
+            CloudProviderCredential(secretId: "sid", secretKey: "skey"),
+            keychainRef: account.keychainRef
+        )
+        defer {
+            keychain.deleteCloudCredential(keychainRef: account.keychainRef)
+        }
+        try repository.upsertCloudProviderAccount(account)
+        try repository.upsertCloudInstanceLink(CloudInstanceLink(
+            id: UUID(),
+            serverId: profile.id,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "prod",
+            publicIp: "203.0.113.1",
+            privateIp: "10.0.0.2",
+            status: "RUNNING",
+            instanceType: "mock",
+            zoneId: "ap-guangzhou-1",
+            vpcId: "vpc-123",
+            rawJSON: nil,
+            lastSyncedAt: Date()
+        ))
+        let service = CloudSecurityGroupService(
+            repository: repository,
+            keychain: keychain,
+            registry: CloudProviderRegistry(adapters: [
+                SecurityGroupViewModelMockCloudAdapter(providerId: .tencentCloud)
+            ]),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.loadCloudSecurityGroups(profile: profile, cloudSecurityGroupService: service)
+        try await waitUntil { viewModel.isLoadingCloudSecurityGroups == false && viewModel.cloudSecurityGroupList != nil }
+        try await waitUntil { viewModel.isLoadingCloudSecurityGroupPolicies == false && viewModel.cloudSecurityGroupPolicySnapshot != nil }
+
+        XCTAssertEqual(viewModel.cloudSecurityGroupList?.regionId, "ap-guangzhou")
+        XCTAssertEqual(viewModel.cloudSecurityGroupList?.instanceId, "ins-123")
+        XCTAssertEqual(viewModel.selectedCloudSecurityGroup?.securityGroupId, "sg-123")
+        XCTAssertEqual(viewModel.cloudSecurityGroupPolicySnapshot?.ingress.first?.port, "22")
+        XCTAssertEqual(viewModel.cloudSecurityGroupPolicySnapshot?.egress.first?.protocolName, "ALL")
+        XCTAssertNil(viewModel.cloudSecurityGroupErrorMessage)
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -1473,5 +1533,93 @@ private final class EnvironmentViewModelMockSSHClient: SSHClient, @unchecked Sen
               let end = command[start.upperBound...].range(of: "'")
         else { return nil }
         return String(command[start.upperBound..<end.lowerBound])
+    }
+}
+
+private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
+    let providerId: CloudProviderID
+    let displayName = "Mock Cloud"
+    let capabilities: Set<CloudCapability> = [.securityGroups]
+
+    func validateCredential(_ credential: CloudProviderCredential) async throws {}
+
+    func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion] {
+        []
+    }
+
+    func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance] {
+        []
+    }
+
+    func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
+        CloudMetricSeries(
+            metricName: query.metricName,
+            instanceId: query.instanceId,
+            regionId: query.regionId,
+            unit: nil,
+            values: [],
+            timestamps: []
+        )
+    }
+
+    func fetchSecurityGroups(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String
+    ) async throws -> [CloudSecurityGroup] {
+        [
+            CloudSecurityGroup(
+                accountId: accountId,
+                providerId: providerId,
+                regionId: regionId,
+                securityGroupId: "sg-123",
+                name: "web",
+                description: "web ingress",
+                projectId: "0",
+                isDefault: false,
+                createdTime: nil,
+                updatedTime: nil
+            ),
+        ]
+    }
+
+    func fetchSecurityGroupPolicies(
+        credential: CloudProviderCredential,
+        group: CloudSecurityGroup,
+        capturedAt: Date
+    ) async throws -> CloudSecurityGroupPolicySnapshot {
+        CloudSecurityGroupPolicySnapshot(
+            group: group,
+            version: "7",
+            ingress: [
+                CloudSecurityGroupRule(
+                    direction: .ingress,
+                    policyIndex: 0,
+                    protocolName: "TCP",
+                    port: "22",
+                    cidrBlock: "203.0.113.0/24",
+                    ipv6CidrBlock: nil,
+                    referencedSecurityGroupId: nil,
+                    action: "ACCEPT",
+                    description: "SSH",
+                    modifiedTime: nil
+                ),
+            ],
+            egress: [
+                CloudSecurityGroupRule(
+                    direction: .egress,
+                    policyIndex: 0,
+                    protocolName: "ALL",
+                    port: "all",
+                    cidrBlock: "0.0.0.0/0",
+                    ipv6CidrBlock: nil,
+                    referencedSecurityGroupId: nil,
+                    action: "ACCEPT",
+                    description: nil,
+                    modifiedTime: nil
+                ),
+            ],
+            capturedAt: capturedAt
+        )
     }
 }

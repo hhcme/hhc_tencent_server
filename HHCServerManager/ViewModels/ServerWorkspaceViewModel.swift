@@ -58,6 +58,12 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isSavingEnvironmentFile = false
     @Published var environmentErrorMessage: String?
     @Published var environmentActionMessage: String?
+    @Published var cloudSecurityGroupList: CloudSecurityGroupList?
+    @Published var selectedCloudSecurityGroup: CloudSecurityGroup?
+    @Published var cloudSecurityGroupPolicySnapshot: CloudSecurityGroupPolicySnapshot?
+    @Published var isLoadingCloudSecurityGroups = false
+    @Published var isLoadingCloudSecurityGroupPolicies = false
+    @Published var cloudSecurityGroupErrorMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -1201,6 +1207,67 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.environmentErrorMessage = error.localizedDescription
                     self.isSavingEnvironmentFile = false
+                }
+            }
+        }
+    }
+
+    func loadCloudSecurityGroups(
+        profile: ServerProfile,
+        cloudSecurityGroupService: CloudSecurityGroupService
+    ) {
+        isLoadingCloudSecurityGroups = true
+        cloudSecurityGroupErrorMessage = nil
+
+        Task {
+            do {
+                let list = try await cloudSecurityGroupService.loadSecurityGroups(for: profile)
+                await MainActor.run {
+                    self.cloudSecurityGroupList = list
+                    if let selected = self.selectedCloudSecurityGroup,
+                       let refreshed = list.groups.first(where: { $0.id == selected.id }) {
+                        self.selectedCloudSecurityGroup = refreshed
+                    } else {
+                        self.selectedCloudSecurityGroup = list.groups.first
+                    }
+                    self.isLoadingCloudSecurityGroups = false
+                }
+                if let selected = await MainActor.run(body: { self.selectedCloudSecurityGroup }) {
+                    await MainActor.run {
+                        self.selectCloudSecurityGroup(
+                            selected,
+                            cloudSecurityGroupService: cloudSecurityGroupService
+                        )
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.cloudSecurityGroupErrorMessage = error.localizedDescription
+                    self.isLoadingCloudSecurityGroups = false
+                }
+            }
+        }
+    }
+
+    func selectCloudSecurityGroup(
+        _ group: CloudSecurityGroup,
+        cloudSecurityGroupService: CloudSecurityGroupService
+    ) {
+        selectedCloudSecurityGroup = group
+        isLoadingCloudSecurityGroupPolicies = true
+        cloudSecurityGroupErrorMessage = nil
+
+        Task {
+            do {
+                let snapshot = try await cloudSecurityGroupService.loadPolicies(for: group)
+                await MainActor.run {
+                    self.cloudSecurityGroupPolicySnapshot = snapshot
+                    self.isLoadingCloudSecurityGroupPolicies = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.cloudSecurityGroupErrorMessage = error.localizedDescription
+                    self.isLoadingCloudSecurityGroupPolicies = false
                 }
             }
         }

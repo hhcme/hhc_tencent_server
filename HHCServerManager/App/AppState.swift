@@ -8,6 +8,7 @@ final class AppState: ObservableObject {
     let cloudInstanceSyncService: CloudInstanceSyncService
     let cloudProviderRegistry: CloudProviderRegistry
     let cloudMetricService: CloudMetricService
+    let cloudSecurityGroupService: CloudSecurityGroupService
     let dashboardService: DashboardService
     let systemdServiceManager: SystemdServiceManager
     let cronManager: CronManager
@@ -35,6 +36,7 @@ final class AppState: ObservableObject {
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
             cloudProviderRegistry = registry
             cloudMetricService = CloudMetricService(repository: repository, keychain: keychain, registry: registry)
+            cloudSecurityGroupService = CloudSecurityGroupService(repository: repository, keychain: keychain, registry: registry)
             dashboardService = DashboardService()
             systemdServiceManager = SystemdServiceManager()
             cronManager = CronManager()
@@ -61,6 +63,7 @@ final class AppState: ObservableObject {
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
             cloudProviderRegistry = registry
             cloudMetricService = CloudMetricService(repository: repository, keychain: keychain, registry: registry)
+            cloudSecurityGroupService = CloudSecurityGroupService(repository: repository, keychain: keychain, registry: registry)
             dashboardService = DashboardService()
             systemdServiceManager = SystemdServiceManager()
             cronManager = CronManager()

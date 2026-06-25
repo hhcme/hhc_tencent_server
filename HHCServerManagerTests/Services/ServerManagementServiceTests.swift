@@ -985,6 +985,156 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(payload["Period"] as? Int, 300)
     }
 
+    func testTencentCloudAdapterFetchSecurityGroupsAndPoliciesUsesVpcAPI() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "TotalCount": 1,
+                "SecurityGroupSet": [
+                  {
+                    "SecurityGroupId": "sg-123",
+                    "SecurityGroupName": "web",
+                    "SecurityGroupDesc": "web ingress",
+                    "ProjectId": 0,
+                    "IsDefault": false,
+                    "CreatedTime": "2026-06-01 10:00:00",
+                    "UpdateTime": "2026-06-02 10:00:00"
+                  }
+                ],
+                "RequestId": "request-sg"
+              }
+            }
+            """,
+            """
+            {
+              "Response": {
+                "SecurityGroupPolicySet": {
+                  "Version": "7",
+                  "Ingress": [
+                    {
+                      "PolicyIndex": 0,
+                      "Protocol": "TCP",
+                      "Port": "22",
+                      "CidrBlock": "203.0.113.0/24",
+                      "Action": "ACCEPT",
+                      "PolicyDescription": "SSH",
+                      "ModifyTime": "2026-06-02 10:00:00"
+                    }
+                  ],
+                  "Egress": [
+                    {
+                      "PolicyIndex": 0,
+                      "Protocol": "ALL",
+                      "Port": "all",
+                      "CidrBlock": "0.0.0.0/0",
+                      "Action": "ACCEPT"
+                    }
+                  ]
+                },
+                "RequestId": "request-policy"
+              }
+            }
+            """
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+
+        let accountId = UUID()
+        let groups = try await adapter.fetchSecurityGroups(
+            credential: CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE"),
+            accountId: accountId,
+            regionId: "ap-guangzhou"
+        )
+        XCTAssertEqual(groups.map(\.securityGroupId), ["sg-123"])
+        XCTAssertEqual(groups[0].accountId, accountId)
+        XCTAssertEqual(groups[0].name, "web")
+        XCTAssertEqual(groups[0].description, "web ingress")
+
+        let snapshot = try await adapter.fetchSecurityGroupPolicies(
+            credential: CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE"),
+            group: groups[0],
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        XCTAssertEqual(snapshot.version, "7")
+        XCTAssertEqual(snapshot.ingress.first?.protocolName, "TCP")
+        XCTAssertEqual(snapshot.ingress.first?.port, "22")
+        XCTAssertEqual(snapshot.ingress.first?.cidrBlock, "203.0.113.0/24")
+        XCTAssertEqual(snapshot.egress.first?.port, "all")
+
+        XCTAssertEqual(transport.requests[0].url?.host, "vpc.intl.tencentcloudapi.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Action"), "DescribeSecurityGroups")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Version"), "2017-03-12")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Region"), "ap-guangzhou")
+        XCTAssertEqual(transport.requests[0].jsonBody?["Offset"] as? Int, 0)
+        XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "X-TC-Action"), "DescribeSecurityGroupPolicies")
+        XCTAssertEqual(transport.requests[1].jsonBody?["SecurityGroupId"] as? String, "sg-123")
+    }
+
+    func testCloudSecurityGroupServiceLoadsLinkedServerGroupsAndPolicies() async throws {
+        let harness = try Harness(adapters: [
+            MockCloudProviderAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .securityGroups]
+            )
+        ], now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        let profile = try harness.service.createServer(
+            name: "prod",
+            host: "203.0.113.1",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        try harness.repository.upsertCloudInstanceLink(CloudInstanceLink(
+            id: UUID(),
+            serverId: profile.id,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-123",
+            displayName: "prod",
+            publicIp: "203.0.113.1",
+            privateIp: "10.0.0.2",
+            status: "RUNNING",
+            instanceType: "mock",
+            zoneId: "ap-guangzhou-1",
+            vpcId: "vpc-123",
+            rawJSON: nil,
+            lastSyncedAt: Date()
+        ))
+        let service = CloudSecurityGroupService(
+            repository: harness.repository,
+            keychain: harness.keychain,
+            registry: CloudProviderRegistry(adapters: [
+                MockCloudProviderAdapter(
+                    providerId: .tencentCloud,
+                    capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .securityGroups]
+                )
+            ]),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let list = try await service.loadSecurityGroups(for: profile)
+        XCTAssertEqual(list.regionId, "ap-guangzhou")
+        XCTAssertEqual(list.instanceId, "ins-123")
+        XCTAssertEqual(list.groups.map(\.securityGroupId), ["sg-123"])
+
+        let policies = try await service.loadPolicies(for: list.groups[0])
+        XCTAssertEqual(policies.group.securityGroupId, "sg-123")
+        XCTAssertEqual(policies.ingress.first?.port, "22")
+        XCTAssertEqual(policies.egress.first?.protocolName, "ALL")
+    }
+
     func testCloudMetricServiceLoadsLinkedTencentCloudCPUMetric() async throws {
         let harness = try Harness(adapters: [
             MockCloudProviderAdapter(
@@ -1144,6 +1294,67 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
             unit: "%",
             values: [18.5, 21.25],
             timestamps: [query.startTime, query.endTime]
+        )
+    }
+
+    func fetchSecurityGroups(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String
+    ) async throws -> [CloudSecurityGroup] {
+        [
+            CloudSecurityGroup(
+                accountId: accountId,
+                providerId: providerId,
+                regionId: regionId,
+                securityGroupId: "sg-123",
+                name: "web",
+                description: "web ingress",
+                projectId: "0",
+                isDefault: false,
+                createdTime: "2026-06-01 10:00:00",
+                updatedTime: "2026-06-02 10:00:00"
+            ),
+        ]
+    }
+
+    func fetchSecurityGroupPolicies(
+        credential: CloudProviderCredential,
+        group: CloudSecurityGroup,
+        capturedAt: Date
+    ) async throws -> CloudSecurityGroupPolicySnapshot {
+        CloudSecurityGroupPolicySnapshot(
+            group: group,
+            version: "7",
+            ingress: [
+                CloudSecurityGroupRule(
+                    direction: .ingress,
+                    policyIndex: 0,
+                    protocolName: "TCP",
+                    port: "22",
+                    cidrBlock: "203.0.113.0/24",
+                    ipv6CidrBlock: nil,
+                    referencedSecurityGroupId: nil,
+                    action: "ACCEPT",
+                    description: "SSH",
+                    modifiedTime: "2026-06-02 10:00:00"
+                ),
+            ],
+            egress: [
+                CloudSecurityGroupRule(
+                    direction: .egress,
+                    policyIndex: 0,
+                    protocolName: "ALL",
+                    port: "all",
+                    cidrBlock: "0.0.0.0/0",
+                    ipv6CidrBlock: nil,
+                    referencedSecurityGroupId: nil,
+                    action: "ACCEPT",
+                    description: nil,
+                    modifiedTime: nil
+                ),
+            ],
+            capturedAt: capturedAt
         )
     }
 }

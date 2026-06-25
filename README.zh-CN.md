@@ -4,7 +4,7 @@
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。它的目标是以 SSH 为核心管理多台 Linux 服务器，提供类似宝塔面板的桌面端体验，并在用户主动配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-当前仓库处于 macOS 早期实现阶段。应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览远程目录、排队传输单个文件，管理 systemd/Cron/Nginx/Environment 基础能力、查看防火墙规则，并在 SQLite 中持久化命令、云资源和远程变更元数据。
+当前仓库处于 macOS 早期实现阶段。应用已经可以保存服务器配置、将 SSH 和云凭据存入 Keychain、校验 SSH 主机指纹、执行真实 OpenSSH smoke test、执行单条远程命令、浏览远程目录、排队传输单个文件，查看腾讯云安全组和防火墙规则，管理 systemd/Cron/Nginx/Environment 基础能力，并在 SQLite 中持久化命令、云资源和远程变更元数据。
 
 ## 为什么做这个项目
 
@@ -25,7 +25,8 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 - 真实 OpenSSH smoke test、可取消的简化单条命令面板、命令元数据历史、stdout/stderr 分开展示和历史重跑。
 - 云账号元数据和云凭据存储基础。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装。
-- 腾讯云 adapter，包含 TC3 请求签名、地域查询、CVM 实例查询解析和云监控 CPU 指标查询。
+- 腾讯云 adapter，包含 TC3 请求签名、地域查询、CVM 实例查询解析、云监控 CPU 指标查询和 VPC 安全组/规则只读查询。
+- 腾讯云安全组基础：通过 VPC API 读取安全组和规则，并在已关联账号/地域下只读展示。
 - 云导入 sheet：验证腾讯云账号、加载地域、同步 CVM 实例，并导入为 SSH profile。
 - Dashboard 基础：通过 SSH 探测 OS/能力，并展示负载、内存、磁盘、CPU、网络、进程摘要和已关联腾讯云 CVM 的 CPU 云监控指标，支持手动刷新和自动刷新。
 - 远程文件浏览基础：支持路径导航、目录列表、文件元信息展示、基于 OpenSSH/scp 的排队单文件上传/下载、可见传输状态、当前传输取消、待传队列清空、重命名、基于 chmod 的权限修改、可恢复移入回收目录，以及带保存前备份和另存为的轻量 UTF-8 文本编辑。
@@ -85,7 +86,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 
 ## 开发状态
 
-macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础大体落地，Phase 3 Dashboard/文件浏览基础已经启动，Phase 4 Services/Cron/Nginx/Firewall/Environment 也已开始：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、云实例同步/导入 UI 基础、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、基于 SSH 的 Dashboard 能力和指标采集（含网络与进程摘要）、Dashboard 单项指标失败 warning 降级、手动刷新和自动刷新、远程目录浏览、带可见任务状态、当前任务取消和待传队列清空的排队单文件上传/下载、重命名、基于 chmod 的权限修改、可恢复移入回收目录、带保存前备份和另存为的轻量 UTF-8 文本编辑、systemd 服务列表/日志/操作、crontab 读取和 Cron 任务管理、Nginx 配置动态探测/读取/编辑/测试/reload/回滚、防火墙只读探测和规则展示、受保护的环境变量文件发现/编辑/备份、远程变更审计日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。SFTP 固化、进度百分比、批量传输、安全组、防火墙写操作、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
+macOS 应用已经进入实现阶段。Phase 1 基础已经落地，Phase 2 基础大体落地，Phase 3 Dashboard/文件浏览基础已经启动，Phase 4 Security Groups/Services/Cron/Nginx/Firewall/Environment 也已开始：SwiftUI 应用结构、本地 SQLite 持久化、Keychain SSH/云凭据、主机指纹信任、基于 OpenSSH 的真实命令执行与取消、可重跑的命令元数据历史、stdout/stderr 分开展示、云账号元数据、云实例关联、云实例同步/导入 UI 基础、provider adapter registry、统一云错误、腾讯云 TC3 请求签名、地域/CVM 实例响应解析、腾讯云安全组发现/规则只读查看、基于 SSH 的 Dashboard 能力和指标采集（含网络与进程摘要）、Dashboard 单项指标失败 warning 降级、手动刷新和自动刷新、远程目录浏览、带可见任务状态、当前任务取消和待传队列清空的排队单文件上传/下载、重命名、基于 chmod 的权限修改、可恢复移入回收目录、带保存前备份和另存为的轻量 UTF-8 文本编辑、systemd 服务列表/日志/操作、crontab 读取和 Cron 任务管理、Nginx 配置动态探测/读取/编辑/测试/reload/回滚、防火墙只读探测和规则展示、受保护的环境变量文件发现/编辑/备份、远程变更审计日志、单元测试和 GitHub Actions CI。命令输出默认只保留在本次会话中，不落库持久化。SFTP 固化、进度百分比、批量传输、安全组写操作、防火墙写操作、部署、私有包仓库和 Windows 原生版仍在后续 Phase。
 
 ## 参与贡献
 

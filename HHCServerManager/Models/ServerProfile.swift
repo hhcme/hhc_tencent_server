@@ -389,7 +389,7 @@ struct RemoteChangeLogEntry: Identifiable, Codable, Equatable, Hashable, Sendabl
     var createdAt: Date
 }
 
-enum CloudProviderID: String, Codable, CaseIterable, Identifiable {
+enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
     case tencentCloud = "tencent_cloud"
 
     var id: String { rawValue }
@@ -402,7 +402,7 @@ enum CloudProviderID: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum CloudCapability: String, Codable, CaseIterable, Identifiable {
+enum CloudCapability: String, Codable, CaseIterable, Identifiable, Sendable {
     case regions
     case instanceDiscovery
     case instanceMetadata
@@ -464,6 +464,77 @@ struct CloudProviderInstance: Identifiable, Codable, Equatable, Hashable {
     var zoneId: String?
     var vpcId: String?
     var rawJSON: String?
+}
+
+struct CloudSecurityGroup: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { securityGroupId }
+    var accountId: UUID
+    var providerId: CloudProviderID
+    var regionId: String
+    var securityGroupId: String
+    var name: String
+    var description: String?
+    var projectId: String?
+    var isDefault: Bool?
+    var createdTime: String?
+    var updatedTime: String?
+}
+
+struct CloudSecurityGroupList: Equatable, Hashable, Sendable {
+    var accountId: UUID
+    var providerId: CloudProviderID
+    var regionId: String
+    var instanceId: String?
+    var groups: [CloudSecurityGroup]
+    var capturedAt: Date
+}
+
+enum CloudSecurityGroupRuleDirection: String, Codable, CaseIterable, Identifiable, Sendable {
+    case ingress
+    case egress
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .ingress:
+            "Ingress"
+        case .egress:
+            "Egress"
+        }
+    }
+}
+
+struct CloudSecurityGroupRule: Identifiable, Equatable, Hashable, Sendable {
+    var id: String {
+        [
+            direction.rawValue,
+            policyIndex.map(String.init) ?? "unknown",
+            protocolName ?? "ALL",
+            port ?? "all",
+            cidrBlock ?? ipv6CidrBlock ?? referencedSecurityGroupId ?? "any",
+            action ?? "unknown",
+        ].joined(separator: "|")
+    }
+
+    var direction: CloudSecurityGroupRuleDirection
+    var policyIndex: Int?
+    var protocolName: String?
+    var port: String?
+    var cidrBlock: String?
+    var ipv6CidrBlock: String?
+    var referencedSecurityGroupId: String?
+    var action: String?
+    var description: String?
+    var modifiedTime: String?
+}
+
+struct CloudSecurityGroupPolicySnapshot: Equatable, Hashable, Sendable {
+    var group: CloudSecurityGroup
+    var version: String?
+    var ingress: [CloudSecurityGroupRule]
+    var egress: [CloudSecurityGroupRule]
+    var capturedAt: Date
 }
 
 extension CloudInstanceLink {

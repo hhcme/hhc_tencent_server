@@ -44,7 +44,8 @@ xcodebuild \
 - KeychainService：SSH password、private key、云 SecretId/SecretKey 写入、读取、覆盖、删除。
 - ServerManagementService / CloudAccountService：服务器与云账号创建、更新、删除、凭据清理。
 - Cloud provider foundation：adapter 协议、provider registry、capability 查询、统一错误、超时包装。
-- TencentCloudAdapter：TC3 签名、Region 查询、CVM DescribeInstances 查询、分页、provider 错误映射、mock transport fixture 测试。
+- TencentCloudAdapter：TC3 签名、Region 查询、CVM DescribeInstances 查询、Cloud Monitor CPU 查询、VPC 安全组/规则查询、分页、provider 错误映射、mock transport fixture 测试。
+- CloudSecurityGroupService：基于已关联云实例读取账号、地域和 Keychain 云凭据，按 provider capability 加载安全组列表和选中安全组规则。
 - CloudInstanceSyncService：读取 Keychain 云凭据、同步云实例 upsert、保留已有 SSH 关联、从云实例创建 SSH profile、关联/解除关联。
 - CloudImportSheet / CloudImportViewModel：腾讯云账号验证后保存、加载可用地域、同步实例、选择实例并导入为 SSH profile。
 - DashboardService：通过 SSH 探测 OS、kernel、`/proc`、systemd、sftp，并采集负载、内存、根磁盘、CPU 核心数、网络收发总量和进程摘要基础指标；单项指标失败会返回 warning，不阻断整个快照。
@@ -55,7 +56,7 @@ xcodebuild \
 - FirewallManager：通过 SSH 只读探测 firewalld、ufw、nftables、iptables 后端，读取后端状态和规则输出；firewalld 安装但未运行时会展示 `not running`，不阻断其他功能。
 - EnvironmentFileManager：通过 SSH 受限发现常见 `.env`、`/etc/default`、`/etc/sysconfig` 和 systemd drop-in 环境文件；支持 256 KiB 内 UTF-8 内容读取、保存前远端备份和临时文件替换。
 - AddServerViewModel：表单校验。
-- ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行与取消、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史、历史命令重跑、Dashboard 手动/自动刷新、远程目录浏览、排队单文件上传/下载、当前传输取消、待传队列清空、传输任务状态记录、重命名、chmod 权限修改、可恢复移入回收目录、轻量文本编辑、systemd 服务管理、Cron 管理、Nginx 配置管理、Firewall 只读状态流和 Environment 文件管理。
+- ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行与取消、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史、历史命令重跑、Dashboard 手动/自动刷新、远程目录浏览、排队单文件上传/下载、当前传输取消、待传队列清空、传输任务状态记录、重命名、chmod 权限修改、可恢复移入回收目录、轻量文本编辑、腾讯云安全组只读查看、systemd 服务管理、Cron 管理、Nginx 配置管理、Firewall 只读状态流和 Environment 文件管理。
 - SSHIntegrationTests：通过环境变量启用，默认跳过。
 
 ## 真实 SSH 手动验证
@@ -112,9 +113,10 @@ export HHC_TEST_SSH_PASSPHRASE=""
 - Cron 当前为 Phase 4 bootstrap：用户级 crontab 通过 SSH 即时读取，添加/启用/禁用/删除操作需要 UI 确认并在远端创建备份，同时会写入 `remote_change_logs` 审计表；真实服务器已完成只读 crontab 验证，真实写操作由 mock/contract 测试覆盖，仍需谨慎手动验收。尚未支持系统级 `/etc/cron*` 管理。
 - Nginx 当前为 Phase 4 bootstrap：配置路径通过 `nginx -V` 动态探测，已覆盖 `/etc/nginx` 和 `/www/server/nginx/conf` 这类非标准安装路径；配置文件可浏览和编辑，保存时会先创建 `.hhc-backup-*` 远端备份，再写入配置并执行 `nginx -t`，测试失败会自动恢复备份；reload 需要 UI 确认并写入 `remote_change_logs` 审计表。真实服务器已完成 `nginx -t` 和配置目录只读验证；真实配置写入/reload 仍需谨慎手动验收。
 - Firewall 当前为 Phase 4 bootstrap：只读探测 firewalld、ufw、nftables、iptables 并展示规则输出；真实服务器已验证 firewalld 安装但未运行的降级状态。新增/删除规则等写操作仍待规则 diff、风险确认和审计流程接入。
+- Security Groups 当前为 Phase 4 bootstrap：仅对已关联云实例的账号和地域启用，使用腾讯云 VPC `DescribeSecurityGroups` / `DescribeSecurityGroupPolicies` 只读查询并展示安全组规则；当前尚未持久化实例与安全组的精确关联，因此先展示该账号地域下的安全组列表，后续补实例过滤、规则 diff、写操作确认和审计。
 - Environment 当前为 Phase 4 bootstrap：只发现受限范围内的常见 env 文件，包括用户/应用目录 `.env` 和 `*.env`、`/etc/default`、`/etc/sysconfig`、`/etc/systemd/system/*.service.d/*.conf`；单文件限制 256 KiB，要求 UTF-8，保存前创建 `.hhc-backup-*` 远端备份并写入 `remote_change_logs`。暂不自动解析 shell profile，不扫描私钥/凭据目录，不做跨文件变量合并。
-- 云账号当前已实现本地元数据、云实例关联表、Keychain 云凭据命名空间、Tencent Cloud adapter、云实例同步服务、基础导入 UI 和已关联 CVM 的 CPU 云监控查询；真实腾讯云账号手动验收仍在后续任务中。
-- TencentCloudAdapter 已接入腾讯云 API 3.0 TC3-HMAC-SHA256 签名流程，并实现 Region、CVM instance 只读查询和 Cloud Monitor `GetMonitorData` CPU 指标查询；默认测试使用 mock transport，不提交真实 SecretId/SecretKey。
+- 云账号当前已实现本地元数据、云实例关联表、Keychain 云凭据命名空间、Tencent Cloud adapter、云实例同步服务、基础导入 UI、已关联 CVM 的 CPU 云监控查询和账号地域级安全组只读查询；真实腾讯云账号手动验收仍在后续任务中。
+- TencentCloudAdapter 已接入腾讯云 API 3.0 TC3-HMAC-SHA256 签名流程，并实现 Region、CVM instance、Cloud Monitor `GetMonitorData` CPU 指标、VPC `DescribeSecurityGroups` 和 `DescribeSecurityGroupPolicies` 只读查询；默认测试使用 mock transport，不提交真实 SecretId/SecretKey。
 - `SSHClient` 协议已经隔离 UI/ViewModel 与具体 SSH 实现，后续可以替换为 SwiftNIO SSH。
 - OpenSSH adapter 当前支持私钥认证，也支持通过临时 `SSH_ASKPASS` 脚本进行 password 认证。密码从 Keychain 读出后只注入当前 SSH 子进程环境，脚本执行后立即删除。
 - 后续仍需要把 bootstrap OpenSSH adapter 替换或补齐为 SwiftNIO SSH 正式实现。

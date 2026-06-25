@@ -533,6 +533,77 @@ final class CloudMetricService: @unchecked Sendable {
     }
 }
 
+final class CloudSecurityGroupService: @unchecked Sendable {
+    private let repository: ServerRepository
+    private let keychain: KeychainService
+    private let registry: CloudProviderRegistry
+    private let now: @Sendable () -> Date
+
+    init(
+        repository: ServerRepository,
+        keychain: KeychainService,
+        registry: CloudProviderRegistry,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.repository = repository
+        self.keychain = keychain
+        self.registry = registry
+        self.now = now
+    }
+
+    func loadSecurityGroups(for profile: ServerProfile) async throws -> CloudSecurityGroupList {
+        let context = try linkedCloudContext(for: profile)
+        let groups = try await registry.adapter(for: context.account.providerId).fetchSecurityGroups(
+            credential: context.credential,
+            accountId: context.account.id,
+            regionId: context.link.regionId
+        )
+        return CloudSecurityGroupList(
+            accountId: context.account.id,
+            providerId: context.account.providerId,
+            regionId: context.link.regionId,
+            instanceId: context.link.instanceId,
+            groups: groups.sorted { left, right in
+                left.name.localizedStandardCompare(right.name) == .orderedAscending
+            },
+            capturedAt: now()
+        )
+    }
+
+    func loadPolicies(for group: CloudSecurityGroup) async throws -> CloudSecurityGroupPolicySnapshot {
+        guard let account = try repository.fetchCloudProviderAccounts().first(where: { $0.id == group.accountId && $0.enabled }) else {
+            throw CloudProviderError.authenticationFailed("Linked cloud account is missing or disabled.")
+        }
+        try registry.require(.securityGroups, providerId: account.providerId)
+        guard let credential = try keychain.readCloudCredential(keychainRef: account.keychainRef) else {
+            throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
+        }
+        return try await registry.adapter(for: account.providerId).fetchSecurityGroupPolicies(
+            credential: credential,
+            group: group,
+            capturedAt: now()
+        )
+    }
+
+    private func linkedCloudContext(for profile: ServerProfile) throws -> (
+        link: CloudInstanceLink,
+        account: CloudProviderAccount,
+        credential: CloudProviderCredential
+    ) {
+        guard let link = try repository.fetchCloudInstanceLinks().first(where: { $0.serverId == profile.id }) else {
+            throw CloudProviderError.providerFailure("This server is not linked to a cloud instance.")
+        }
+        guard let account = try repository.fetchCloudProviderAccounts().first(where: { $0.id == link.accountId && $0.enabled }) else {
+            throw CloudProviderError.authenticationFailed("Linked cloud account is missing or disabled.")
+        }
+        try registry.require(.securityGroups, providerId: account.providerId)
+        guard let credential = try keychain.readCloudCredential(keychainRef: account.keychainRef) else {
+            throw CloudProviderError.authenticationFailed("Cloud credential is missing from Keychain.")
+        }
+        return (link, account, credential)
+    }
+}
+
 final class SystemdServiceManager: @unchecked Sendable {
     private let now: @Sendable () -> Date
 
@@ -1563,6 +1634,16 @@ protocol CloudProviderAdapter: Sendable {
     func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion]
     func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance]
     func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries
+    func fetchSecurityGroups(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String
+    ) async throws -> [CloudSecurityGroup]
+    func fetchSecurityGroupPolicies(
+        credential: CloudProviderCredential,
+        group: CloudSecurityGroup,
+        capturedAt: Date
+    ) async throws -> CloudSecurityGroupPolicySnapshot
 }
 
 enum CloudProviderError: LocalizedError, Equatable {
@@ -1681,7 +1762,7 @@ final class URLSessionTencentCloudHTTPTransport: TencentCloudHTTPTransport, @unc
 final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     let providerId: CloudProviderID = .tencentCloud
     let displayName = "Tencent Cloud"
-    let capabilities: Set<CloudCapability> = [.regions, .instanceDiscovery, .instanceMetadata, .cloudMetrics]
+    let capabilities: Set<CloudCapability> = [.regions, .instanceDiscovery, .instanceMetadata, .cloudMetrics, .securityGroups]
 
     private let transport: TencentCloudHTTPTransport
     private let now: @Sendable () -> Date
@@ -1803,6 +1884,80 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             unit: response.response.metricName == "CPUUsage" ? "%" : nil,
             values: dataPoint?.values ?? [],
             timestamps: (dataPoint?.timestamps ?? []).map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        )
+    }
+
+    func fetchSecurityGroups(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String
+    ) async throws -> [CloudSecurityGroup] {
+        var offset = 0
+        let limit = 100
+        var groups: [CloudSecurityGroup] = []
+        var totalCount: Int?
+
+        repeat {
+            let payload = TencentDescribeSecurityGroupsPayload(offset: offset, limit: limit)
+            let response: TencentCloudEnvelope<TencentDescribeSecurityGroupsResponse> = try await request(
+                credential: credential,
+                endpoint: TencentCloudEndpoint(
+                    host: "vpc.intl.tencentcloudapi.com",
+                    service: "vpc",
+                    action: "DescribeSecurityGroups",
+                    version: "2017-03-12",
+                    region: regionId
+                ),
+                payload: payload
+            )
+            try throwIfNeeded(response.response.error)
+            let page = response.response.securityGroupSet ?? []
+            groups.append(contentsOf: page.map { group in
+                CloudSecurityGroup(
+                    accountId: accountId,
+                    providerId: .tencentCloud,
+                    regionId: regionId,
+                    securityGroupId: group.securityGroupId,
+                    name: group.securityGroupName,
+                    description: group.securityGroupDesc,
+                    projectId: group.projectId.map(String.init),
+                    isDefault: group.isDefault,
+                    createdTime: group.createdTime,
+                    updatedTime: group.updateTime
+                )
+            })
+            totalCount = response.response.totalCount
+            offset += page.count
+        } while offset < (totalCount ?? 0) && offset > 0
+
+        return groups
+    }
+
+    func fetchSecurityGroupPolicies(
+        credential: CloudProviderCredential,
+        group: CloudSecurityGroup,
+        capturedAt: Date
+    ) async throws -> CloudSecurityGroupPolicySnapshot {
+        let payload = TencentDescribeSecurityGroupPoliciesPayload(securityGroupId: group.securityGroupId)
+        let response: TencentCloudEnvelope<TencentDescribeSecurityGroupPoliciesResponse> = try await request(
+            credential: credential,
+            endpoint: TencentCloudEndpoint(
+                host: "vpc.intl.tencentcloudapi.com",
+                service: "vpc",
+                action: "DescribeSecurityGroupPolicies",
+                version: "2017-03-12",
+                region: group.regionId
+            ),
+            payload: payload
+        )
+        try throwIfNeeded(response.response.error)
+        let policySet = response.response.securityGroupPolicySet
+        return CloudSecurityGroupPolicySnapshot(
+            group: group,
+            version: policySet?.version,
+            ingress: Self.mapSecurityGroupRules(policySet?.ingress ?? [], direction: .ingress),
+            egress: Self.mapSecurityGroupRules(policySet?.egress ?? [], direction: .egress),
+            capturedAt: capturedAt
         )
     }
 
@@ -1929,6 +2084,26 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         return formatter.string(from: date)
     }
 
+    private static func mapSecurityGroupRules(
+        _ rules: [TencentSecurityGroupPolicy],
+        direction: CloudSecurityGroupRuleDirection
+    ) -> [CloudSecurityGroupRule] {
+        rules.map { rule in
+            CloudSecurityGroupRule(
+                direction: direction,
+                policyIndex: rule.policyIndex,
+                protocolName: rule.protocolName,
+                port: rule.port,
+                cidrBlock: rule.cidrBlock,
+                ipv6CidrBlock: rule.ipv6CidrBlock,
+                referencedSecurityGroupId: rule.securityGroupId,
+                action: rule.action,
+                description: rule.policyDescription,
+                modifiedTime: rule.modifyTime
+            )
+        }
+    }
+
     private static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
@@ -1968,6 +2143,24 @@ private struct TencentDescribeInstancesPayload: Encodable {
     enum CodingKeys: String, CodingKey {
         case offset = "Offset"
         case limit = "Limit"
+    }
+}
+
+private struct TencentDescribeSecurityGroupsPayload: Encodable {
+    var offset: Int
+    var limit: Int
+
+    enum CodingKeys: String, CodingKey {
+        case offset = "Offset"
+        case limit = "Limit"
+    }
+}
+
+private struct TencentDescribeSecurityGroupPoliciesPayload: Encodable {
+    var securityGroupId: String
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroupId = "SecurityGroupId"
     }
 }
 
@@ -2073,6 +2266,28 @@ private struct TencentGetMonitorDataResponse: Decodable {
     }
 }
 
+private struct TencentDescribeSecurityGroupsResponse: Decodable {
+    var totalCount: Int?
+    var securityGroupSet: [TencentSecurityGroup]?
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCount = "TotalCount"
+        case securityGroupSet = "SecurityGroupSet"
+        case error = "Error"
+    }
+}
+
+private struct TencentDescribeSecurityGroupPoliciesResponse: Decodable {
+    var securityGroupPolicySet: TencentSecurityGroupPolicySet?
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroupPolicySet = "SecurityGroupPolicySet"
+        case error = "Error"
+    }
+}
+
 private struct TencentMonitorDataPoint: Decodable {
     var dimensions: [TencentMonitorDimensionValue]?
     var timestamps: [Int]
@@ -2082,6 +2297,62 @@ private struct TencentMonitorDataPoint: Decodable {
         case dimensions = "Dimensions"
         case timestamps = "Timestamps"
         case values = "Values"
+    }
+}
+
+private struct TencentSecurityGroup: Decodable {
+    var securityGroupId: String
+    var securityGroupName: String
+    var securityGroupDesc: String?
+    var projectId: Int?
+    var isDefault: Bool?
+    var createdTime: String?
+    var updateTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case securityGroupId = "SecurityGroupId"
+        case securityGroupName = "SecurityGroupName"
+        case securityGroupDesc = "SecurityGroupDesc"
+        case projectId = "ProjectId"
+        case isDefault = "IsDefault"
+        case createdTime = "CreatedTime"
+        case updateTime = "UpdateTime"
+    }
+}
+
+private struct TencentSecurityGroupPolicySet: Decodable {
+    var version: String?
+    var ingress: [TencentSecurityGroupPolicy]?
+    var egress: [TencentSecurityGroupPolicy]?
+
+    enum CodingKeys: String, CodingKey {
+        case version = "Version"
+        case ingress = "Ingress"
+        case egress = "Egress"
+    }
+}
+
+private struct TencentSecurityGroupPolicy: Decodable {
+    var policyIndex: Int?
+    var protocolName: String?
+    var port: String?
+    var cidrBlock: String?
+    var ipv6CidrBlock: String?
+    var securityGroupId: String?
+    var action: String?
+    var policyDescription: String?
+    var modifyTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case policyIndex = "PolicyIndex"
+        case protocolName = "Protocol"
+        case port = "Port"
+        case cidrBlock = "CidrBlock"
+        case ipv6CidrBlock = "Ipv6CidrBlock"
+        case securityGroupId = "SecurityGroupId"
+        case action = "Action"
+        case policyDescription = "PolicyDescription"
+        case modifyTime = "ModifyTime"
     }
 }
 
