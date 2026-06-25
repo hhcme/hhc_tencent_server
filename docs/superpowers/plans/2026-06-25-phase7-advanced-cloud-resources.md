@@ -216,10 +216,11 @@ CREATE TABLE cloud_billing_states (
 - [x] 危险云操作失败路径测试：覆盖快照创建、云盘挂载和实例电源操作失败时写入 failed 审计日志，且不污染本地快照、云盘和实例状态缓存。
 - [x] 云资源中心运行时权限降级 ViewModel 测试，覆盖 permission denied 降级和非权限错误不降级。
 - [x] 云资源中心本地筛选 ViewModel 测试，覆盖 account、region、kind、status、text filter 和过滤结果变化后的 selected resource 重置。
+- [x] 真实多云只读同步 opt-in 集成测试入口：`CloudIntegrationTests` 默认跳过，启用 `HHC_TEST_CLOUD_REAL=1` 和对应云厂商只读凭据后会验证 credential、region/project、实例、云盘、快照、计费同步和统一资源作用域。
 
 ### Task 8：手动验收
 
-- [ ] 腾讯云、阿里云、华为云账号都可只读同步实例。
+- [ ] 腾讯云、阿里云、华为云账号都可只读同步实例。当前已有受保护真实集成测试入口，等待真实只读账号凭据执行验收。
 - [x] 云资源中心能跨厂商搜索。
 - [x] 腾讯云云盘和快照信息可展示。
 - [x] 阿里云云盘信息可同步并进入云资源中心统一资源列表。

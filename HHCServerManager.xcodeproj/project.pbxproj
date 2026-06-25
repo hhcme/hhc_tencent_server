@@ -32,6 +32,7 @@
 		900000000000000000000106 /* ServerWorkspaceViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000007 /* ServerWorkspaceViewModelTests.swift */; };
 		900000000000000000000107 /* HostKeyTrustStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000008 /* HostKeyTrustStoreTests.swift */; };
 		900000000000000000000108 /* OpenSSHClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000009 /* OpenSSHClientTests.swift */; };
+		900000000000000000000109 /* CloudIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000010 /* CloudIntegrationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,6 +75,7 @@
 		900000000000000000000007 /* ServerWorkspaceViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerWorkspaceViewModelTests.swift; sourceTree = "<group>"; };
 		900000000000000000000008 /* HostKeyTrustStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyTrustStoreTests.swift; sourceTree = "<group>"; };
 		900000000000000000000009 /* OpenSSHClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSSHClientTests.swift; sourceTree = "<group>"; };
+		900000000000000000000010 /* CloudIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudIntegrationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -269,6 +271,7 @@
 			isa = PBXGroup;
 			children = (
 				900000000000000000000005 /* SSHIntegrationTests.swift */,
+				900000000000000000000010 /* CloudIntegrationTests.swift */,
 			);
 			path = Integration;
 			sourceTree = "<group>";
@@ -403,6 +406,7 @@
 				900000000000000000000104 /* AddServerViewModelTests.swift in Sources */,
 				900000000000000000000106 /* ServerWorkspaceViewModelTests.swift in Sources */,
 				900000000000000000000105 /* SSHIntegrationTests.swift in Sources */,
+				900000000000000000000109 /* CloudIntegrationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
