@@ -84,6 +84,7 @@ CREATE TABLE registry_backups (
 
 - [x] 检查 Node.js 和包管理器：已实现 SSH preflight marker 采集和报告解析。
 - [x] 检查 systemd：已实现 `systemctl` 可用性检查。
+- [x] 检查 htpasswd：已作为 warning 级检查接入，用于提示 Verdaccio 用户增删改能力是否可用。
 - [x] 检查端口占用：已实现 `ss`/`netstat` 监听端口检测。
 - [x] 检查目录权限和磁盘空间：已实现安装目录/data 目录父级可写检查和 `df` 可用空间解析。
 - [x] 生成可读的检查报告：已输出 passed/warning/failed、detail 和 remediation。
@@ -99,7 +100,7 @@ CREATE TABLE registry_backups (
 ### Task 3：Verdaccio 管理
 
 - [x] 查看运行状态和日志：已通过 systemd state、Verdaccio version、storage size 和 journal tail 生成状态快照，日志会脱敏。
-- [ ] 管理用户和权限配置：已支持生成 `htpasswd` auth 配置和包访问/发布策略切换；用户增删改仍待接入安全输入和远端命令流程。
+- [x] 管理用户和权限配置：已支持生成 `htpasswd` auth 配置、包访问/发布策略切换，以及基于远端 `htpasswd -B -i` / `htpasswd -D` 的用户创建、改密和删除命令层；UI 接入和真实服务器验收仍待完成。
 - [x] 列出私有包：已基于 Verdaccio storage 下 package metadata 生成包名、版本数量、latest version、大小和更新时间摘要。
 - [x] 修改上游 registry 配置：已支持通过 `VerdaccioConfigPolicy` 生成受控 uplink URL，并复用保存前备份和重启流程。
 - [x] 保存配置前备份：已支持读取/保存 `config.yaml`，保存前创建 `.hhc-backup-*` 备份并重启服务；真实服务器写操作仍需谨慎验收。
@@ -133,6 +134,7 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 安装命令和 health check 状态机测试。
 - [x] Verdaccio 状态、日志脱敏和配置保存前备份测试。
 - [x] Verdaccio 上游 registry 和权限策略配置生成/保存测试。
+- [x] Verdaccio 用户创建、改密、删除命令层测试，覆盖 htpasswd 依赖、备份、重启和明文密码不进入命令字符串。
 - [x] Verdaccio Nginx proxy 生成、写入、`nginx -t` 和 reload contract 测试。
 - [x] 备份归档命令测试。
 - [x] 恢复状态机测试：已覆盖恢复成功、health check 失败回滚、恢复命令失败回滚和非法备份路径拒绝。

@@ -1298,6 +1298,19 @@ struct VerdaccioConfigSaveResult: Equatable, Sendable {
     var backupPath: String
 }
 
+enum VerdaccioUserMutationAction: String, Equatable, Sendable {
+    case create
+    case updatePassword
+    case delete
+}
+
+struct VerdaccioUserMutationResult: Equatable, Sendable {
+    var username: String
+    var action: VerdaccioUserMutationAction
+    var htpasswdPath: String
+    var backupPath: String
+}
+
 struct VerdaccioPackageSummary: Identifiable, Equatable, Sendable {
     var id: String { name }
     var name: String
@@ -1331,6 +1344,8 @@ enum RegistryConfigurationError: LocalizedError, Equatable {
     case invalidRegistryURL
     case invalidProxyServerName
     case invalidProxyBodySize
+    case invalidRegistryUsername
+    case invalidRegistryPassword
 
     var errorDescription: String? {
         switch self {
@@ -1352,6 +1367,10 @@ enum RegistryConfigurationError: LocalizedError, Equatable {
             "Nginx server_name must be a domain, wildcard domain, IP address, or underscore without unsafe characters."
         case .invalidProxyBodySize:
             "Nginx client_max_body_size must be a positive number followed by k, m, or g."
+        case .invalidRegistryUsername:
+            "Registry username must be 1-64 characters and can only contain letters, numbers, dot, underscore, at sign, and dash."
+        case .invalidRegistryPassword:
+            "Registry password must be 8-4096 characters and cannot contain line breaks or null bytes."
         }
     }
 }
@@ -1739,6 +1758,101 @@ final class VerdaccioManager: @unchecked Sendable {
         )
     }
 
+    func createUser(
+        draft: VerdaccioInstallDraft,
+        username: String,
+        password: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioUserMutationResult {
+        try validateUsername(username)
+        try validatePassword(password)
+        let backupPath = htpasswdBackupPath(for: draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(
+                Self.upsertUserCommand(
+                    draft: draft,
+                    username: username.trimmed,
+                    password: password,
+                    backupPath: backupPath,
+                    requireExistingUser: false
+                ),
+                profile: profile
+            )
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not create Verdaccio user."))
+        }
+        return VerdaccioUserMutationResult(
+            username: username.trimmed,
+            action: .create,
+            htpasswdPath: Self.htpasswdPath(for: draft),
+            backupPath: backupPath
+        )
+    }
+
+    func updateUserPassword(
+        draft: VerdaccioInstallDraft,
+        username: String,
+        password: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioUserMutationResult {
+        try validateUsername(username)
+        try validatePassword(password)
+        let backupPath = htpasswdBackupPath(for: draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(
+                Self.upsertUserCommand(
+                    draft: draft,
+                    username: username.trimmed,
+                    password: password,
+                    backupPath: backupPath,
+                    requireExistingUser: true
+                ),
+                profile: profile
+            )
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not update Verdaccio user."))
+        }
+        return VerdaccioUserMutationResult(
+            username: username.trimmed,
+            action: .updatePassword,
+            htpasswdPath: Self.htpasswdPath(for: draft),
+            backupPath: backupPath
+        )
+    }
+
+    func deleteUser(
+        draft: VerdaccioInstallDraft,
+        username: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioUserMutationResult {
+        try validateUsername(username)
+        let backupPath = htpasswdBackupPath(for: draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(
+                Self.deleteUserCommand(
+                    draft: draft,
+                    username: username.trimmed,
+                    backupPath: backupPath
+                ),
+                profile: profile
+            )
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not delete Verdaccio user."))
+        }
+        return VerdaccioUserMutationResult(
+            username: username.trimmed,
+            action: .delete,
+            htpasswdPath: Self.htpasswdPath(for: draft),
+            backupPath: backupPath
+        )
+    }
+
     func listPackages(
         draft: VerdaccioInstallDraft,
         profile: ServerProfile,
@@ -1960,6 +2074,31 @@ final class VerdaccioManager: @unchecked Sendable {
         return SSHClientError.processFailed("\(restoreMessage)\nRollback failed using \(rollbackPath): \(rollbackMessage)")
     }
 
+    private func validateUsername(_ username: String) throws {
+        let username = username.trimmed
+        guard !username.isEmpty,
+              username.count <= 64,
+              username.range(of: #"^[A-Za-z0-9._@-]+$"#, options: .regularExpression) != nil,
+              !username.contains(":")
+        else {
+            throw RegistryConfigurationError.invalidRegistryUsername
+        }
+    }
+
+    private func validatePassword(_ password: String) throws {
+        guard (8...4096).contains(password.count),
+              !password.contains("\n"),
+              !password.contains("\r"),
+              !password.contains("\0")
+        else {
+            throw RegistryConfigurationError.invalidRegistryPassword
+        }
+    }
+
+    private func htpasswdBackupPath(for draft: VerdaccioInstallDraft) -> String {
+        "\(Self.htpasswdPath(for: draft)).hhc-backup-\(Self.timestamp(for: now()))"
+    }
+
     static func parseStatus(
         _ output: String,
         serviceName: String,
@@ -1998,6 +2137,72 @@ final class VerdaccioManager: @unchecked Sendable {
                 )
             }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    static func htpasswdPath(for draft: VerdaccioInstallDraft) -> String {
+        "\(draft.installPath.trimmed)/htpasswd"
+    }
+
+    static func upsertUserCommand(
+        draft: VerdaccioInstallDraft,
+        username: String,
+        password: String,
+        backupPath: String,
+        requireExistingUser: Bool
+    ) -> String {
+        let encodedPassword = Data(password.utf8).base64EncodedString()
+        let mode = requireExistingUser ? "update" : "create"
+        return """
+        set -e; \
+        install_path=\(shellQuote(draft.installPath.trimmed)); \
+        service_name=\(shellQuote(draft.serviceName.trimmed)); \
+        username=\(shellQuote(username.trimmed)); \
+        backup=\(shellQuote(backupPath)); \
+        htpasswd_file="$install_path/htpasswd"; \
+        service="$service_name.service"; \
+        command -v htpasswd >/dev/null 2>&1 || { echo 'htpasswd command is required to manage Verdaccio users.' >&2; exit 127; }; \
+        touch "$htpasswd_file"; \
+        chown "$service_name:$service_name" "$htpasswd_file"; \
+        chmod 0640 "$htpasswd_file"; \
+        if [ \(shellQuote(mode)) = 'create' ] && grep -q "^$username:" "$htpasswd_file"; then echo 'Verdaccio user already exists.' >&2; exit 4; fi; \
+        if [ \(shellQuote(mode)) = 'update' ] && ! grep -q "^$username:" "$htpasswd_file"; then echo 'Verdaccio user does not exist.' >&2; exit 5; fi; \
+        password_file=$(mktemp); \
+        trap 'rm -f -- "$password_file"' EXIT; \
+        base64 -d > "$password_file" <<'__HHC_VERDACCIO_USER_PASSWORD__'
+        \(encodedPassword)
+        __HHC_VERDACCIO_USER_PASSWORD__
+        cp -p -- "$htpasswd_file" "$backup"; \
+        htpasswd -B -i "$htpasswd_file" "$username" < "$password_file"; \
+        chown "$service_name:$service_name" "$htpasswd_file"; \
+        chmod 0640 "$htpasswd_file"; \
+        systemctl restart "$service"; \
+        printf '__HHC_VERDACCIO_HTPASSWD_BACKUP__%s\\n' "$backup"
+        """
+    }
+
+    static func deleteUserCommand(
+        draft: VerdaccioInstallDraft,
+        username: String,
+        backupPath: String
+    ) -> String {
+        """
+        set -e; \
+        install_path=\(shellQuote(draft.installPath.trimmed)); \
+        service_name=\(shellQuote(draft.serviceName.trimmed)); \
+        username=\(shellQuote(username.trimmed)); \
+        backup=\(shellQuote(backupPath)); \
+        htpasswd_file="$install_path/htpasswd"; \
+        service="$service_name.service"; \
+        command -v htpasswd >/dev/null 2>&1 || { echo 'htpasswd command is required to manage Verdaccio users.' >&2; exit 127; }; \
+        test -f "$htpasswd_file" || { echo 'Verdaccio htpasswd file does not exist.' >&2; exit 5; }; \
+        if ! grep -q "^$username:" "$htpasswd_file"; then echo 'Verdaccio user does not exist.' >&2; exit 5; fi; \
+        cp -p -- "$htpasswd_file" "$backup"; \
+        htpasswd -D "$htpasswd_file" "$username"; \
+        chown "$service_name:$service_name" "$htpasswd_file"; \
+        chmod 0640 "$htpasswd_file"; \
+        systemctl restart "$service"; \
+        printf '__HHC_VERDACCIO_HTPASSWD_BACKUP__%s\\n' "$backup"
+        """
     }
 
     static func statusCommand(for draft: VerdaccioInstallDraft) -> String {
@@ -2240,6 +2445,13 @@ final class RegistryPreflightChecker: @unchecked Sendable {
                 remediation: packageManager == nil ? "Install npm, pnpm, or yarn on the server." : nil
             ),
             RegistryPreflightCheck(
+                id: "htpasswd",
+                title: "htpasswd",
+                status: values["HTPASSWD"] == "yes" ? .passed : .warning,
+                detail: values["HTPASSWD"] == "yes" ? "htpasswd is available for Verdaccio user management." : "htpasswd was not found; install and package workflows can continue, but user add/update/delete actions will be unavailable.",
+                remediation: values["HTPASSWD"] == "yes" ? nil : "Install apache2-utils, httpd-tools, or the distribution package that provides htpasswd."
+            ),
+            RegistryPreflightCheck(
                 id: "systemd",
                 title: "systemd",
                 status: values["SYSTEMD"] == "yes" ? .passed : .failed,
@@ -2280,6 +2492,7 @@ final class RegistryPreflightChecker: @unchecked Sendable {
         install_parent=$(dirname -- "$install_path"); data_parent=$(dirname -- "$data_path"); \
         printf '__HHC_REGISTRY_NODE_VERSION__%s\\n' "$(node --version 2>/dev/null || true)"; \
         if command -v npm >/dev/null 2>&1; then printf '__HHC_REGISTRY_PACKAGE_MANAGER__npm %s\\n' "$(npm --version 2>/dev/null || true)"; elif command -v pnpm >/dev/null 2>&1; then printf '__HHC_REGISTRY_PACKAGE_MANAGER__pnpm %s\\n' "$(pnpm --version 2>/dev/null || true)"; elif command -v yarn >/dev/null 2>&1; then printf '__HHC_REGISTRY_PACKAGE_MANAGER__yarn %s\\n' "$(yarn --version 2>/dev/null || true)"; else printf '__HHC_REGISTRY_PACKAGE_MANAGER__\\n'; fi; \
+        command -v htpasswd >/dev/null 2>&1 && printf '__HHC_REGISTRY_HTPASSWD__yes\\n' || printf '__HHC_REGISTRY_HTPASSWD__no\\n'; \
         command -v systemctl >/dev/null 2>&1 && printf '__HHC_REGISTRY_SYSTEMD__yes\\n' || printf '__HHC_REGISTRY_SYSTEMD__no\\n'; \
         if (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null || true) | awk '{print $4}' | grep -Eq "[:.]$port$"; then printf '__HHC_REGISTRY_PORT_BUSY__yes\\n'; else printf '__HHC_REGISTRY_PORT_BUSY__no\\n'; fi; \
         test -d "$install_parent" && test -w "$install_parent" && printf '__HHC_REGISTRY_INSTALL_PARENT_WRITABLE__yes\\n' || printf '__HHC_REGISTRY_INSTALL_PARENT_WRITABLE__no\\n'; \

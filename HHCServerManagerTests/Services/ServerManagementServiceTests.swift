@@ -788,6 +788,108 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(git?.verdict, .notARegistry)
     }
 
+    func testVerdaccioUserCommandsUseHtpasswdWithoutPlaintextPassword() {
+        let draft = VerdaccioInstallDraft()
+        let command = VerdaccioManager.upsertUserCommand(
+            draft: draft,
+            username: "team.dev",
+            password: "Correct-Horse-Secret-123",
+            backupPath: "/srv/verdaccio/htpasswd.hhc-backup-20260625190000",
+            requireExistingUser: false
+        )
+
+        XCTAssertTrue(command.contains("command -v htpasswd"))
+        XCTAssertTrue(command.contains("htpasswd -B -i"))
+        XCTAssertTrue(command.contains("systemctl restart \"$service\""))
+        XCTAssertTrue(command.contains("__HHC_VERDACCIO_HTPASSWD_BACKUP__"))
+        XCTAssertFalse(command.contains("Correct-Horse-Secret-123"))
+
+        let deleteCommand = VerdaccioManager.deleteUserCommand(
+            draft: draft,
+            username: "team.dev",
+            backupPath: "/srv/verdaccio/htpasswd.hhc-backup-20260625190000"
+        )
+
+        XCTAssertTrue(deleteCommand.contains("htpasswd -D"))
+        XCTAssertTrue(deleteCommand.contains("cp -p -- \"$htpasswd_file\" \"$backup\""))
+        XCTAssertTrue(deleteCommand.contains("systemctl restart \"$service\""))
+    }
+
+    func testVerdaccioManagerCreatesUpdatesAndDeletesUsersWithBackups() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "__HHC_VERDACCIO_HTPASSWD_BACKUP__/srv/verdaccio/htpasswd.hhc-backup\n", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: "__HHC_VERDACCIO_HTPASSWD_BACKUP__/srv/verdaccio/htpasswd.hhc-backup\n", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: "__HHC_VERDACCIO_HTPASSWD_BACKUP__/srv/verdaccio/htpasswd.hhc-backup\n", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_719_318_000) })
+
+        let created = try await manager.createUser(
+            draft: VerdaccioInstallDraft(),
+            username: "team.dev",
+            password: "Correct-Horse-Secret-123",
+            profile: profile,
+            sshClient: client
+        )
+        let updated = try await manager.updateUserPassword(
+            draft: VerdaccioInstallDraft(),
+            username: "team.dev",
+            password: "Correct-Horse-Secret-456",
+            profile: profile,
+            sshClient: client
+        )
+        let deleted = try await manager.deleteUser(
+            draft: VerdaccioInstallDraft(),
+            username: "team.dev",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(created.action, .create)
+        XCTAssertEqual(updated.action, .updatePassword)
+        XCTAssertEqual(deleted.action, .delete)
+        XCTAssertEqual(created.htpasswdPath, "/srv/verdaccio/htpasswd")
+        XCTAssertTrue(created.backupPath.contains("htpasswd.hhc-backup-2024-"))
+        XCTAssertTrue(client.commands[0].contains("htpasswd -B -i"))
+        XCTAssertTrue(client.commands[1].contains("'update'"))
+        XCTAssertTrue(client.commands[2].contains("htpasswd -D"))
+        XCTAssertFalse(client.commands.joined(separator: "\n").contains("Correct-Horse-Secret"))
+    }
+
+    func testVerdaccioManagerRejectsUnsafeUserInputsBeforeSSH() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let manager = VerdaccioManager()
+
+        do {
+            _ = try await manager.createUser(
+                draft: VerdaccioInstallDraft(),
+                username: "team:dev",
+                password: "Correct-Horse-Secret-123",
+                profile: profile,
+                sshClient: client
+            )
+            XCTFail("Expected invalid username to be rejected.")
+        } catch {
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidRegistryUsername)
+        }
+
+        do {
+            _ = try await manager.updateUserPassword(
+                draft: VerdaccioInstallDraft(),
+                username: "team.dev",
+                password: "short",
+                profile: profile,
+                sshClient: client
+            )
+            XCTFail("Expected invalid password to be rejected.")
+        } catch {
+            XCTAssertEqual(error as? RegistryConfigurationError, .invalidRegistryPassword)
+        }
+
+        XCTAssertTrue(client.commands.isEmpty)
+    }
+
     func testRegistryPreflightCheckerParsesReadyReport() async throws {
         let profile = makeServiceTestProfile()
         let client = RecordingSSHClient(responses: [
@@ -796,6 +898,7 @@ final class ServerManagementServiceTests: XCTestCase {
                 stdout: """
                 __HHC_REGISTRY_NODE_VERSION__v20.11.1
                 __HHC_REGISTRY_PACKAGE_MANAGER__npm 10.2.4
+                __HHC_REGISTRY_HTPASSWD__yes
                 __HHC_REGISTRY_SYSTEMD__yes
                 __HHC_REGISTRY_PORT_BUSY__no
                 __HHC_REGISTRY_INSTALL_PARENT_WRITABLE__yes
@@ -812,8 +915,9 @@ final class ServerManagementServiceTests: XCTestCase {
         let report = try await checker.run(draft: VerdaccioInstallDraft(), profile: profile, sshClient: client)
 
         XCTAssertTrue(report.isReady)
-        XCTAssertEqual(report.checks.map(\.status), [.passed, .passed, .passed, .passed, .passed, .passed])
+        XCTAssertEqual(report.checks.map(\.status), [.passed, .passed, .passed, .passed, .passed, .passed, .passed])
         XCTAssertTrue(client.commands[0].contains("node --version"))
+        XCTAssertTrue(client.commands[0].contains("command -v htpasswd"))
         XCTAssertTrue(client.commands[0].contains("port=4873"))
         XCTAssertEqual(report.capturedAt, Date(timeIntervalSince1970: 1_700_000_000))
     }
@@ -822,6 +926,7 @@ final class ServerManagementServiceTests: XCTestCase {
         let report = RegistryPreflightChecker.parseReport("""
         __HHC_REGISTRY_NODE_VERSION__
         __HHC_REGISTRY_PACKAGE_MANAGER__
+        __HHC_REGISTRY_HTPASSWD__no
         __HHC_REGISTRY_SYSTEMD__no
         __HHC_REGISTRY_PORT_BUSY__yes
         __HHC_REGISTRY_INSTALL_PARENT_WRITABLE__no
@@ -832,6 +937,7 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertFalse(report.isReady)
         XCTAssertEqual(report.checks.first { $0.id == "node" }?.status, .failed)
         XCTAssertEqual(report.checks.first { $0.id == "package_manager" }?.status, .failed)
+        XCTAssertEqual(report.checks.first { $0.id == "htpasswd" }?.status, .warning)
         XCTAssertEqual(report.checks.first { $0.id == "systemd" }?.status, .failed)
         XCTAssertEqual(report.checks.first { $0.id == "port" }?.status, .failed)
         XCTAssertEqual(report.checks.first { $0.id == "paths" }?.status, .failed)
