@@ -16,6 +16,7 @@ final class AppState: ObservableObject {
     let firewallManager: FirewallManager
     let environmentFileManager: EnvironmentFileManager
     let remoteFileService: RemoteFileService
+    let deploymentRunner: DeploymentRunner
     let sshClient: OpenSSHClient
 
     @Published var servers: [ServerProfile] = []
@@ -44,6 +45,7 @@ final class AppState: ObservableObject {
             firewallManager = FirewallManager()
             environmentFileManager = EnvironmentFileManager()
             remoteFileService = RemoteFileService()
+            deploymentRunner = DeploymentRunner(repository: repository)
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,
                 keychain: keychain,
@@ -71,6 +73,7 @@ final class AppState: ObservableObject {
             firewallManager = FirewallManager()
             environmentFileManager = EnvironmentFileManager()
             remoteFileService = RemoteFileService()
+            deploymentRunner = DeploymentRunner(repository: repository)
             cloudInstanceSyncService = CloudInstanceSyncService(
                 repository: repository,
                 keychain: keychain,

@@ -46,6 +46,8 @@ struct ServerWorkspaceView: View {
                     .tag("firewall")
                 Label("Security Groups", systemImage: "lock.shield")
                     .tag("securityGroups")
+                Label("Deployments", systemImage: "arrow.down.doc")
+                    .tag("deployments")
                 Label("Environment", systemImage: "slider.horizontal.3")
                     .tag("environment")
                 Label("Cron", systemImage: "calendar.badge.clock")
@@ -259,6 +261,8 @@ struct ServerWorkspaceView: View {
             firewallPanel
         case "securityGroups":
             securityGroupsPanel
+        case "deployments":
+            deploymentsPanel
         case "environment":
             environmentPanel
         case "cron":
@@ -524,6 +528,301 @@ struct ServerWorkspaceView: View {
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var deploymentsPanel: some View {
+        HSplitView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Deployments")
+                        .font(.title2.weight(.semibold))
+                    Spacer()
+                    Button {
+                        viewModel.startNewDeploymentProject(serverId: profile.id)
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .help("New deployment project")
+                }
+
+                if viewModel.deploymentProjects.isEmpty {
+                    ContentUnavailableView(
+                        "No Deployment Projects",
+                        systemImage: "arrow.down.doc",
+                        description: Text("Create a project to deploy a GitLab repository over SSH.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 180)
+                } else {
+                    List(selection: deploymentProjectSelectionBinding) {
+                        ForEach(viewModel.deploymentProjects) { project in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(project.name)
+                                    .font(.headline)
+                                Text("\(project.branch) -> \(project.deployPath)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .padding(.vertical, 4)
+                            .tag(Optional(project.id))
+                        }
+                    }
+                    .listStyle(.sidebar)
+                }
+
+                if let message = viewModel.deploymentActionMessage {
+                    Label(message, systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+                if let error = viewModel.deploymentErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .padding(20)
+            .frame(minWidth: 260, idealWidth: 300)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    deploymentProjectForm
+                    Divider()
+                    deploymentCommandPreview
+                    Divider()
+                    deploymentRunHistory
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .onAppear {
+            viewModel.loadDeploymentProjects(profile: profile, repository: appState.repository)
+        }
+    }
+
+    private var deploymentProjectForm: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Project")
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                Button {
+                    viewModel.saveDeploymentProject(profile: profile, repository: appState.repository)
+                } label: {
+                    if viewModel.isSavingDeploymentProject {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Save", systemImage: "tray.and.arrow.down")
+                    }
+                }
+                .disabled(viewModel.isSavingDeploymentProject)
+
+                Button(role: .destructive) {
+                    viewModel.deleteSelectedDeploymentProject(profile: profile, repository: appState.repository)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(viewModel.selectedDeploymentProject == nil || viewModel.isRunningDeployment)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Name").foregroundStyle(.secondary)
+                    TextField("Website", text: $viewModel.deploymentName)
+                        .textFieldStyle(.roundedBorder)
+                }
+                GridRow {
+                    Text("Repository").foregroundStyle(.secondary)
+                    TextField("git@gitlab.com:team/project.git", text: $viewModel.deploymentRepositoryURL)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+                GridRow {
+                    Text("Branch").foregroundStyle(.secondary)
+                    TextField("main", text: $viewModel.deploymentBranch)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+                GridRow {
+                    Text("Path").foregroundStyle(.secondary)
+                    TextField("/srv/app", text: $viewModel.deploymentPath)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+                GridRow {
+                    Text("Build").foregroundStyle(.secondary)
+                    TextField("npm ci && npm run build", text: $viewModel.deploymentBuildCommand)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+                GridRow {
+                    Text("Restart").foregroundStyle(.secondary)
+                    TextField("systemctl restart app.service", text: $viewModel.deploymentRestartCommand)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+                GridRow {
+                    Text("Health Check").foregroundStyle(.secondary)
+                    TextField("curl -fsS http://127.0.0.1:3000/health", text: $viewModel.deploymentHealthCheckCommand)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.runDeployment(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        deploymentRunner: appState.deploymentRunner,
+                        repository: appState.repository
+                    )
+                } label: {
+                    if viewModel.isRunningDeployment {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Run Deployment", systemImage: "play.fill")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isRunningDeployment || viewModel.deploymentCommandPlan == nil)
+
+                Button {
+                    viewModel.cancelDeployment()
+                } label: {
+                    Label("Cancel", systemImage: "stop.fill")
+                }
+                .disabled(!viewModel.isRunningDeployment)
+            }
+        }
+        .onChange(of: viewModel.deploymentRepositoryURL) { _, _ in viewModel.refreshDeploymentPlan() }
+        .onChange(of: viewModel.deploymentBranch) { _, _ in viewModel.refreshDeploymentPlan() }
+        .onChange(of: viewModel.deploymentPath) { _, _ in viewModel.refreshDeploymentPlan() }
+        .onChange(of: viewModel.deploymentBuildCommand) { _, _ in viewModel.refreshDeploymentPlan() }
+        .onChange(of: viewModel.deploymentRestartCommand) { _, _ in viewModel.refreshDeploymentPlan() }
+        .onChange(of: viewModel.deploymentHealthCheckCommand) { _, _ in viewModel.refreshDeploymentPlan() }
+    }
+
+    private var deploymentCommandPreview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Command Preview")
+                    .font(.headline)
+                Spacer()
+                if let root = viewModel.deploymentCommandPlan?.allowedRoot {
+                    Text("Allowed root: \(root)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text(viewModel.deploymentCommandPlan?.commandPreview ?? "Save a valid deployment configuration to preview commands.")
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(12)
+                .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        }
+    }
+
+    private var deploymentRunHistory: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Runs")
+                .font(.headline)
+
+            if viewModel.deploymentRuns.isEmpty {
+                ContentUnavailableView(
+                    "No Runs Yet",
+                    systemImage: "clock",
+                    description: Text("Run a deployment to capture status, commits, and logs.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 160)
+            } else {
+                Picker("Run", selection: deploymentRunSelectionBinding) {
+                    ForEach(viewModel.deploymentRuns) { run in
+                        Text(deploymentRunTitle(run)).tag(Optional(run.id))
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 420, alignment: .leading)
+
+                if let run = viewModel.selectedDeploymentRun {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                        GridRow {
+                            Text("Status").foregroundStyle(.secondary)
+                            deploymentStatusBadge(run.status)
+                        }
+                        GridRow {
+                            Text("Started").foregroundStyle(.secondary)
+                            Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
+                        }
+                        if let finishedAt = run.finishedAt {
+                            GridRow {
+                                Text("Finished").foregroundStyle(.secondary)
+                                Text(finishedAt.formatted(date: .abbreviated, time: .shortened))
+                            }
+                        }
+                        if let previousCommit = run.previousCommit {
+                            GridRow {
+                                Text("Previous").foregroundStyle(.secondary)
+                                Text(previousCommit).font(.system(.body, design: .monospaced))
+                            }
+                        }
+                        if let targetCommit = run.targetCommit {
+                            GridRow {
+                                Text("Target").foregroundStyle(.secondary)
+                                Text(targetCommit).font(.system(.body, design: .monospaced))
+                            }
+                        }
+                        if let summary = run.summary {
+                            GridRow {
+                                Text("Summary").foregroundStyle(.secondary)
+                                Text(summary)
+                            }
+                        }
+                    }
+
+                    deploymentLogView
+                }
+            }
+        }
+    }
+
+    private var deploymentLogView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Logs")
+                .font(.subheadline.weight(.semibold))
+            if viewModel.deploymentLogs.isEmpty {
+                Text("No logs captured for this run.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(viewModel.deploymentLogs) { entry in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text(entry.stepName)
+                                .font(.caption.weight(.semibold))
+                            Text(entry.stream.rawValue)
+                                .font(.caption)
+                                .foregroundStyle(deploymentLogColor(entry.stream))
+                            Spacer()
+                            Text(entry.createdAt.formatted(date: .omitted, time: .standard))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(entry.message)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(10)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                }
             }
         }
     }
@@ -1839,10 +2138,80 @@ struct ServerWorkspaceView: View {
         return parts.joined(separator: " · ")
     }
 
+    private func deploymentRunTitle(_ run: DeploymentRun) -> String {
+        var parts = [
+            run.status.rawValue,
+            run.startedAt.formatted(date: .abbreviated, time: .shortened),
+        ]
+        if let targetCommit = run.targetCommit {
+            parts.append(targetCommit)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func deploymentStatusBadge(_ status: DeploymentRunStatus) -> some View {
+        Text(status.rawValue)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(deploymentStatusColor(status).opacity(0.16), in: Capsule())
+            .foregroundStyle(deploymentStatusColor(status))
+    }
+
+    private func deploymentStatusColor(_ status: DeploymentRunStatus) -> Color {
+        switch status {
+        case .pending:
+            .secondary
+        case .running:
+            .blue
+        case .succeeded:
+            .green
+        case .failed:
+            .red
+        case .cancelled:
+            .orange
+        }
+    }
+
+    private func deploymentLogColor(_ stream: DeploymentLogStream) -> Color {
+        switch stream {
+        case .stdout:
+            .green
+        case .stderr:
+            .orange
+        case .system:
+            .secondary
+        }
+    }
+
     private var currentServerBinding: Binding<UUID> {
         Binding(
             get: { appState.selectedServerId ?? profile.id },
             set: { appState.selectedServerId = $0 }
+        )
+    }
+
+    private var deploymentProjectSelectionBinding: Binding<UUID?> {
+        Binding(
+            get: { viewModel.selectedDeploymentProject?.id },
+            set: { projectId in
+                guard let projectId,
+                      let project = viewModel.deploymentProjects.first(where: { $0.id == projectId })
+                else { return }
+                viewModel.selectDeploymentProject(project, repository: appState.repository)
+            }
+        )
+    }
+
+    private var deploymentRunSelectionBinding: Binding<UUID?> {
+        Binding(
+            get: { viewModel.selectedDeploymentRun?.id },
+            set: { runId in
+                guard let runId,
+                      let run = viewModel.deploymentRuns.first(where: { $0.id == runId })
+                else { return }
+                viewModel.selectDeploymentRun(run, repository: appState.repository)
+            }
         )
     }
 

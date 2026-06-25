@@ -235,6 +235,60 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.commandHistory.map(\.command), ["df -h"])
     }
 
+    func testDeploymentProjectDraftSavesAndBuildsPreview() throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.startNewDeploymentProject(serverId: profile.id)
+        viewModel.deploymentName = "API"
+        viewModel.deploymentRepositoryURL = "git@gitlab.com:hhc/api.git"
+        viewModel.deploymentBranch = "release/2026.06"
+        viewModel.deploymentPath = "/srv/api"
+        viewModel.deploymentBuildCommand = "npm ci && npm run build"
+        viewModel.deploymentRestartCommand = "systemctl restart api.service"
+        viewModel.refreshDeploymentPlan()
+        viewModel.saveDeploymentProject(profile: profile, repository: repository)
+
+        XCTAssertNil(viewModel.deploymentErrorMessage)
+        XCTAssertEqual(viewModel.deploymentProjects.map(\.name), ["API"])
+        XCTAssertEqual(viewModel.selectedDeploymentProject?.deployPath, "/srv/api")
+        XCTAssertTrue(viewModel.deploymentCommandPlan?.commandPreview.contains("git reset --hard 'origin/release/2026.06'") == true)
+        XCTAssertTrue(viewModel.deploymentCommandPlan?.commandPreview.contains("systemctl restart api.service") == true)
+    }
+
+    func testRunDeploymentPersistsRunLogsFromWorkspace() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = DeploymentWorkspaceMockSSHClient()
+        let runner = DeploymentRunner(
+            repository: repository,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        viewModel.startNewDeploymentProject(serverId: profile.id)
+        viewModel.deploymentName = "API"
+        viewModel.deploymentRepositoryURL = "git@gitlab.com:hhc/api.git"
+        viewModel.deploymentBranch = "main"
+        viewModel.deploymentPath = "/srv/api"
+        viewModel.deploymentBuildCommand = "npm run build"
+
+        viewModel.runDeployment(
+            profile: profile,
+            sshClient: client,
+            deploymentRunner: runner,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isRunningDeployment == false && viewModel.selectedDeploymentRun != nil }
+
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.status, .succeeded)
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.previousCommit, "abc123")
+        XCTAssertEqual(viewModel.selectedDeploymentRun?.targetCommit, "def456")
+        XCTAssertTrue(viewModel.deploymentLogs.contains { $0.stepName == "finish" && $0.message == "Deployment completed." })
+        XCTAssertTrue(client.commands.contains { $0.contains("git reset --hard 'origin/main'") })
+    }
+
     func testCancelCommandStopsRunningStateAndShowsCancellationSummary() async throws {
         let profile = makeProfile()
         let client = SlowSSHClient()
@@ -1017,6 +1071,27 @@ private final class MockSSHClient: SSHClient, @unchecked Sendable {
             exitCode: 0,
             duration: 0
         )
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class DeploymentWorkspaceMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("if [ -d") && command.contains("git rev-parse HEAD") {
+            return CommandResult(command: command, stdout: "abc123\n", stderr: "", exitCode: 0, duration: 0.1)
+        }
+        if command.contains("git rev-parse HEAD") {
+            return CommandResult(command: command, stdout: "def456\n", stderr: "", exitCode: 0, duration: 0.1)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0.1)
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}

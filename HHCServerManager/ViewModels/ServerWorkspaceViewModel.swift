@@ -64,6 +64,24 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isLoadingCloudSecurityGroups = false
     @Published var isLoadingCloudSecurityGroupPolicies = false
     @Published var cloudSecurityGroupErrorMessage: String?
+    @Published var deploymentProjects: [DeploymentProject] = []
+    @Published var selectedDeploymentProject: DeploymentProject?
+    @Published var deploymentRuns: [DeploymentRun] = []
+    @Published var selectedDeploymentRun: DeploymentRun?
+    @Published var deploymentLogs: [DeploymentLogEntry] = []
+    @Published var deploymentName = ""
+    @Published var deploymentRepositoryURL = ""
+    @Published var deploymentBranch = "main"
+    @Published var deploymentPath = "/srv/app"
+    @Published var deploymentBuildCommand = ""
+    @Published var deploymentRestartCommand = ""
+    @Published var deploymentHealthCheckCommand = ""
+    @Published var deploymentCommandPlan: DeploymentCommandPlan?
+    @Published var isLoadingDeployments = false
+    @Published var isSavingDeploymentProject = false
+    @Published var isRunningDeployment = false
+    @Published var deploymentErrorMessage: String?
+    @Published var deploymentActionMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -72,6 +90,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var pendingHostKey: HostKeyInfo?
     private var pendingHostKeyAction: PendingHostKeyAction?
     private var commandTask: Task<Void, Never>?
+    private var deploymentTask: Task<Void, Never>?
     private var runningCommand: String?
     private var dashboardAutoRefreshTask: Task<Void, Never>?
     private var transferTask: Task<Void, Never>?
@@ -81,6 +100,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     deinit {
         dashboardAutoRefreshTask?.cancel()
         commandTask?.cancel()
+        deploymentTask?.cancel()
         transferTask?.cancel()
     }
 
@@ -1270,6 +1290,225 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.isLoadingCloudSecurityGroupPolicies = false
                 }
             }
+        }
+    }
+
+    func loadDeploymentProjects(profile: ServerProfile, repository: ServerRepository) {
+        isLoadingDeployments = true
+        deploymentErrorMessage = nil
+
+        do {
+            deploymentProjects = try repository.fetchDeploymentProjects(serverId: profile.id)
+            if let selected = selectedDeploymentProject,
+               let refreshed = deploymentProjects.first(where: { $0.id == selected.id }) {
+                selectDeploymentProject(refreshed, repository: repository)
+            } else if selectedDeploymentProject == nil {
+                resetDeploymentDraft(serverId: profile.id)
+                deploymentRuns = []
+                deploymentLogs = []
+                selectedDeploymentRun = nil
+            } else {
+                selectedDeploymentProject = nil
+                resetDeploymentDraft(serverId: profile.id)
+                deploymentRuns = []
+                deploymentLogs = []
+                selectedDeploymentRun = nil
+            }
+            isLoadingDeployments = false
+        } catch {
+            deploymentErrorMessage = error.localizedDescription
+            isLoadingDeployments = false
+        }
+    }
+
+    func startNewDeploymentProject(serverId: UUID) {
+        selectedDeploymentProject = nil
+        deploymentRuns = []
+        deploymentLogs = []
+        selectedDeploymentRun = nil
+        resetDeploymentDraft(serverId: serverId)
+        deploymentActionMessage = nil
+        deploymentErrorMessage = nil
+    }
+
+    func selectDeploymentProject(_ project: DeploymentProject, repository: ServerRepository) {
+        selectedDeploymentProject = project
+        deploymentName = project.name
+        deploymentRepositoryURL = project.repositoryURL
+        deploymentBranch = project.branch
+        deploymentPath = project.deployPath
+        deploymentBuildCommand = project.buildCommand ?? ""
+        deploymentRestartCommand = project.restartCommand ?? ""
+        deploymentHealthCheckCommand = project.healthCheckCommand ?? ""
+        refreshDeploymentPlan()
+
+        do {
+            deploymentRuns = try repository.fetchDeploymentRuns(projectId: project.id)
+            if let selected = selectedDeploymentRun,
+               let refreshed = deploymentRuns.first(where: { $0.id == selected.id }) {
+                selectDeploymentRun(refreshed, repository: repository)
+            } else {
+                selectedDeploymentRun = deploymentRuns.first
+                if let run = selectedDeploymentRun {
+                    deploymentLogs = try repository.fetchDeploymentLogs(runId: run.id)
+                } else {
+                    deploymentLogs = []
+                }
+            }
+        } catch {
+            deploymentErrorMessage = error.localizedDescription
+        }
+    }
+
+    func selectDeploymentRun(_ run: DeploymentRun, repository: ServerRepository) {
+        selectedDeploymentRun = run
+        do {
+            deploymentLogs = try repository.fetchDeploymentLogs(runId: run.id)
+        } catch {
+            deploymentErrorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshDeploymentPlan() {
+        do {
+            deploymentCommandPlan = try DeploymentCommandBuilder.buildPlan(for: draftDeploymentProject())
+            deploymentErrorMessage = nil
+        } catch {
+            deploymentCommandPlan = nil
+            deploymentErrorMessage = error.localizedDescription
+        }
+    }
+
+    func saveDeploymentProject(profile: ServerProfile, repository: ServerRepository) {
+        isSavingDeploymentProject = true
+        deploymentErrorMessage = nil
+        deploymentActionMessage = nil
+
+        do {
+            var project = draftDeploymentProject(serverId: profile.id)
+            project.updatedAt = Date()
+            try DeploymentCommandBuilder.validate(project: project)
+            try repository.upsertDeploymentProject(project)
+            deploymentProjects = try repository.fetchDeploymentProjects(serverId: profile.id)
+            selectedDeploymentProject = deploymentProjects.first { $0.id == project.id } ?? project
+            refreshDeploymentPlan()
+            deploymentRuns = try repository.fetchDeploymentRuns(projectId: project.id)
+            deploymentLogs = []
+            selectedDeploymentRun = deploymentRuns.first
+            deploymentActionMessage = "Deployment project saved."
+            isSavingDeploymentProject = false
+        } catch {
+            deploymentErrorMessage = error.localizedDescription
+            isSavingDeploymentProject = false
+        }
+    }
+
+    func deleteSelectedDeploymentProject(profile: ServerProfile, repository: ServerRepository) {
+        guard let project = selectedDeploymentProject else { return }
+        deploymentErrorMessage = nil
+        deploymentActionMessage = nil
+
+        do {
+            try repository.deleteDeploymentProject(id: project.id)
+            deploymentProjects = try repository.fetchDeploymentProjects(serverId: profile.id)
+            startNewDeploymentProject(serverId: profile.id)
+            deploymentActionMessage = "Deployment project deleted."
+        } catch {
+            deploymentErrorMessage = error.localizedDescription
+        }
+    }
+
+    func runDeployment(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        deploymentRunner: DeploymentRunner,
+        repository: ServerRepository
+    ) {
+        guard !isRunningDeployment else { return }
+        saveDeploymentProject(profile: profile, repository: repository)
+        guard let project = selectedDeploymentProject, deploymentErrorMessage == nil else { return }
+
+        isRunningDeployment = true
+        deploymentErrorMessage = nil
+        deploymentActionMessage = "Deployment started."
+
+        deploymentTask = Task {
+            do {
+                let run = try await deploymentRunner.run(project: project, profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.selectedDeploymentRun = run
+                    self.deploymentActionMessage = run.summary
+                    self.isRunningDeployment = false
+                    self.reloadDeploymentRunState(project: project, runId: run.id, repository: repository)
+                }
+            } catch {
+                await MainActor.run {
+                    self.deploymentErrorMessage = error.localizedDescription
+                    self.isRunningDeployment = false
+                    self.reloadDeploymentRunState(project: project, runId: nil, repository: repository)
+                }
+            }
+        }
+    }
+
+    func cancelDeployment() {
+        deploymentTask?.cancel()
+    }
+
+    private func resetDeploymentDraft(serverId: UUID) {
+        deploymentName = "Website"
+        deploymentRepositoryURL = "git@gitlab.com:team/project.git"
+        deploymentBranch = "main"
+        deploymentPath = "/srv/app"
+        deploymentBuildCommand = ""
+        deploymentRestartCommand = ""
+        deploymentHealthCheckCommand = ""
+        deploymentCommandPlan = try? DeploymentCommandBuilder.buildPlan(for: draftDeploymentProject(serverId: serverId))
+    }
+
+    private func draftDeploymentProject(serverId: UUID? = nil) -> DeploymentProject {
+        let now = Date()
+        return DeploymentProject(
+            id: selectedDeploymentProject?.id ?? UUID(),
+            serverId: serverId ?? selectedDeploymentProject?.serverId ?? UUID(),
+            name: optionalDeploymentText(deploymentName) ?? "Deployment",
+            repositoryURL: deploymentRepositoryURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            branch: deploymentBranch.trimmingCharacters(in: .whitespacesAndNewlines),
+            deployPath: deploymentPath.trimmingCharacters(in: .whitespacesAndNewlines),
+            buildCommand: optionalDeploymentText(deploymentBuildCommand),
+            restartCommand: optionalDeploymentText(deploymentRestartCommand),
+            healthCheckCommand: optionalDeploymentText(deploymentHealthCheckCommand),
+            webhookEnabled: selectedDeploymentProject?.webhookEnabled ?? false,
+            webhookSecretRef: selectedDeploymentProject?.webhookSecretRef,
+            createdAt: selectedDeploymentProject?.createdAt ?? now,
+            updatedAt: now
+        )
+    }
+
+    private func optionalDeploymentText(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func reloadDeploymentRunState(
+        project: DeploymentProject,
+        runId: UUID?,
+        repository: ServerRepository
+    ) {
+        do {
+            deploymentRuns = try repository.fetchDeploymentRuns(projectId: project.id)
+            if let runId {
+                selectedDeploymentRun = deploymentRuns.first { $0.id == runId } ?? deploymentRuns.first
+            } else {
+                selectedDeploymentRun = deploymentRuns.first
+            }
+            if let run = selectedDeploymentRun {
+                deploymentLogs = try repository.fetchDeploymentLogs(runId: run.id)
+            } else {
+                deploymentLogs = []
+            }
+        } catch {
+            deploymentErrorMessage = error.localizedDescription
         }
     }
 
