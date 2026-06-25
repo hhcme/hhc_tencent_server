@@ -2800,7 +2800,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 localURL: localURL,
                 toDirectoryPath: directoryPath,
                 profile: profile,
-                transferClient: transferClient
+                transferClient: transferClient,
+                progressHandler: { progress in
+                    Task { @MainActor in
+                        self.updateRemoteFileTransferJob(
+                            jobId,
+                            progress: progress,
+                            profile: profile,
+                            repository: repository
+                        )
+                    }
+                }
             )
             let listing = try await remoteFileService.listDirectory(
                 path: self.remoteFilePath,
@@ -2855,7 +2865,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 entry: entry,
                 to: localURL,
                 profile: profile,
-                transferClient: transferClient
+                transferClient: transferClient,
+                progressHandler: { progress in
+                    Task { @MainActor in
+                        self.updateRemoteFileTransferJob(
+                            jobId,
+                            progress: progress,
+                            profile: profile,
+                            repository: repository
+                        )
+                    }
+                }
             )
             await MainActor.run {
                 self.remoteFileActionMessage = "Downloaded \(entry.name) to \(result.localPath)."
@@ -2886,7 +2906,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     private func markRemoteFileTransferJobRunning(_ id: UUID) {
         guard let index = remoteFileTransferJobs.firstIndex(where: { $0.id == id }) else { return }
         remoteFileTransferJobs[index].status = .running
-        remoteFileTransferJobs[index].progressFraction = nil
+        remoteFileTransferJobs[index].progressFraction = 0
         remoteFileTransferJobs[index].startedAt = Date()
     }
 
@@ -2909,6 +2929,38 @@ final class ServerWorkspaceViewModel: ObservableObject {
         remoteFileTransferJobs[index].progressFraction = status == .succeeded ? 1 : remoteFileTransferJobs[index].progressFraction
         remoteFileTransferJobs[index].message = message
         remoteFileTransferJobs[index].finishedAt = Date()
+    }
+
+    private func updateRemoteFileTransferJob(
+        _ id: UUID,
+        progress: RemoteFileTransferProgress,
+        profile: ServerProfile,
+        repository: ServerRepository?
+    ) {
+        guard let index = remoteFileTransferJobs.firstIndex(where: { $0.id == id }) else { return }
+        guard remoteFileTransferJobs[index].status == .running else { return }
+        if let totalBytes = progress.totalBytes {
+            remoteFileTransferJobs[index].byteCount = totalBytes
+        }
+        if let fraction = progress.fraction {
+            remoteFileTransferJobs[index].progressFraction = fraction
+        } else if let completed = progress.completedBytes,
+                  let total = progress.totalBytes,
+                  total > 0 {
+            remoteFileTransferJobs[index].progressFraction = min(max(Double(completed) / Double(total), 0), 1)
+        }
+        remoteFileTransferJobs[index].message = Self.remoteFileTransferProgressMessage(progress)
+        persistRemoteFileTransferJob(id, profile: profile, repository: repository)
+    }
+
+    private static func remoteFileTransferProgressMessage(_ progress: RemoteFileTransferProgress) -> String? {
+        guard let completed = progress.completedBytes else {
+            return nil
+        }
+        if let total = progress.totalBytes, total > 0 {
+            return "Transferred \(completed) of \(total) bytes."
+        }
+        return "Transferred \(completed) bytes."
     }
 
     private func persistRemoteFileTransferJob(_ id: UUID, profile: ServerProfile, repository: ServerRepository?) {

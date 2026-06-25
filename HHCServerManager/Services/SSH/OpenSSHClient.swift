@@ -75,23 +75,35 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         )
     }
 
-    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func uploadFile(
+        localURL: URL,
+        remotePath: String,
+        profile: ServerProfile,
+        progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?
+    ) async throws -> RemoteFileTransferResult {
         try await transferFile(
             source: localURL.path,
             destination: "\(profile.username)@\(profile.host):\(Self.scpRemoteQuote(remotePath))",
             remotePath: remotePath,
             localURL: localURL,
-            profile: profile
+            profile: profile,
+            progressHandler: progressHandler
         )
     }
 
-    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func downloadFile(
+        remotePath: String,
+        localURL: URL,
+        profile: ServerProfile,
+        progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?
+    ) async throws -> RemoteFileTransferResult {
         try await transferFile(
             source: "\(profile.username)@\(profile.host):\(Self.scpRemoteQuote(remotePath))",
             destination: localURL.path,
             remotePath: remotePath,
             localURL: localURL,
-            profile: profile
+            profile: profile,
+            progressHandler: progressHandler
         )
     }
 
@@ -105,7 +117,8 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         destination: String,
         remotePath: String,
         localURL: URL,
-        profile: ServerProfile
+        profile: ServerProfile,
+        progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?
     ) async throws -> RemoteFileTransferResult {
         try await ensureHostKeyTrusted(profile: profile)
         try rebuildKnownHostsFile()
@@ -116,6 +129,8 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         }
 
         let start = Date()
+        let initialByteCount = (try? fileManager.attributesOfItem(atPath: localURL.path)[.size]) as? Int64
+        progressHandler?(RemoteFileTransferProgress(completedBytes: 0, totalBytes: initialByteCount, fraction: 0))
         var arguments = authContext.arguments
         arguments.append(contentsOf: [source, destination])
         let processResult = try await runProcess("/usr/bin/scp", arguments: arguments, environment: authContext.environment)
@@ -125,6 +140,7 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         }
 
         let byteCount = (try? fileManager.attributesOfItem(atPath: localURL.path)[.size]) as? Int64
+        progressHandler?(RemoteFileTransferProgress(completedBytes: byteCount, totalBytes: byteCount ?? initialByteCount, fraction: 1))
         return RemoteFileTransferResult(
             remotePath: remotePath,
             localPath: localURL.path,

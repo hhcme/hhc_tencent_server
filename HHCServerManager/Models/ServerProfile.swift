@@ -406,6 +406,22 @@ struct RemoteFileTransferResult: Equatable, Hashable, Sendable {
     var duration: TimeInterval
 }
 
+struct RemoteFileTransferProgress: Equatable, Hashable, Sendable {
+    var completedBytes: Int64?
+    var totalBytes: Int64?
+    var fraction: Double?
+
+    init(completedBytes: Int64? = nil, totalBytes: Int64? = nil, fraction: Double? = nil) {
+        self.completedBytes = completedBytes
+        self.totalBytes = totalBytes
+        self.fraction = fraction.map(Self.clampedFraction)
+    }
+
+    private static func clampedFraction(_ value: Double) -> Double {
+        min(max(value, 0), 1)
+    }
+}
+
 enum RemoteFileTransferDirection: String, Equatable, Hashable, Sendable {
     case upload
     case download

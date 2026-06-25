@@ -116,6 +116,7 @@ All notable changes to this project will be documented in this file.
 - Added Huawei Cloud ECS start/stop/reboot actions with provider-aware `SHUTOFF`/`ACTIVE` status gating, soft stop/reboot requests, local transition cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Dashboard snapshot persistence so successful refreshes are cached in SQLite and restored when reopening a server workspace.
 - Persisted remote file transfer history with progress state restoration in the macOS workspace.
+- Added remote file transfer progress callbacks with persisted running progress updates.
 - Added limited Firewall rule add/delete actions with validation, risk confirmation, refreshed snapshots, and remote change audit logs.
 - Added Tencent Cloud security group single-rule add/remove actions with provider capability gating, risk confirmation, refreshed policy snapshots, RequestId capture, and remote change audit logs.
 - Added Alibaba Cloud security group single-rule add/remove actions for ingress and egress CIDR rules with provider capability gating, signed ECS API fixtures, RequestId capture, and the shared risk confirmation/audit flow.
@@ -229,6 +230,7 @@ All notable changes to this project will be documented in this file.
 - 添加阿里云 ECS 实例启动/停止/重启操作，包含 `Stopped` / `Running` 状态门禁、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。
 - 添加 Dashboard 快照持久化，成功刷新会缓存到 SQLite，重新打开服务器工作台时恢复最近快照。
 - 添加远程文件传输历史持久化，macOS 工作台可恢复最近传输记录和进度状态。
+- 添加远程文件传输进度回调，运行中进度可更新 UI 并持久化。
 - 添加受限防火墙规则新增/删除动作，包含输入校验、风险确认、规则快照刷新和远程变更审计日志。
 - 添加腾讯云安全组单条规则新增/删除动作，包含 provider capability 门禁、风险确认、规则快照刷新、RequestId 捕获和远程变更审计日志。
 - 添加阿里云安全组单条 ingress/egress CIDR 规则新增/删除动作，包含 provider capability 门禁、ECS 签名请求 fixture、RequestId 捕获和统一风险确认/审计流程。

@@ -1063,6 +1063,38 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.remoteFileErrorMessage)
     }
 
+    func testRemoteFileTransferProgressUpdatesRunningJobAndPersistence() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = SlowRemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.uploadRemoteFile(
+            localURL: URL(fileURLWithPath: "/tmp/large.log"),
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service,
+            repository: repository
+        )
+        try await waitUntil { viewModel.remoteFileTransferJobs.first?.progressFraction == 0.5 }
+
+        let runningJob = try XCTUnwrap(viewModel.remoteFileTransferJobs.first)
+        XCTAssertEqual(runningJob.status, .running)
+        XCTAssertEqual(runningJob.byteCount, 1_024)
+        XCTAssertEqual(runningJob.message, "Transferred 512 of 1024 bytes.")
+
+        let persisted = try XCTUnwrap(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).first)
+        XCTAssertEqual(persisted.status, .running)
+        XCTAssertEqual(persisted.progressFraction, 0.5)
+        XCTAssertEqual(persisted.byteCount, 1_024)
+        XCTAssertEqual(persisted.message, "Transferred 512 of 1024 bytes.")
+
+        viewModel.cancelRemoteFileTransfer()
+        try await waitUntil { viewModel.remoteFileTransferJobs.first?.status == .cancelled }
+    }
+
     func testRemoteFileTransfersRunSeriallyWithPendingQueueState() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
@@ -1141,7 +1173,12 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         viewModel.cancelPendingRemoteFileTransfers()
 
         XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.status), [.cancelled, .running])
-        XCTAssertEqual(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).map(\.status), [.running, .cancelled])
+        let persistedStatusesByPath = Dictionary(
+            uniqueKeysWithValues: try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+                .map { ($0.localPath, $0.status) }
+        )
+        XCTAssertEqual(persistedStatusesByPath["/tmp/running.env"], .running)
+        XCTAssertEqual(persistedStatusesByPath["/tmp/pending.env"], .cancelled)
         XCTAssertTrue(viewModel.isTransferringRemoteFile)
         try await waitUntil { viewModel.remoteFileTransferJobs.last?.status == .succeeded }
         XCTAssertEqual(client.uploads.map(\.remotePath), ["~/running.env"])
@@ -2326,10 +2363,12 @@ private final class RemoteFileTransferMockSSHClient: SSHClient, RemoteFileTransf
         return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
     }
 
-    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
+        progressHandler?(RemoteFileTransferProgress(completedBytes: 0, totalBytes: 8, fraction: 0))
         uploads.append((localURL, remotePath))
         remoteNames.append(localURL.lastPathComponent)
         remoteNames.sort()
+        progressHandler?(RemoteFileTransferProgress(completedBytes: 8, totalBytes: 8, fraction: 1))
         return RemoteFileTransferResult(
             remotePath: remotePath,
             localPath: localURL.path,
@@ -2338,8 +2377,9 @@ private final class RemoteFileTransferMockSSHClient: SSHClient, RemoteFileTransf
         )
     }
 
-    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
         downloads.append((remotePath, localURL))
+        progressHandler?(RemoteFileTransferProgress(completedBytes: 8, totalBytes: 8, fraction: 1))
         return RemoteFileTransferResult(
             remotePath: remotePath,
             localPath: localURL.path,
@@ -2360,22 +2400,24 @@ private final class SlowRemoteFileTransferMockSSHClient: SSHClient, RemoteFileTr
         CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
     }
 
-    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
+        progressHandler?(RemoteFileTransferProgress(completedBytes: 512, totalBytes: 1_024, fraction: 0.5))
         try await Task.sleep(nanoseconds: 5_000_000_000)
         return RemoteFileTransferResult(
             remotePath: remotePath,
             localPath: localURL.path,
-            byteCount: nil,
+            byteCount: 1_024,
             duration: 5
         )
     }
 
-    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
+        progressHandler?(RemoteFileTransferProgress(completedBytes: 512, totalBytes: 1_024, fraction: 0.5))
         try await Task.sleep(nanoseconds: 5_000_000_000)
         return RemoteFileTransferResult(
             remotePath: remotePath,
             localPath: localURL.path,
-            byteCount: nil,
+            byteCount: 1_024,
             duration: 5
         )
     }
@@ -2402,7 +2444,7 @@ private final class QueuedRemoteFileTransferMockSSHClient: SSHClient, RemoteFile
         return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
     }
 
-    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
         try await Task.sleep(nanoseconds: 50_000_000)
         uploads.append((localURL, remotePath))
         remoteNames.append(localURL.lastPathComponent)
@@ -2414,7 +2456,7 @@ private final class QueuedRemoteFileTransferMockSSHClient: SSHClient, RemoteFile
         )
     }
 
-    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
         RemoteFileTransferResult(
             remotePath: remotePath,
             localPath: localURL.path,

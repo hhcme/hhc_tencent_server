@@ -4907,26 +4907,38 @@ final class RemoteFileService: @unchecked Sendable {
         localURL: URL,
         toDirectoryPath directoryPath: String,
         profile: ServerProfile,
-        transferClient: RemoteFileTransferClient
+        transferClient: RemoteFileTransferClient,
+        progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)? = nil
     ) async throws -> RemoteFileTransferResult {
         let fileName = Self.validatedFileName(localURL.lastPathComponent)
         guard !fileName.isEmpty else {
             throw SSHClientError.processFailed("Local file name cannot be empty, '.', '..', or contain '/'.")
         }
         let remotePath = Self.joinedPath(basePath: Self.normalizedDirectoryPath(directoryPath), name: fileName)
-        return try await transferClient.uploadFile(localURL: localURL, remotePath: remotePath, profile: profile)
+        return try await transferClient.uploadFile(
+            localURL: localURL,
+            remotePath: remotePath,
+            profile: profile,
+            progressHandler: progressHandler
+        )
     }
 
     func downloadFile(
         entry: RemoteFileEntry,
         to localURL: URL,
         profile: ServerProfile,
-        transferClient: RemoteFileTransferClient
+        transferClient: RemoteFileTransferClient,
+        progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)? = nil
     ) async throws -> RemoteFileTransferResult {
         guard entry.kind == .file else {
             throw SSHClientError.processFailed("Only regular files can be downloaded.")
         }
-        return try await transferClient.downloadFile(remotePath: entry.path, localURL: localURL, profile: profile)
+        return try await transferClient.downloadFile(
+            remotePath: entry.path,
+            localURL: localURL,
+            profile: profile,
+            progressHandler: progressHandler
+        )
     }
 
     static func parentPath(for path: String) -> String {

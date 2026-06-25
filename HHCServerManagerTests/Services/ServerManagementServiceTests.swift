@@ -6131,7 +6131,7 @@ private final class RecordingTransferClient: RemoteFileTransferClient, @unchecke
     private(set) var uploads: [(localURL: URL, remotePath: String)] = []
     private(set) var downloads: [(remotePath: String, localURL: URL)] = []
 
-    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
         uploads.append((localURL, remotePath))
         return RemoteFileTransferResult(
             remotePath: remotePath,
@@ -6141,7 +6141,7 @@ private final class RecordingTransferClient: RemoteFileTransferClient, @unchecke
         )
     }
 
-    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile) async throws -> RemoteFileTransferResult {
+    func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
         downloads.append((remotePath, localURL))
         return RemoteFileTransferResult(
             remotePath: remotePath,
