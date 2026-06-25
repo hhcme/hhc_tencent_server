@@ -48,6 +48,8 @@ final class KeychainService: ServerCredentialStore, @unchecked Sendable {
         try save(data, account: "ssh_private_key_\(keychainRef)")
         if let passphrase, !passphrase.isEmpty {
             try save(Data(passphrase.utf8), account: "ssh_private_key_passphrase_\(keychainRef)")
+        } else {
+            delete(account: "ssh_private_key_passphrase_\(keychainRef)")
         }
     }
 

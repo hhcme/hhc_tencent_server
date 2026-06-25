@@ -428,17 +428,18 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 
 ### Task 3: KeychainService
 
-- [ ] 实现 password/private key/passphrase 的 save/read/delete。
-- [ ] 支持自定义 service name，方便测试隔离。
-- [ ] 所有 Keychain 操作返回明确错误类型。
-- [ ] 写单元测试，使用测试专用 service name。
+- [x] 实现 password/private key/passphrase 的 save/read/delete：`KeychainService` 分账号保存密码、私钥、私钥口令，并在私钥口令为空时清理旧口令。
+- [x] 支持自定义 service name，方便测试隔离：`KeychainService(serviceName:)` 支持测试专用 service name。
+- [x] 所有 Keychain 操作返回明确错误类型：读取缺失项返回 `nil`，非预期 Security status 抛出 `KeychainError.unexpectedStatus`。
+- [x] 写单元测试，使用测试专用 service name：`KeychainServiceTests` 每个测试使用 UUID service name 并在 tearDown 清理凭据。
 
 验收：
 
-- [ ] 保存、读取、覆盖、删除 password 成功。
-- [ ] 保存、读取、删除 private key data 成功。
-- [ ] 删除不存在项不视为失败。
-- [ ] 测试结束清理 Keychain 项。
+- [x] 保存、读取、覆盖、删除 password 成功。
+- [x] 保存、读取、删除 private key data 成功。
+- [x] 保存、读取、清空、删除 private key passphrase 成功。
+- [x] 删除不存在项不视为失败。
+- [x] 测试结束清理 Keychain 项。
 
 ### Task 4: ServerManagementService
 

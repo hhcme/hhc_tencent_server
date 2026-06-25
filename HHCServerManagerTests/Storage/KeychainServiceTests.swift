@@ -33,10 +33,17 @@ final class KeychainServiceTests: XCTestCase {
         let keyData = Data("private-key-data".utf8)
         try service.savePrivateKey(keyData, passphrase: "phrase", keychainRef: keychainRef)
         XCTAssertEqual(try service.readPrivateKey(keychainRef: keychainRef), keyData)
+        XCTAssertEqual(try service.readPrivateKeyPassphrase(keychainRef: keychainRef), "phrase")
+
+        let updatedKeyData = Data("updated-private-key-data".utf8)
+        try service.savePrivateKey(updatedKeyData, passphrase: nil, keychainRef: keychainRef)
+        XCTAssertEqual(try service.readPrivateKey(keychainRef: keychainRef), updatedKeyData)
+        XCTAssertNil(try service.readPrivateKeyPassphrase(keychainRef: keychainRef))
 
         service.deleteCredentials(keychainRef: keychainRef)
         service.deleteCredentials(keychainRef: keychainRef)
         XCTAssertNil(try service.readPrivateKey(keychainRef: keychainRef))
+        XCTAssertNil(try service.readPrivateKeyPassphrase(keychainRef: keychainRef))
     }
 
     func testCloudCredentialRoundTripOverwriteAndDelete() throws {
