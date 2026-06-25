@@ -443,8 +443,8 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 ### Task 4: ServerManagementService
 
 - [ ] 定义 `CredentialInput`。
-- [ ] 实现 add/update/delete server 的编排。
-- [x] DB 写入失败时清理 Keychain：`ServerManagementServiceTests.testCreateServerRemovesNewCredentialWhenDatabaseWriteFails` 用固定 server UUID 和真实 SQLite 失败路径验证新写入凭据会被删除。
+- [x] 实现 add/update/delete server 的编排：`ServerManagementService` 统一处理创建、更新、删除和凭据生命周期，测试覆盖 keep/replace credential、删除 DB/HostKey/Keychain，以及 `AppState` 删除选中服务器状态清理。
+- [x] DB 写入失败时清理/回滚 Keychain：`ServerManagementServiceTests.testCreateServerRemovesNewCredentialWhenDatabaseWriteFails` 验证创建失败清理新凭据，`testUpdateServerRestoresOriginalCredentialWhenDatabaseWriteFails` 验证更新失败恢复旧凭据。
 - [x] Keychain 写入失败时不落库：`ServerManagementServiceTests.testCreateServerDoesNotPersistProfileWhenKeychainWriteFails` 通过失败的 `ServerCredentialStore` 验证 repository 仍为空。
 - [x] 写单元测试覆盖失败补偿：已覆盖 SQLite 写入失败后的 Keychain 清理，以及 Keychain 写入失败后的不落库行为。
 

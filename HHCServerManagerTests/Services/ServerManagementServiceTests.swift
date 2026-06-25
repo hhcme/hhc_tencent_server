@@ -181,6 +181,37 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(try harness.keychain.readPassword(keychainRef: profile.keychainRef), "new")
     }
 
+    func testUpdateServerRestoresOriginalCredentialWhenDatabaseWriteFails() throws {
+        let database = try AppDatabase.inMemory()
+        let repository = ServerRepository(database: database)
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManager.tests.update-db-failure.\(UUID().uuidString)")
+        let service = ServerManagementService(repository: repository, keychain: keychain)
+        let profile = try service.createServer(
+            name: "Tencent",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("original")
+        )
+        defer { keychain.deleteCredentials(keychainRef: profile.keychainRef) }
+
+        try database.execute("DROP TABLE server_profiles")
+
+        XCTAssertThrowsError(try service.updateServer(
+            profile,
+            name: "Renamed",
+            host: "new.example",
+            port: 2222,
+            username: "ubuntu",
+            groupName: nil,
+            authType: .password,
+            credentialUpdate: .replace(.password("new"))
+        ))
+        XCTAssertEqual(try keychain.readPassword(keychainRef: profile.keychainRef), "original")
+    }
+
     func testCloudAccountServiceCreatesUpdatesAndDeletesAccountWithCredential() throws {
         let harness = try Harness()
         let account = try harness.cloudAccountService.createAccount(
@@ -5461,6 +5492,10 @@ private final class FailingServerCredentialStore: ServerCredentialStore, @unchec
     }
 
     func readPrivateKey(keychainRef: String) throws -> Data? {
+        nil
+    }
+
+    func readPrivateKeyPassphrase(keychainRef: String) throws -> String? {
         nil
     }
 

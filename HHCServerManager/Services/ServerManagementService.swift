@@ -73,13 +73,10 @@ final class ServerManagementService: @unchecked Sendable {
         authType: SSHAuthType,
         credentialUpdate: CredentialUpdate
     ) throws -> ServerProfile {
+        let originalCredential = try existingCredential(for: existing)
+
         if case let .replace(credential) = credentialUpdate {
-            switch credential {
-            case let .password(password):
-                try keychain.savePassword(password, keychainRef: existing.keychainRef)
-            case let .privateKey(data, passphrase):
-                try keychain.savePrivateKey(data, passphrase: passphrase, keychainRef: existing.keychainRef)
-            }
+            try saveCredential(credential, keychainRef: existing.keychainRef)
         }
 
         let updated = ServerProfile(
@@ -94,8 +91,45 @@ final class ServerManagementService: @unchecked Sendable {
             createdAt: existing.createdAt,
             updatedAt: Date()
         )
-        try repository.upsert(updated)
-        return updated
+        do {
+            try repository.upsert(updated)
+            return updated
+        } catch {
+            if credentialUpdate != .keepExisting {
+                restoreCredential(originalCredential, keychainRef: existing.keychainRef)
+            }
+            throw error
+        }
+    }
+
+    private func saveCredential(_ credential: CredentialInput, keychainRef: String) throws {
+        switch credential {
+        case let .password(password):
+            try keychain.savePassword(password, keychainRef: keychainRef)
+        case let .privateKey(data, passphrase):
+            try keychain.savePrivateKey(data, passphrase: passphrase, keychainRef: keychainRef)
+        }
+    }
+
+    private func existingCredential(for profile: ServerProfile) throws -> CredentialInput? {
+        switch profile.authType {
+        case .password:
+            return try keychain.readPassword(keychainRef: profile.keychainRef).map(CredentialInput.password)
+        case .privateKey:
+            guard let data = try keychain.readPrivateKey(keychainRef: profile.keychainRef) else {
+                return nil
+            }
+            let passphrase = try keychain.readPrivateKeyPassphrase(keychainRef: profile.keychainRef)
+            return .privateKey(data: data, passphrase: passphrase)
+        }
+    }
+
+    private func restoreCredential(_ credential: CredentialInput?, keychainRef: String) {
+        guard let credential else {
+            keychain.deleteCredentials(keychainRef: keychainRef)
+            return
+        }
+        try? saveCredential(credential, keychainRef: keychainRef)
     }
 
     func configureDeploymentWebhook(

@@ -20,6 +20,7 @@ protocol ServerCredentialStore: Sendable {
     func readPassword(keychainRef: String) throws -> String?
     func savePrivateKey(_ data: Data, passphrase: String?, keychainRef: String) throws
     func readPrivateKey(keychainRef: String) throws -> Data?
+    func readPrivateKeyPassphrase(keychainRef: String) throws -> String?
     func deleteCredentials(keychainRef: String)
     func saveWebhookSecret(_ secret: String, keychainRef: String) throws
     func readWebhookSecret(keychainRef: String) throws -> String?
@@ -52,6 +53,11 @@ final class KeychainService: ServerCredentialStore, @unchecked Sendable {
 
     func readPrivateKey(keychainRef: String) throws -> Data? {
         try readData(account: "ssh_private_key_\(keychainRef)")
+    }
+
+    func readPrivateKeyPassphrase(keychainRef: String) throws -> String? {
+        guard let data = try readData(account: "ssh_private_key_passphrase_\(keychainRef)") else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     func deleteCredentials(keychainRef: String) {
