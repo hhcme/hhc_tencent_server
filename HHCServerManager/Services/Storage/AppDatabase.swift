@@ -176,6 +176,25 @@ final class AppDatabase: @unchecked Sendable {
             ON dashboard_snapshots(server_id, captured_at DESC)
         """)
         try execute("""
+            CREATE TABLE IF NOT EXISTS remote_file_transfers (
+                id TEXT PRIMARY KEY NOT NULL,
+                server_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
+                direction TEXT NOT NULL,
+                remote_path TEXT NOT NULL,
+                local_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                byte_count INTEGER,
+                progress_fraction REAL,
+                message TEXT,
+                started_at TEXT NOT NULL,
+                finished_at TEXT
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_remote_file_transfers_server_started_at
+            ON remote_file_transfers(server_id, started_at DESC)
+        """)
+        try execute("""
             CREATE TABLE IF NOT EXISTS operation_logs (
                 id TEXT PRIMARY KEY NOT NULL,
                 scope TEXT NOT NULL,

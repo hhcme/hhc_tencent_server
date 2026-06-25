@@ -149,6 +149,52 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertNil(try repository.fetchLatestDashboardSnapshot(serverId: server.id))
     }
 
+    func testRemoteFileTransferJobsPersistOrderAndCascadeWithServer() throws {
+        let repository = try makeRepository()
+        let server = makeServer()
+        try repository.upsert(server)
+
+        let older = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .upload,
+            remotePath: "/var/www/older.env",
+            localPath: "/tmp/older.env",
+            status: .failed,
+            byteCount: nil,
+            progressFraction: nil,
+            message: "permission denied",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_001)
+        )
+        var newer = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .download,
+            remotePath: "/var/www/app.env",
+            localPath: "/tmp/app.env",
+            status: .running,
+            byteCount: nil,
+            progressFraction: nil,
+            message: nil,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_010),
+            finishedAt: nil
+        )
+
+        try repository.upsertRemoteFileTransferJob(older, serverId: server.id)
+        try repository.upsertRemoteFileTransferJob(newer, serverId: server.id)
+        newer.status = .succeeded
+        newer.byteCount = 1_024
+        newer.progressFraction = 1
+        newer.message = "Downloaded app.env to /tmp/app.env."
+        newer.finishedAt = Date(timeIntervalSince1970: 1_700_000_012)
+        try repository.upsertRemoteFileTransferJob(newer, serverId: server.id)
+
+        let jobs = try repository.fetchRemoteFileTransferJobs(serverId: server.id)
+        XCTAssertEqual(jobs, [newer, older])
+
+        try repository.deleteServer(id: server.id)
+        XCTAssertTrue(try repository.fetchRemoteFileTransferJobs(serverId: server.id).isEmpty)
+    }
+
     func testOperationLogsPersistInReverseChronologicalOrder() throws {
         let repository = try makeRepository()
         try repository.saveOperationLog(OperationLogEntry(

@@ -98,6 +98,7 @@ All notable changes to this project will be documented in this file.
 - Added Tencent Cloud CBS disk attach/detach actions with status gating, risk confirmation, local transition cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Tencent Cloud CVM start/stop/reboot actions with status gating, risk confirmation, local transition cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Dashboard snapshot persistence so successful refreshes are cached in SQLite and restored when reopening a server workspace.
+- Persisted remote file transfer history with progress state restoration in the macOS workspace.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -191,3 +192,4 @@ All notable changes to this project will be documented in this file.
 - 添加腾讯云 CBS 云盘挂载/卸载操作，包含状态门禁、风险确认、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。
 - 添加腾讯云 CVM 实例启动/停止/重启操作，包含状态门禁、风险确认、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。
 - 添加 Dashboard 快照持久化，成功刷新会缓存到 SQLite，重新打开服务器工作台时恢复最近快照。
+- 添加远程文件传输历史持久化，macOS 工作台可恢复最近传输记录和进度状态。

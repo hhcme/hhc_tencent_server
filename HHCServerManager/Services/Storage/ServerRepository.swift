@@ -153,6 +153,53 @@ final class ServerRepository: @unchecked Sendable {
         }.first
     }
 
+    func upsertRemoteFileTransferJob(_ job: RemoteFileTransferJob, serverId: UUID) throws {
+        try database.execute("""
+            INSERT INTO remote_file_transfers (
+                id, server_id, direction, remote_path, local_path, status, byte_count,
+                progress_fraction, message, started_at, finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                direction = excluded.direction,
+                remote_path = excluded.remote_path,
+                local_path = excluded.local_path,
+                status = excluded.status,
+                byte_count = excluded.byte_count,
+                progress_fraction = excluded.progress_fraction,
+                message = excluded.message,
+                started_at = excluded.started_at,
+                finished_at = excluded.finished_at
+        """, bindings: [
+            .text(job.id.uuidString),
+            .text(serverId.uuidString),
+            .text(job.direction.rawValue),
+            .text(job.remotePath),
+            .text(job.localPath),
+            .text(job.status.rawValue),
+            job.byteCount.map { .int(Int($0)) } ?? .null,
+            job.progressFraction.map(SQLiteValue.double) ?? .null,
+            job.message.map(SQLiteValue.text) ?? .null,
+            .text(AppDatabase.string(from: job.startedAt)),
+            job.finishedAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+        ])
+    }
+
+    func fetchRemoteFileTransferJobs(serverId: UUID, limit: Int = 20) throws -> [RemoteFileTransferJob] {
+        try database.query("""
+            SELECT id, direction, remote_path, local_path, status, byte_count,
+                   progress_fraction, message, started_at, finished_at
+            FROM remote_file_transfers
+            WHERE server_id = ?
+            ORDER BY started_at DESC
+            LIMIT ?
+        """, bindings: [
+            .text(serverId.uuidString),
+            .int(max(1, limit)),
+        ]) { statement in
+            try Self.mapRemoteFileTransferJob(statement)
+        }
+    }
+
     func saveOperationLog(_ entry: OperationLogEntry) throws {
         try database.execute("""
             INSERT INTO operation_logs (
@@ -868,6 +915,21 @@ final class ServerRepository: @unchecked Sendable {
         )
     }
 
+    private static func mapRemoteFileTransferJob(_ statement: OpaquePointer) throws -> RemoteFileTransferJob {
+        RemoteFileTransferJob(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            direction: RemoteFileTransferDirection(rawValue: string(statement, 1)) ?? .upload,
+            remotePath: string(statement, 2),
+            localPath: string(statement, 3),
+            status: RemoteFileTransferStatus(rawValue: string(statement, 4)) ?? .failed,
+            byteCount: optionalInt64(statement, 5),
+            progressFraction: optionalDouble(statement, 6),
+            message: optionalString(statement, 7),
+            startedAt: date(statement, 8),
+            finishedAt: optionalDate(statement, 9)
+        )
+    }
+
     private static func mapRemoteChangeLogEntry(_ statement: OpaquePointer) throws -> RemoteChangeLogEntry {
         RemoteChangeLogEntry(
             id: UUID(uuidString: string(statement, 0)) ?? UUID(),
@@ -1080,6 +1142,11 @@ final class ServerRepository: @unchecked Sendable {
     private static func optionalInt(_ statement: OpaquePointer, _ index: Int32) -> Int? {
         guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
         return Int(sqlite3_column_int(statement, index))
+    }
+
+    private static func optionalDouble(_ statement: OpaquePointer, _ index: Int32) -> Double? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return sqlite3_column_double(statement, index)
     }
 
     private static func optionalDuration(_ statement: OpaquePointer, _ index: Int32) -> TimeInterval? {

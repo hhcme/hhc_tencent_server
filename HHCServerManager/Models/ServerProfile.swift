@@ -361,6 +361,7 @@ struct RemoteFileTransferJob: Identifiable, Equatable, Hashable, Sendable {
     var localPath: String
     var status: RemoteFileTransferStatus
     var byteCount: Int64?
+    var progressFraction: Double?
     var message: String?
     var startedAt: Date
     var finishedAt: Date?

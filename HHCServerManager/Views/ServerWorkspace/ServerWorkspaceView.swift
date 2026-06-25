@@ -311,6 +311,7 @@ struct ServerWorkspaceView: View {
             viewModel.configure(initialState: appState.connectionState(for: profile))
             viewModel.loadCommandHistory(profile: profile, repository: appState.repository)
             viewModel.loadCachedDashboardSnapshot(profile: profile, repository: appState.repository)
+            viewModel.loadRemoteFileTransferHistory(profile: profile, repository: appState.repository)
         }
         .onDisappear {
             viewModel.stopDashboardAutoRefresh()
@@ -2718,7 +2719,8 @@ struct ServerWorkspaceView: View {
                 profile: profile,
                 sshClient: appState.sshClient,
                 transferClient: appState.sshClient,
-                remoteFileService: appState.remoteFileService
+                remoteFileService: appState.remoteFileService,
+                repository: appState.repository
             )
         }
     }
@@ -2734,7 +2736,8 @@ struct ServerWorkspaceView: View {
                 to: url,
                 profile: profile,
                 transferClient: appState.sshClient,
-                remoteFileService: appState.remoteFileService
+                remoteFileService: appState.remoteFileService,
+                repository: appState.repository
             )
         }
     }
@@ -4070,6 +4073,15 @@ private struct RemoteTransferJobsView: View {
                             .font(.subheadline)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        if job.status == .running, job.progressFraction == nil {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(maxWidth: 180)
+                        } else if let progressFraction = job.progressFraction {
+                            ProgressView(value: progressFraction)
+                                .controlSize(.small)
+                                .frame(maxWidth: 180)
+                        }
                         Text(metadata(for: job))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -4128,6 +4140,11 @@ private struct RemoteTransferJobsView: View {
 
     private func metadata(for job: RemoteFileTransferJob) -> String {
         var parts = [job.status.rawValue.capitalized]
+        if let progressFraction = job.progressFraction {
+            parts.append("\(Int((progressFraction * 100).rounded()))%")
+        } else if job.status == .running {
+            parts.append("In progress")
+        }
         if let byteCount = job.byteCount {
             parts.append(formatBytes(byteCount))
         }

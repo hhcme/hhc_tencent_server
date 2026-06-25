@@ -176,6 +176,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    func loadRemoteFileTransferHistory(profile: ServerProfile, repository: ServerRepository) {
+        do {
+            remoteFileTransferJobs = try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+        } catch {
+            remoteFileErrorMessage = error.localizedDescription
+        }
+    }
+
     func refreshDashboard(
         profile: ServerProfile,
         sshClient: SSHClient,
@@ -576,7 +584,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         profile: ServerProfile,
         sshClient: SSHClient,
         transferClient: RemoteFileTransferClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
     ) {
         let remotePath = RemoteFileService.joinedPath(
             basePath: RemoteFileService.normalizedDirectoryPath(remoteFilePath),
@@ -597,7 +606,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
             profile: profile,
             sshClient: sshClient,
             transferClient: transferClient,
-            remoteFileService: remoteFileService
+            remoteFileService: remoteFileService,
+            repository: repository
         ))
         startNextRemoteFileTransferIfNeeded()
     }
@@ -607,7 +617,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         to localURL: URL,
         profile: ServerProfile,
         transferClient: RemoteFileTransferClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
     ) {
         let jobId = enqueueRemoteFileTransferJob(
             direction: .download,
@@ -622,7 +633,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
             localURL: localURL,
             profile: profile,
             transferClient: transferClient,
-            remoteFileService: remoteFileService
+            remoteFileService: remoteFileService,
+            repository: repository
         ))
         startNextRemoteFileTransferIfNeeded()
     }
@@ -2499,6 +2511,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
             localPath: localPath,
             status: .pending,
             byteCount: nil,
+            progressFraction: 0,
             message: nil,
             startedAt: Date(),
             finishedAt: nil
@@ -2515,7 +2528,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
 
         transferTask = Task {
             switch request {
-            case let .upload(jobId, localURL, directoryPath, profile, sshClient, transferClient, remoteFileService):
+            case let .upload(jobId, localURL, directoryPath, profile, sshClient, transferClient, remoteFileService, repository):
                 await self.runUploadTransfer(
                     jobId: jobId,
                     localURL: localURL,
@@ -2523,16 +2536,18 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     profile: profile,
                     sshClient: sshClient,
                     transferClient: transferClient,
-                    remoteFileService: remoteFileService
+                    remoteFileService: remoteFileService,
+                    repository: repository
                 )
-            case let .download(jobId, entry, localURL, profile, transferClient, remoteFileService):
+            case let .download(jobId, entry, localURL, profile, transferClient, remoteFileService, repository):
                 await self.runDownloadTransfer(
                     jobId: jobId,
                     entry: entry,
                     localURL: localURL,
                     profile: profile,
                     transferClient: transferClient,
-                    remoteFileService: remoteFileService
+                    remoteFileService: remoteFileService,
+                    repository: repository
                 )
             }
         }
@@ -2545,7 +2560,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         profile: ServerProfile,
         sshClient: SSHClient,
         transferClient: RemoteFileTransferClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository?
     ) async {
         do {
             let didAccess = localURL.startAccessingSecurityScopedResource()
@@ -2570,20 +2586,24 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 self.remoteFilePath = listing.path
                 self.remoteFileActionMessage = "Uploaded \(localURL.lastPathComponent) to \(result.remotePath)."
                 self.finishRemoteFileTransferJob(jobId, status: .succeeded, result: result, message: self.remoteFileActionMessage)
+                self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
                 self.finishRunningRemoteFileTransfer()
             }
         } catch is CancellationError {
             await MainActor.run {
                 self.cancelRemoteFileTransferJobIfRunning(jobId)
+                self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
             }
         } catch SSHClientError.cancelled {
             await MainActor.run {
                 self.cancelRemoteFileTransferJobIfRunning(jobId)
+                self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
             }
         } catch {
             await MainActor.run {
                 self.remoteFileErrorMessage = error.localizedDescription
                 self.finishRemoteFileTransferJob(jobId, status: .failed, message: error.localizedDescription)
+                self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
                 self.finishRunningRemoteFileTransfer()
             }
         }
@@ -2595,7 +2615,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         localURL: URL,
         profile: ServerProfile,
         transferClient: RemoteFileTransferClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository?
     ) async {
         do {
             let didAccess = localURL.startAccessingSecurityScopedResource()
@@ -2613,20 +2634,24 @@ final class ServerWorkspaceViewModel: ObservableObject {
             await MainActor.run {
                 self.remoteFileActionMessage = "Downloaded \(entry.name) to \(result.localPath)."
                 self.finishRemoteFileTransferJob(jobId, status: .succeeded, result: result, message: self.remoteFileActionMessage)
+                self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
                 self.finishRunningRemoteFileTransfer()
             }
         } catch is CancellationError {
             await MainActor.run {
                 self.cancelRemoteFileTransferJobIfRunning(jobId)
+                self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
             }
         } catch SSHClientError.cancelled {
             await MainActor.run {
                 self.cancelRemoteFileTransferJobIfRunning(jobId)
+                self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
             }
         } catch {
             await MainActor.run {
                 self.remoteFileErrorMessage = error.localizedDescription
                 self.finishRemoteFileTransferJob(jobId, status: .failed, message: error.localizedDescription)
+                self.persistRemoteFileTransferJob(jobId, profile: profile, repository: repository)
                 self.finishRunningRemoteFileTransfer()
             }
         }
@@ -2635,6 +2660,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     private func markRemoteFileTransferJobRunning(_ id: UUID) {
         guard let index = remoteFileTransferJobs.firstIndex(where: { $0.id == id }) else { return }
         remoteFileTransferJobs[index].status = .running
+        remoteFileTransferJobs[index].progressFraction = nil
         remoteFileTransferJobs[index].startedAt = Date()
     }
 
@@ -2654,8 +2680,24 @@ final class ServerWorkspaceViewModel: ObservableObject {
         guard let index = remoteFileTransferJobs.firstIndex(where: { $0.id == id }) else { return }
         remoteFileTransferJobs[index].status = status
         remoteFileTransferJobs[index].byteCount = result?.byteCount
+        remoteFileTransferJobs[index].progressFraction = status == .succeeded ? 1 : remoteFileTransferJobs[index].progressFraction
         remoteFileTransferJobs[index].message = message
         remoteFileTransferJobs[index].finishedAt = Date()
+    }
+
+    private func persistRemoteFileTransferJob(_ id: UUID, profile: ServerProfile, repository: ServerRepository?) {
+        guard
+            let repository,
+            let job = remoteFileTransferJobs.first(where: { $0.id == id })
+        else {
+            return
+        }
+
+        do {
+            try repository.upsertRemoteFileTransferJob(job, serverId: profile.id)
+        } catch {
+            remoteFileErrorMessage = error.localizedDescription
+        }
     }
 
     private func cancelRemoteFileTransferJob(_ id: UUID) {
@@ -2779,7 +2821,8 @@ private enum QueuedRemoteFileTransfer {
         profile: ServerProfile,
         sshClient: SSHClient,
         transferClient: RemoteFileTransferClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository?
     )
     case download(
         jobId: UUID,
@@ -2787,14 +2830,15 @@ private enum QueuedRemoteFileTransfer {
         localURL: URL,
         profile: ServerProfile,
         transferClient: RemoteFileTransferClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository?
     )
 
     var jobId: UUID {
         switch self {
-        case let .upload(jobId, _, _, _, _, _, _):
+        case let .upload(jobId, _, _, _, _, _, _, _):
             jobId
-        case let .download(jobId, _, _, _, _, _):
+        case let .download(jobId, _, _, _, _, _, _):
             jobId
         }
     }
