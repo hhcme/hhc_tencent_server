@@ -4,7 +4,7 @@
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。它的目标是以 SSH 为核心管理多台 Linux 服务器，提供类似宝塔面板的桌面端体验，并在用户主动配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-当前仓库处于设计和 Phase 1 规划阶段。Phase 1 的核心交付不是模拟界面，而是打通一个安全、真实、可验证的 SSH 最小闭环：保存服务器配置、保存凭据、验证主机指纹、真实连接远程服务器、执行 smoke test 命令并断开连接。
+当前仓库处于设计和实施计划阶段。Phase 1 的核心交付不是模拟界面，而是打通一个安全、真实、可验证的 SSH 最小闭环：保存服务器配置、保存凭据、验证主机指纹、真实连接远程服务器、执行 smoke test 命令并断开连接。
 
 ## 为什么做这个项目
 
@@ -66,23 +66,18 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端。
 - [文档索引](docs/README.md)
 - [macOS MVP 本地设计快照](docs/assets/design/macos-mvp-v0.2/README.md)
 - [macOS MVP 设计稿说明](docs/superpowers/specs/2026-06-25-macos-mvp-design.md)
-- [English macOS MVP design note](docs/en/2026-06-25-macos-mvp-design.md)
 - [设计文档](docs/superpowers/specs/2026-06-25-server-manager-design.md)
 - [云厂商 API 增强层设计](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)
 - [Windows 原生版技术选型](docs/superpowers/specs/2026-06-25-windows-native-client-strategy.md)
-- [Phase 1 实施计划](docs/superpowers/plans/2026-06-25-phase1-ssh-connection.md)
-- [English design document](docs/en/2026-06-25-server-manager-design.md)
-- [English cloud provider API enhancement](docs/en/2026-06-25-cloud-provider-integration.md)
-- [English Windows native client strategy](docs/en/2026-06-25-windows-native-client-strategy.md)
-- [English Phase 1 plan](docs/en/2026-06-25-phase1-ssh-connection.md)
+- [全部 Phase 实施计划](docs/superpowers/plans/README.md)
 
 ## 开发状态
 
-当前还没有应用代码。仓库先沉淀设计、边界、开源协作规范和第一阶段实施计划，避免后续实现时在安全模型、依赖版本、主机指纹、私钥存储和并发模型上返工。
+当前还没有应用代码。仓库先沉淀设计、边界、开源协作规范和各阶段实施计划，避免后续实现时在安全模型、依赖版本、主机指纹、私钥存储和并发模型上返工。
 
 ## 参与贡献
 
-欢迎后续参与设计讨论、实现、测试和文档翻译。提交前请阅读：
+欢迎后续参与设计讨论、实现、测试和文档改进。提交前请阅读：
 
 - [贡献指南](CONTRIBUTING.md)
 - [行为准则](CODE_OF_CONDUCT.md)

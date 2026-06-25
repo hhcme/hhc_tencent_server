@@ -588,9 +588,9 @@ CREATE TABLE package_services (
 
 ## 8. 开发阶段规划
 
-### Phase 1：项目骨架 + SSH 连接
+### Phase 1：项目骨架 + 真实 SSH 最小闭环
 - Xcode 项目初始化
-- SwiftUI 应用框架（侧边栏 + 标签页）
+- SwiftUI 应用框架（启动服务器列表 + 单服务器工作台 + toolbar 服务器切换器）
 - SSH 连接层（真实连接、主机指纹确认、密码/密钥认证、执行单条命令）
 - 服务器配置 CRUD + Keychain 集成
 - 连接状态管理
@@ -599,7 +599,7 @@ CREATE TABLE package_services (
 - CloudProviderAdapter 协议和腾讯云只读 adapter
 - 云账号配置、凭据写入 Keychain、权限校验
 - 腾讯云 CVM 实例发现与 SSH profile 关联
-- 简化版终端（命令执行 + 输出展示）
+- 简化命令面板（命令执行 + 输出展示）
 - 命令历史
 
 ### Phase 3：Dashboard + 文件管理器
@@ -630,15 +630,15 @@ CREATE TABLE package_services (
 ### Phase 6：私有包仓库
 - Verdaccio 一键部署
 - npm 包管理
-- Flutter pub server 部署
-- pub 包管理
+- Dart/Flutter pub 私有仓库方案验证
+- 验证通过后实现 pub 包管理
 
 ### Phase 7：高级云资源管理
 - 阿里云、华为云 adapter
 - 云盘、快照、备份、计费/到期状态
 - 多云资源搜索与高级过滤
 
-### Phase 8：Windows 原生版
+### Phase 8：Windows 原生版技术验证
 - WinUI 3 + Windows App SDK + .NET/C# 技术验证
 - Windows Credential Manager / DPAPI 凭据存储
 - Windows 版真实 SSH MVP（服务器 CRUD、凭据、主机指纹、`printf hhc-ssh-ok`）

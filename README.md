@@ -6,9 +6,9 @@ HHC Server Manager is an open-source macOS native server management client. It a
 
 HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，目标是以 SSH 为核心提供类似宝塔面板的桌面端体验，并在用户配置云厂商 API 凭据后启用实例发现、云监控、安全组和开关机等增强能力。
 
-> Project status: design and Phase 1 planning. The first implementation milestone is a secure, real SSH connection MVP.
+> Project status: design and implementation planning. The first implementation milestone is a secure, real SSH connection MVP.
 >
-> 项目状态：设计与 Phase 1 规划阶段。第一个实现里程碑是安全、真实的 SSH 连接 MVP。
+> 项目状态：设计与实施计划阶段。第一个实现里程碑是安全、真实的 SSH 连接 MVP。
 
 ## Highlights / 亮点
 
@@ -16,30 +16,25 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - SSH-first server management with optional cloud API enhancement.
 - Credentials stored in macOS Keychain.
 - Host key verification as a first-class security requirement.
-- Bilingual documentation in English and Chinese.
+- Bilingual README for the project introduction; detailed design and implementation documents are maintained in Chinese.
 - MIT licensed.
 
 - 计划使用 SwiftUI 构建 macOS 原生应用。
 - SSH-first 服务器管理，云 API 作为可选增强能力。
 - SSH 密码、私钥等敏感信息存入 macOS Keychain。
 - 把主机指纹验证作为基础安全能力。
-- 中英文双语文档。
+- README 作为项目介绍保留中英文；详细设计和实施计划默认使用中文维护。
 - 使用 MIT 开源协议。
 
 ## Documentation / 文档
 
 - [Documentation index / 文档索引](docs/README.md)
 - [macOS MVP design snapshots / macOS MVP 本地设计快照](docs/assets/design/macos-mvp-v0.2/README.md)
-- [macOS MVP design note, Chinese / macOS MVP 设计稿说明中文](docs/superpowers/specs/2026-06-25-macos-mvp-design.md)
-- [macOS MVP design note, English](docs/en/2026-06-25-macos-mvp-design.md)
-- [Design document, Chinese / 设计文档中文](docs/superpowers/specs/2026-06-25-server-manager-design.md)
-- [Design document, English](docs/en/2026-06-25-server-manager-design.md)
-- [Cloud Provider API enhancement, Chinese / 云厂商 API 增强层中文](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)
-- [Cloud Provider API enhancement, English](docs/en/2026-06-25-cloud-provider-integration.md)
-- [Windows native client strategy, Chinese / Windows 原生版技术选型中文](docs/superpowers/specs/2026-06-25-windows-native-client-strategy.md)
-- [Windows native client strategy, English](docs/en/2026-06-25-windows-native-client-strategy.md)
-- [Phase 1 plan, Chinese / Phase 1 中文计划](docs/superpowers/plans/2026-06-25-phase1-ssh-connection.md)
-- [Phase 1 plan, English](docs/en/2026-06-25-phase1-ssh-connection.md)
+- [macOS MVP design note / macOS MVP 设计稿说明](docs/superpowers/specs/2026-06-25-macos-mvp-design.md)
+- [Design document / 项目设计文档](docs/superpowers/specs/2026-06-25-server-manager-design.md)
+- [Cloud Provider API enhancement / 云厂商 API 增强层设计](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)
+- [Windows native client strategy / Windows 原生版技术选型](docs/superpowers/specs/2026-06-25-windows-native-client-strategy.md)
+- [Phase implementation plans / 全部 Phase 实施计划](docs/superpowers/plans/README.md)
 
 ## Planned Roadmap / 规划路线
 

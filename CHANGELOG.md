@@ -9,8 +9,8 @@ All notable changes to this project will be documented in this file.
 - Added MIT license.
 - Added bilingual README files.
 - Added contributing, security, and code of conduct documents.
-- Added bilingual documentation index.
-- Added English summaries for the design document and Phase 1 implementation plan.
+- Added Chinese documentation index.
+- Kept detailed design and implementation planning documents in Chinese while keeping README bilingual.
 - Refined the project design and Phase 1 plan around real SSH behavior, host key trust, Keychain storage, and SwiftNIO SSH version constraints.
 - Added SSH-first plus optional Cloud API enhancement direction.
 - Added bilingual Cloud Provider API enhancement design.
@@ -21,12 +21,14 @@ All notable changes to this project will be documented in this file.
 - Revised the macOS design direction with a native v0.2 flow: server list first, dedicated server workspace, and toolbar-based server switching.
 - Added repository-versioned PNG snapshots for the macOS MVP v0.2 design.
 - Aligned the Phase 1 implementation plan and architecture documents with the local macOS v0.2 design flow.
+- Added Chinese implementation plans for all roadmap phases from Phase 1 to Phase 8.
+- Removed the internal English documentation mirror to avoid duplicated implementation planning drift.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
 - 添加贡献指南、安全策略和行为准则。
-- 添加中英文文档索引。
-- 添加英文版设计文档和 Phase 1 实施计划摘要。
+- 添加中文文档索引。
+- 明确 README 保持中英文，详细设计和实施计划默认使用中文维护。
 - 围绕真实 SSH 行为、主机指纹信任、Keychain 存储和 SwiftNIO SSH 版本约束修订项目设计与 Phase 1 计划。
 - 添加 SSH-first + 云 API 可选增强的产品方向。
 - 添加中英文《云厂商 API 增强层设计》。
@@ -37,3 +39,5 @@ All notable changes to this project will be documented in this file.
 - 修订 macOS 设计方向，新增更原生的 v0.2 流程：先展示服务器列表，再进入单服务器工作台，并通过工具栏切换服务器。
 - 添加 macOS MVP v0.2 设计稿的仓库内 PNG 快照。
 - 将 Phase 1 实施计划和架构文档校准到 macOS v0.2 本地设计流程。
+- 补齐 Phase 1 到 Phase 8 的中文实施计划。
+- 移除内部英文文档镜像，避免实施计划重复维护后漂移。

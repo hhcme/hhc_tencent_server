@@ -12,8 +12,8 @@
 
 ## Documentation / 文档
 
-- [ ] English documentation updated when needed.
-- [ ] 中文文档已按需更新。
+- [ ] README updated when project-introduction content changes.
+- [ ] 中文设计文档或 Phase 实施计划已按需更新。
 
 ## Security / 安全
 

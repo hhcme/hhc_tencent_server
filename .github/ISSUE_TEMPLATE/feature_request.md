@@ -17,10 +17,12 @@ assignees: ""
 
 ## Phase / 所属阶段
 
-- [ ] Phase 1: SSH MVP
-- [ ] Phase 2: Dashboard and commands
-- [ ] Phase 3: File manager
-- [ ] Phase 4: Environment management
-- [ ] Phase 5: Deployment
-- [ ] Phase 6: Package registries
+- [ ] Phase 1: macOS SSH MVP / macOS 真实 SSH 最小闭环
+- [ ] Phase 2: Cloud foundation and command panel / 云厂商基础层 + 简化命令面板
+- [ ] Phase 3: Dashboard and file manager / Dashboard + 文件管理器
+- [ ] Phase 4: Security groups and environment configuration / 安全组 + 环境配置
+- [ ] Phase 5: GitLab deployment / GitLab 部署
+- [ ] Phase 6: Private package registries / 私有包仓库
+- [ ] Phase 7: Advanced cloud resources / 高级云资源管理
+- [ ] Phase 8: Windows native validation / Windows 原生版技术验证
 - [ ] Unsure / 不确定

@@ -4,7 +4,7 @@ English | [中文](README.zh-CN.md)
 
 HHC Server Manager is an open-source macOS native server management client. It aims to manage multiple Linux servers through SSH and provide a desktop experience similar to Baota Panel, with optional cloud provider API enhancements for instance discovery, cloud-side metrics, security groups, and power operations.
 
-The repository is currently in the design and Phase 1 planning stage. The first milestone is not a mocked UI. It is a secure, real, verifiable SSH MVP: save a server profile, store credentials, verify the host key, connect to a remote server, run a smoke-test command, and disconnect cleanly.
+The repository is currently in the design and implementation planning stage. The first milestone is not a mocked UI. It is a secure, real, verifiable SSH MVP: save a server profile, store credentials, verify the host key, connect to a remote server, run a smoke-test command, and disconnect cleanly.
 
 ## Why
 
@@ -65,24 +65,20 @@ Target users include:
 
 - [Documentation index](docs/README.md)
 - [macOS MVP design snapshots](docs/assets/design/macos-mvp-v0.2/README.md)
-- [macOS MVP design note](docs/en/2026-06-25-macos-mvp-design.md)
-- [中文 macOS MVP 设计稿说明](docs/superpowers/specs/2026-06-25-macos-mvp-design.md)
-- [Design document](docs/en/2026-06-25-server-manager-design.md)
-- [Cloud provider API enhancement](docs/en/2026-06-25-cloud-provider-integration.md)
-- [Windows native client strategy](docs/en/2026-06-25-windows-native-client-strategy.md)
-- [Phase 1 implementation plan](docs/en/2026-06-25-phase1-ssh-connection.md)
-- [中文设计文档](docs/superpowers/specs/2026-06-25-server-manager-design.md)
-- [中文云厂商 API 增强层设计](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)
-- [中文 Windows 原生版技术选型](docs/superpowers/specs/2026-06-25-windows-native-client-strategy.md)
-- [中文 Phase 1 计划](docs/superpowers/plans/2026-06-25-phase1-ssh-connection.md)
+- Detailed design and implementation documents are maintained in Chinese to avoid duplicated planning drift.
+- [macOS MVP design note](docs/superpowers/specs/2026-06-25-macos-mvp-design.md)
+- [Design document](docs/superpowers/specs/2026-06-25-server-manager-design.md)
+- [Cloud provider API enhancement](docs/superpowers/specs/2026-06-25-cloud-provider-integration.md)
+- [Windows native client strategy](docs/superpowers/specs/2026-06-25-windows-native-client-strategy.md)
+- [All phase implementation plans](docs/superpowers/plans/README.md)
 
 ## Development Status
 
-There is no application code yet. The repository first captures architecture, boundaries, open-source collaboration rules, and the Phase 1 plan so implementation does not need to revisit security, dependency, host-key trust, private-key storage, and concurrency decisions later.
+There is no application code yet. The repository first captures architecture, boundaries, open-source collaboration rules, and phase implementation plans so implementation does not need to revisit security, dependency, host-key trust, private-key storage, and concurrency decisions later.
 
 ## Contributing
 
-Contributions to design discussions, implementation, testing, and documentation translation are welcome. Please read:
+Contributions to design discussions, implementation, testing, and documentation improvements are welcome. Please read:
 
 - [Contributing Guide](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)

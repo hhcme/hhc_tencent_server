@@ -1,0 +1,175 @@
+# Phase 7：高级云资源管理实施计划
+
+> Phase 7 在已有腾讯云基础层上扩展更多云厂商和高级云资源能力。重点是 provider adapter 的一致性、能力矩阵、只读优先和危险操作审计。
+
+**前置条件:** Phase 6 已完成，macOS 版核心 SSH、云账号、部署和包仓库能力稳定。
+
+## 1. 目标
+
+1. 实现 Alibaba Cloud 和 Huawei Cloud adapter 的只读实例发现。
+2. 扩展 Tencent Cloud adapter：云盘、快照、基础计费/到期状态。
+3. 建立跨云资源搜索和高级过滤。
+4. 支持云盘、快照、备份等高级资源查看。
+5. 对快照创建、云盘挂载/卸载等危险操作建立能力和确认框架。
+6. 补齐 provider capability matrix 和兼容测试 harness。
+
+## 2. 非目标
+
+- 不做所有云厂商的全量 API 覆盖。
+- 不做 Terraform 替代品。
+- 不做自动成本优化决策，只展示信息和风险提示。
+- 不做跨云迁移。
+- 不做负载均衡、RDS、对象存储等非服务器核心资源的深度管理。
+
+## 3. 技术约束
+
+- 新厂商默认只读接入，写操作必须单独 capability 和权限档位。
+- provider adapter 必须吸收字段差异，UI 面向统一资源模型。
+- 计费和到期状态来自云 API，必须标注刷新时间和可能延迟。
+- 快照、云盘挂载、删除等操作必须二次确认。
+- 所有云 API 请求必须限流、可取消、可审计。
+
+## 4. 数据模型
+
+```sql
+CREATE TABLE cloud_disks (
+    id TEXT PRIMARY KEY NOT NULL,
+    account_id TEXT NOT NULL REFERENCES cloud_provider_accounts(id) ON DELETE CASCADE,
+    provider_id TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    disk_id TEXT NOT NULL,
+    instance_id TEXT,
+    name TEXT,
+    disk_type TEXT,
+    size_gb INTEGER,
+    status TEXT,
+    raw_json TEXT,
+    last_synced_at DATETIME,
+    UNIQUE(account_id, region_id, disk_id)
+);
+
+CREATE TABLE cloud_snapshots (
+    id TEXT PRIMARY KEY NOT NULL,
+    account_id TEXT NOT NULL REFERENCES cloud_provider_accounts(id) ON DELETE CASCADE,
+    provider_id TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    disk_id TEXT,
+    name TEXT,
+    status TEXT,
+    size_gb INTEGER,
+    created_at_provider DATETIME,
+    raw_json TEXT,
+    last_synced_at DATETIME,
+    UNIQUE(account_id, region_id, snapshot_id)
+);
+
+CREATE TABLE cloud_billing_states (
+    id TEXT PRIMARY KEY NOT NULL,
+    account_id TEXT NOT NULL REFERENCES cloud_provider_accounts(id) ON DELETE CASCADE,
+    provider_id TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    billing_type TEXT,
+    expire_at DATETIME,
+    status TEXT,
+    raw_json TEXT,
+    last_synced_at DATETIME,
+    UNIQUE(account_id, provider_id, resource_type, resource_id)
+);
+```
+
+## 5. 模块设计
+
+- `ProviderCapabilityMatrix`：展示每个厂商每项能力状态。
+- `CloudResourceSearchService`：跨账号、跨地域、跨厂商搜索。
+- `CloudDiskService`：云盘列表和状态同步。
+- `CloudSnapshotService`：快照列表、创建和状态轮询。
+- `CloudBillingService`：计费类型、到期、欠费/冻结状态。
+- `ProviderAdapterTestHarness`：统一 fixture 和契约测试。
+
+## 6. UI 范围
+
+- 云资源中心：账号、厂商、地域、状态、标签、搜索。
+- 服务器工作台云资源页：实例、云盘、快照、计费状态。
+- Provider capability matrix 页面。
+- 云盘详情：挂载实例、容量、类型、状态。
+- 快照列表：状态、创建时间、来源云盘。
+- 危险操作确认：创建快照、删除快照、挂载/卸载云盘。
+
+## 7. 实施任务
+
+### Task 1：Adapter 契约
+
+- [ ] 明确实例、云盘、快照、计费的统一模型。
+- [ ] 定义 capability matrix。
+- [ ] 添加 adapter fixture 测试规范。
+- [ ] 所有 adapter 输出统一错误类型。
+
+### Task 2：Alibaba Cloud adapter
+
+- [ ] 验证当前 SDK 或签名方案。
+- [ ] 实现凭据校验。
+- [ ] 实现地域和 ECS 实例发现。
+- [ ] 解析公网 IP、私网 IP、规格、状态。
+- [ ] 添加 fixture 测试。
+
+### Task 3：Huawei Cloud adapter
+
+- [ ] 验证当前 SDK 或签名方案。
+- [ ] 实现凭据校验。
+- [ ] 实现地域和 ECS 实例发现。
+- [ ] 解析网络、状态和规格。
+- [ ] 添加 fixture 测试。
+
+### Task 4：高级资源
+
+- [ ] 腾讯云云盘同步。
+- [ ] 腾讯云快照同步。
+- [ ] 腾讯云基础计费/到期状态同步。
+- [ ] 阿里云、华为云按 capability 补同类只读能力。
+
+### Task 5：高级操作
+
+- [ ] 创建快照操作。
+- [ ] 删除快照操作。
+- [ ] 云盘挂载/卸载预留接口，默认只在验证通过后启用。
+- [ ] 所有操作写入 operation logs。
+
+### Task 6：云资源中心 UI
+
+- [ ] 资源搜索和过滤。
+- [ ] 高级资源详情页。
+- [ ] capability matrix 展示。
+- [ ] 操作风险确认。
+
+### Task 7：测试
+
+- [ ] Provider adapter 契约测试。
+- [ ] 三家云实例解析测试。
+- [ ] 云盘/快照/计费解析测试。
+- [ ] 跨云搜索测试。
+- [ ] 危险操作确认状态机测试。
+
+### Task 8：手动验收
+
+- [ ] 腾讯云、阿里云、华为云账号都可只读同步实例。
+- [ ] 云资源中心能跨厂商搜索。
+- [ ] 腾讯云云盘和快照信息可展示。
+- [ ] 计费/到期状态有来源和刷新时间。
+- [ ] 创建快照需要二次确认并写日志。
+- [ ] 权限不足时能力自动降级。
+
+## 8. 完成标志
+
+1. 多云只读实例发现可用。
+2. 云资源中心可跨云搜索。
+3. 云盘、快照、计费状态基础能力可用。
+4. 危险云操作有 capability、确认、日志和错误处理。
+5. Adapter 契约测试覆盖核心字段。
+6. 测试和手动验收通过。
+
+## 9. 后续 Phase 边界
+
+- Phase 8 才启动 Windows 原生版技术验证。
+- 跨云迁移、负载均衡、数据库、对象存储等能力另行立项，不放入当前路线图。
