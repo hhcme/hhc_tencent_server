@@ -4,12 +4,12 @@ import Network
 
 final class ServerManagementService: @unchecked Sendable {
     private let repository: ServerRepository
-    private let keychain: KeychainService
+    private let keychain: any ServerCredentialStore
     private let makeUUID: @Sendable () -> UUID
 
     init(
         repository: ServerRepository,
-        keychain: KeychainService,
+        keychain: any ServerCredentialStore,
         makeUUID: @escaping @Sendable () -> UUID = UUID.init
     ) {
         self.repository = repository

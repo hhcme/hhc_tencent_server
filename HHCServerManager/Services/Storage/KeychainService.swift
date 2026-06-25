@@ -15,7 +15,18 @@ enum KeychainError: LocalizedError {
     }
 }
 
-final class KeychainService: @unchecked Sendable {
+protocol ServerCredentialStore: Sendable {
+    func savePassword(_ password: String, keychainRef: String) throws
+    func readPassword(keychainRef: String) throws -> String?
+    func savePrivateKey(_ data: Data, passphrase: String?, keychainRef: String) throws
+    func readPrivateKey(keychainRef: String) throws -> Data?
+    func deleteCredentials(keychainRef: String)
+    func saveWebhookSecret(_ secret: String, keychainRef: String) throws
+    func readWebhookSecret(keychainRef: String) throws -> String?
+    func deleteWebhookSecret(keychainRef: String)
+}
+
+final class KeychainService: ServerCredentialStore, @unchecked Sendable {
     private let serviceName: String
 
     init(serviceName: String = "me.hhc.HHCServerManager") {

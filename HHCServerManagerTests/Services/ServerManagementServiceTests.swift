@@ -46,6 +46,26 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertNil(try keychain.readPassword(keychainRef: keychainRef))
     }
 
+    func testCreateServerDoesNotPersistProfileWhenKeychainWriteFails() throws {
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        let keychain = FailingServerCredentialStore()
+        let service = ServerManagementService(repository: repository, keychain: keychain)
+
+        XCTAssertThrowsError(try service.createServer(
+            name: "No Credential",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )) { error in
+            XCTAssertEqual(error as? FailingServerCredentialStore.Error, .writeFailed)
+        }
+        XCTAssertTrue(try repository.fetchServers().isEmpty)
+        XCTAssertEqual(keychain.deletedCredentialRefs.count, 1)
+    }
+
     func testDeleteServerRemovesProfileTrustedKeysAndCredentials() throws {
         let harness = try Harness()
         let profile = try harness.service.createServer(
@@ -5419,6 +5439,44 @@ final class ServerManagementServiceTests: XCTestCase {
             )
         }
     }
+}
+
+private final class FailingServerCredentialStore: ServerCredentialStore, @unchecked Sendable {
+    enum Error: Swift.Error, Equatable {
+        case writeFailed
+    }
+
+    private(set) var deletedCredentialRefs: [String] = []
+
+    func savePassword(_ password: String, keychainRef: String) throws {
+        throw Error.writeFailed
+    }
+
+    func readPassword(keychainRef: String) throws -> String? {
+        nil
+    }
+
+    func savePrivateKey(_ data: Data, passphrase: String?, keychainRef: String) throws {
+        throw Error.writeFailed
+    }
+
+    func readPrivateKey(keychainRef: String) throws -> Data? {
+        nil
+    }
+
+    func deleteCredentials(keychainRef: String) {
+        deletedCredentialRefs.append(keychainRef)
+    }
+
+    func saveWebhookSecret(_ secret: String, keychainRef: String) throws {
+        throw Error.writeFailed
+    }
+
+    func readWebhookSecret(keychainRef: String) throws -> String? {
+        nil
+    }
+
+    func deleteWebhookSecret(keychainRef: String) {}
 }
 
 private struct MockCloudProviderAdapter: CloudProviderAdapter {
