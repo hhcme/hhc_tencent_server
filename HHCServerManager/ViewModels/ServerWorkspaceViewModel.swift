@@ -93,11 +93,15 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var verdaccioStatusSnapshot: VerdaccioStatusSnapshot?
     @Published var verdaccioPackages: [VerdaccioPackageSummary] = []
     @Published var verdaccioBackupResult: VerdaccioRegistryBackupResult?
+    @Published var verdaccioUserMutationResult: VerdaccioUserMutationResult?
+    @Published var verdaccioUsernameDraft = ""
+    @Published var verdaccioPasswordDraft = ""
     @Published var isRunningRegistryPreflight = false
     @Published var isInstallingVerdaccio = false
     @Published var isLoadingVerdaccioStatus = false
     @Published var isLoadingVerdaccioPackages = false
     @Published var isCreatingVerdaccioBackup = false
+    @Published var isMutatingVerdaccioUser = false
     @Published var registryErrorMessage: String?
     @Published var registryActionMessage: String?
     @Published var commandResult: CommandResult?
@@ -1868,6 +1872,121 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isCreatingVerdaccioBackup = false
+                }
+            }
+        }
+    }
+
+    func createVerdaccioUser(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager
+    ) {
+        mutateVerdaccioUser(
+            profile: profile,
+            sshClient: sshClient,
+            verdaccioManager: verdaccioManager,
+            actionName: "Created",
+            mutation: { draft, username, password, profile, sshClient in
+                try await verdaccioManager.createUser(
+                    draft: draft,
+                    username: username,
+                    password: password,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+            }
+        )
+    }
+
+    func updateVerdaccioUserPassword(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager
+    ) {
+        mutateVerdaccioUser(
+            profile: profile,
+            sshClient: sshClient,
+            verdaccioManager: verdaccioManager,
+            actionName: "Updated",
+            mutation: { draft, username, password, profile, sshClient in
+                try await verdaccioManager.updateUserPassword(
+                    draft: draft,
+                    username: username,
+                    password: password,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+            }
+        )
+    }
+
+    func deleteVerdaccioUser(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager
+    ) {
+        guard !isMutatingVerdaccioUser else { return }
+        isMutatingVerdaccioUser = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+        let username = verdaccioUsernameDraft
+
+        Task {
+            do {
+                let result = try await verdaccioManager.deleteUser(
+                    draft: registryDraft,
+                    username: username,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.verdaccioUserMutationResult = result
+                    self.registryActionMessage = "Deleted Verdaccio user \(result.username). Backup: \(result.backupPath)."
+                    self.isMutatingVerdaccioUser = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isMutatingVerdaccioUser = false
+                }
+            }
+        }
+    }
+
+    private func mutateVerdaccioUser(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager,
+        actionName: String,
+        mutation: @escaping @Sendable (
+            VerdaccioInstallDraft,
+            String,
+            String,
+            ServerProfile,
+            SSHClient
+        ) async throws -> VerdaccioUserMutationResult
+    ) {
+        guard !isMutatingVerdaccioUser else { return }
+        isMutatingVerdaccioUser = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+        let username = verdaccioUsernameDraft
+        let password = verdaccioPasswordDraft
+
+        Task {
+            do {
+                let result = try await mutation(registryDraft, username, password, profile, sshClient)
+                await MainActor.run {
+                    self.verdaccioUserMutationResult = result
+                    self.verdaccioPasswordDraft = ""
+                    self.registryActionMessage = "\(actionName) Verdaccio user \(result.username). Backup: \(result.backupPath)."
+                    self.isMutatingVerdaccioUser = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isMutatingVerdaccioUser = false
                 }
             }
         }

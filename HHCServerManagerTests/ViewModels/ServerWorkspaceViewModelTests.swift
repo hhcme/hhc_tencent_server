@@ -1207,6 +1207,35 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_ACTIVE_STATE__") })
     }
 
+    func testPrivateRegistriesWorkspaceManagesVerdaccioUsers() async throws {
+        let profile = makeProfile()
+        let viewModel = ServerWorkspaceViewModel()
+        let client = RegistryViewModelMockSSHClient()
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.verdaccioUsernameDraft = "team.dev"
+        viewModel.verdaccioPasswordDraft = "Correct-Horse-Secret-123"
+        viewModel.createVerdaccioUser(profile: profile, sshClient: client, verdaccioManager: manager)
+        try await waitUntil { viewModel.isMutatingVerdaccioUser == false && viewModel.verdaccioUserMutationResult?.action == .create }
+
+        XCTAssertEqual(viewModel.verdaccioUserMutationResult?.username, "team.dev")
+        XCTAssertEqual(viewModel.verdaccioPasswordDraft, "")
+        XCTAssertTrue(viewModel.registryActionMessage?.contains("Created Verdaccio user team.dev") == true)
+
+        viewModel.verdaccioPasswordDraft = "Correct-Horse-Secret-456"
+        viewModel.updateVerdaccioUserPassword(profile: profile, sshClient: client, verdaccioManager: manager)
+        try await waitUntil { viewModel.isMutatingVerdaccioUser == false && viewModel.verdaccioUserMutationResult?.action == .updatePassword }
+
+        viewModel.deleteVerdaccioUser(profile: profile, sshClient: client, verdaccioManager: manager)
+        try await waitUntil { viewModel.isMutatingVerdaccioUser == false && viewModel.verdaccioUserMutationResult?.action == .delete }
+
+        XCTAssertTrue(viewModel.registryActionMessage?.contains("Deleted Verdaccio user team.dev") == true)
+        XCTAssertTrue(client.commands.contains { $0.contains("htpasswd -B -i") && $0.contains("'create'") })
+        XCTAssertTrue(client.commands.contains { $0.contains("htpasswd -B -i") && $0.contains("'update'") })
+        XCTAssertTrue(client.commands.contains { $0.contains("htpasswd -D") })
+        XCTAssertFalse(client.commands.joined(separator: "\n").contains("Correct-Horse-Secret"))
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -1966,6 +1995,15 @@ private final class RegistryViewModelMockSSHClient: SSHClient, @unchecked Sendab
         commands.append(command)
         if command.contains("systemctl enable --now 'verdaccio.service'") {
             return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+        }
+        if command.contains("htpasswd -B -i") || command.contains("htpasswd -D") {
+            return CommandResult(
+                command: command,
+                stdout: "__HHC_VERDACCIO_HTPASSWD_BACKUP__/srv/verdaccio/htpasswd.hhc-backup-2024-01-01T00-00-00Z\n",
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
         }
         if command.contains("curl -fsS --max-time 5 'http://127.0.0.1:4873/-/ping'") {
             return CommandResult(command: command, stdout: #"{"ok":"verdaccio"}"#, stderr: "", exitCode: 0, duration: 0)

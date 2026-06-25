@@ -21,6 +21,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingEnvironmentSave = false
     @State private var pendingDeploymentRollback: DeploymentRollbackRequest?
     @State private var pendingVerdaccioInstall = false
+    @State private var pendingVerdaccioUserDelete = false
     @State private var securityGroupDraftDirection: CloudSecurityGroupRuleDirection = .ingress
     @State private var securityGroupDraftProtocol = "TCP"
     @State private var securityGroupDraftPort = "22"
@@ -199,6 +200,18 @@ struct ServerWorkspaceView: View {
             }
         } message: {
             Text(verdaccioInstallConfirmationMessage)
+        }
+        .alert("Delete Verdaccio User?", isPresented: $pendingVerdaccioUserDelete) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                viewModel.deleteVerdaccioUser(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    verdaccioManager: appState.verdaccioManager
+                )
+            }
+        } message: {
+            Text(verdaccioUserDeleteConfirmationMessage)
         }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
@@ -759,6 +772,7 @@ struct ServerWorkspaceView: View {
 
                 registryPreflightSection
                 verdaccioStatusSection
+                verdaccioUsersSection
                 verdaccioPackagesSection
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -824,6 +838,77 @@ struct ServerWorkspaceView: View {
                     .frame(maxWidth: .infinity, minHeight: 140)
             }
         }
+    }
+
+    private var verdaccioUsersSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Users")
+                .font(.headline)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Username")
+                        .foregroundStyle(.secondary)
+                    TextField("team.dev", text: $viewModel.verdaccioUsernameDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 280)
+                }
+                GridRow {
+                    Text("Password")
+                        .foregroundStyle(.secondary)
+                    SecureField("8 characters minimum", text: $viewModel.verdaccioPasswordDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 280)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.createVerdaccioUser(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        verdaccioManager: appState.verdaccioManager
+                    )
+                } label: {
+                    if viewModel.isMutatingVerdaccioUser {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Create", systemImage: "person.badge.plus")
+                    }
+                }
+                .disabled(isRegistryBusy || !isVerdaccioUserPasswordReady)
+
+                Button {
+                    viewModel.updateVerdaccioUserPassword(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        verdaccioManager: appState.verdaccioManager
+                    )
+                } label: {
+                    Label("Update Password", systemImage: "key")
+                }
+                .disabled(isRegistryBusy || !isVerdaccioUserPasswordReady)
+
+                Button(role: .destructive) {
+                    pendingVerdaccioUserDelete = true
+                } label: {
+                    Label("Delete", systemImage: "person.crop.circle.badge.minus")
+                }
+                .disabled(isRegistryBusy || !isVerdaccioUserReady)
+            }
+
+            if let result = viewModel.verdaccioUserMutationResult {
+                Label(
+                    "\(verdaccioUserActionName(result.action)) \(result.username) · backup \(result.backupPath)",
+                    systemImage: "person.crop.circle.badge.checkmark"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var verdaccioPackagesSection: some View {
@@ -2773,11 +2858,20 @@ struct ServerWorkspaceView: View {
             viewModel.isInstallingVerdaccio ||
             viewModel.isLoadingVerdaccioStatus ||
             viewModel.isLoadingVerdaccioPackages ||
-            viewModel.isCreatingVerdaccioBackup
+            viewModel.isCreatingVerdaccioBackup ||
+            viewModel.isMutatingVerdaccioUser
     }
 
     private var isRegistryPreflightReady: Bool {
         viewModel.registryPreflightReport?.isReady == true
+    }
+
+    private var isVerdaccioUserReady: Bool {
+        !viewModel.verdaccioUsernameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isVerdaccioUserPasswordReady: Bool {
+        isVerdaccioUserReady && viewModel.verdaccioPasswordDraft.count >= 8
     }
 
     private var verdaccioInstallConfirmationMessage: String {
@@ -2786,6 +2880,23 @@ struct ServerWorkspaceView: View {
 
         Run this only after preflight passes and you are ready to change the remote server.
         """
+    }
+
+    private var verdaccioUserDeleteConfirmationMessage: String {
+        """
+        This will remove \(viewModel.verdaccioUsernameDraft.trimmingCharacters(in: .whitespacesAndNewlines)) from \(viewModel.registryDraft.installPath)/htpasswd, create a backup first, and restart \(viewModel.registryDraft.serviceName).service.
+        """
+    }
+
+    private func verdaccioUserActionName(_ action: VerdaccioUserMutationAction) -> String {
+        switch action {
+        case .create:
+            "Created"
+        case .updatePassword:
+            "Updated"
+        case .delete:
+            "Deleted"
+        }
     }
 
     private var isNginxDraftDirty: Bool {
