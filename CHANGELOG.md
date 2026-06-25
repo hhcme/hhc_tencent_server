@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - Added workspace connection state, Connect/Disconnect controls, and ViewModel tests for success, failure, host-key trust, and disconnect flows.
 - Added server editing with profile updates, credential preservation/replacement, edit UI entry points, and test coverage.
 - Extracted host-key trust evaluation into `HostKeyTrustStore` and added tests for unknown, trusted, and changed host-key states.
+- Added shared local and GitHub Actions macOS build-test automation.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -53,3 +54,4 @@ All notable changes to this project will be documented in this file.
 - 添加工作台连接状态、Connect/Disconnect 控制，并补充 ViewModel 成功、失败、主机指纹信任和断开连接流程测试。
 - 添加服务器编辑能力，支持配置更新、凭据保留/替换、编辑入口和测试覆盖。
 - 抽出 `HostKeyTrustStore` 主机指纹信任判断，并补充未知、已信任和指纹变更阻断测试。
+- 添加本地与 GitHub Actions 共用的 macOS 构建测试自动化。

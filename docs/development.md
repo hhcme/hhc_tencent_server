@@ -18,6 +18,16 @@ xcodebuild \
 
 默认测试不依赖真实服务器。真实 SSH 集成测试在未配置环境变量时会自动跳过。
 
+推荐本地直接运行与 GitHub Actions 共用的 CI 脚本：
+
+```sh
+scripts/ci.sh
+```
+
+GitHub Actions workflow 位于 `.github/workflows/ci.yml`，会在 `main` 分支 push 和 pull request 时运行同一套 macOS 构建测试。
+
+如果需要展开调试，可以直接运行底层 `xcodebuild test` 命令：
+
 ```sh
 xcodebuild \
   -project HHCServerManager.xcodeproj \
