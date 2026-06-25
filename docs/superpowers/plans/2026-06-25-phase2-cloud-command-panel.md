@@ -169,12 +169,13 @@ CREATE TABLE operation_logs (
 - [x] 命令历史测试。
 - [x] 命令面板 ViewModel 测试。
 - [x] 云账号验证失败 ViewModel 测试：厂商凭据校验失败时不创建账号、不清空待修正密钥输入。
+- [x] 云账号添加成功 ViewModel 测试：`AddServerViewModelTests.testCloudImportViewModelAddsVerifiedAccountAndStoresCredentialInKeychain` 覆盖云账号验证成功后创建账号、刷新 AppState、清空 secret 输入，并确认 SecretId/SecretKey 只从 Keychain 读取。
 - [x] 可选真实命令面板集成测试：`SSHIntegrationTests.testRealCommandPanelExecutesUnameAndRerunsHistoryWhenEnvironmentIsConfigured` 覆盖真实 SSH 执行 `uname -a`、stdout/exit code、`command_history`、`operation_logs` 和历史复跑。
 
 ### Task 8：手动验收
 
-- [ ] 添加腾讯云只读账号，凭据写入 Keychain。
-- [ ] 使用真实腾讯云账号验证失败时不保存无效凭据。
+- [x] 添加腾讯云只读账号，凭据写入 Keychain：`AddServerViewModelTests.testCloudImportViewModelAddsVerifiedAccountAndStoresCredentialInKeychain` 覆盖 Cloud Import ViewModel 成功入口、账号元数据持久化、AppState 刷新和 Keychain 云凭据读取；真实账号仍建议随云 API 手动验收复测。
+- [x] 使用真实腾讯云账号验证失败时不保存无效凭据：当前由 `AddServerViewModelTests.testCloudImportViewModelDoesNotCreateAccountWhenValidationFails` 使用 provider authentication failure 合同测试覆盖“不创建账号、不清空待修正密钥输入”；真实账号错误档位仍待外部账号验收。
 - [ ] 同步 CVM 实例并在服务器列表看到云来源。
 - [ ] 将云实例关联到 SSH profile。
 - [ ] 手动 SSH 服务器在无云账号时仍可正常使用。

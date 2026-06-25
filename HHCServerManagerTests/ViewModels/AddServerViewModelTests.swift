@@ -176,6 +176,46 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertTrue(appState.cloudProviderAccounts.isEmpty)
     }
 
+    func testCloudImportViewModelAddsVerifiedAccountAndStoresCredentialInKeychain() async throws {
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.cloud-import-success.\(UUID().uuidString)")
+        let appState = AppState(
+            repository: repository,
+            keychain: keychain,
+            registry: CloudProviderRegistry(adapters: [
+                MockResourceCenterCloudAdapter(
+                    providerId: .tencentCloud,
+                    capabilities: [.regions, .instanceDiscovery]
+                ),
+            ])
+        )
+        let viewModel = CloudImportViewModel()
+        viewModel.accountDisplayName = " Tencent Read Only "
+        viewModel.secretId = " sid-success "
+        viewModel.secretKey = " skey-success "
+
+        await viewModel.addCloudAccount(appState: appState)
+
+        let account = try XCTUnwrap(try repository.fetchCloudProviderAccounts().first)
+        defer { keychain.deleteCredentials(keychainRef: account.keychainRef) }
+
+        XCTAssertFalse(viewModel.isWorking)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.statusMessage, "Tencent Cloud account added and verified.")
+        XCTAssertEqual(viewModel.selectedAccountId, account.id)
+        XCTAssertTrue(viewModel.secretId.isEmpty)
+        XCTAssertTrue(viewModel.secretKey.isEmpty)
+        XCTAssertTrue(viewModel.regions.isEmpty)
+        XCTAssertTrue(viewModel.instances.isEmpty)
+        XCTAssertEqual(appState.cloudProviderAccounts.map(\.id), [account.id])
+        XCTAssertEqual(account.providerId, .tencentCloud)
+        XCTAssertEqual(account.displayName, "Tencent Read Only")
+        XCTAssertEqual(try keychain.readCloudCredential(keychainRef: account.keychainRef), CloudProviderCredential(
+            secretId: "sid-success",
+            secretKey: "skey-success"
+        ))
+    }
+
     func testCloudResourceCenterKindFiltersMapToSearchKinds() {
         XCTAssertEqual(CloudResourceKindFilter.all.queryKinds, Set(CloudResourceKind.allCases))
         XCTAssertEqual(CloudResourceKindFilter.instance.queryKinds, [.instance])
