@@ -1065,6 +1065,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
 
     func testRemoteFileTransfersRunSeriallyWithPendingQueueState() async throws {
         let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
         let client = QueuedRemoteFileTransferMockSSHClient()
         let viewModel = ServerWorkspaceViewModel()
         let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
@@ -1082,7 +1083,8 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             profile: profile,
             sshClient: client,
             transferClient: client,
-            remoteFileService: service
+            remoteFileService: service,
+            repository: repository
         )
         try await waitUntil { viewModel.remoteFileTransferJobs.first?.status == .running }
 
@@ -1091,10 +1093,12 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             profile: profile,
             sshClient: client,
             transferClient: client,
-            remoteFileService: service
+            remoteFileService: service,
+            repository: repository
         )
 
         XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.status), [.pending, .running])
+        XCTAssertEqual(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).map(\.status), [.running, .pending])
         try await waitUntil {
             viewModel.remoteFileTransferJobs.count == 2 &&
                 viewModel.remoteFileTransferJobs.allSatisfy { $0.status == .succeeded }
@@ -1107,6 +1111,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
 
     func testCancelPendingRemoteFileTransfersLeavesRunningTransferActive() async throws {
         let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
         let client = QueuedRemoteFileTransferMockSSHClient()
         let viewModel = ServerWorkspaceViewModel()
         let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
@@ -1116,7 +1121,8 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             profile: profile,
             sshClient: client,
             transferClient: client,
-            remoteFileService: service
+            remoteFileService: service,
+            repository: repository
         )
         try await waitUntil { viewModel.remoteFileTransferJobs.first?.status == .running }
 
@@ -1125,16 +1131,56 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             profile: profile,
             sshClient: client,
             transferClient: client,
-            remoteFileService: service
+            remoteFileService: service,
+            repository: repository
         )
         XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.status), [.pending, .running])
 
         viewModel.cancelPendingRemoteFileTransfers()
 
         XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.status), [.cancelled, .running])
+        XCTAssertEqual(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).map(\.status), [.running, .cancelled])
         XCTAssertTrue(viewModel.isTransferringRemoteFile)
         try await waitUntil { viewModel.remoteFileTransferJobs.last?.status == .succeeded }
         XCTAssertEqual(client.uploads.map(\.remotePath), ["~/running.env"])
+    }
+
+    func testLoadRemoteFileTransferHistoryMarksUnfinishedJobsInterrupted() throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let pending = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .upload,
+            remotePath: "/var/www/pending.env",
+            localPath: "/tmp/pending.env",
+            status: .pending,
+            byteCount: nil,
+            progressFraction: 0,
+            message: nil,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            finishedAt: nil
+        )
+        let running = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .download,
+            remotePath: "/var/www/running.env",
+            localPath: "/tmp/running.env",
+            status: .running,
+            byteCount: nil,
+            progressFraction: nil,
+            message: nil,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_001),
+            finishedAt: nil
+        )
+        try repository.upsertRemoteFileTransferJob(pending, serverId: profile.id)
+        try repository.upsertRemoteFileTransferJob(running, serverId: profile.id)
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.loadRemoteFileTransferHistory(profile: profile, repository: repository)
+
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.status), [.interrupted, .interrupted])
+        XCTAssertTrue(viewModel.remoteFileTransferJobs.allSatisfy { $0.message == "Transfer was interrupted before completion." })
+        XCTAssertEqual(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).map(\.status), [.interrupted, .interrupted])
     }
 
     func testSystemdUnitsLoadSelectAndPerformAction() async throws {

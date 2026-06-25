@@ -426,6 +426,7 @@ enum RemoteFileTransferStatus: String, Equatable, Hashable, Sendable {
     case succeeded
     case failed
     case cancelled
+    case interrupted
 }
 
 struct RemoteFileTransferJob: Identifiable, Equatable, Hashable, Sendable {

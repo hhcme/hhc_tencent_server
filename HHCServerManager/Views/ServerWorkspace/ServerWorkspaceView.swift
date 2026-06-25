@@ -4363,6 +4363,8 @@ private struct RemoteTransferJobsView: View {
             "xmark.octagon"
         case .cancelled:
             "minus.circle"
+        case .interrupted:
+            "exclamationmark.triangle"
         }
     }
 
@@ -4378,6 +4380,8 @@ private struct RemoteTransferJobsView: View {
             .red
         case .cancelled:
             .secondary
+        case .interrupted:
+            .orange
         }
     }
 

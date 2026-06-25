@@ -182,7 +182,19 @@ final class ServerWorkspaceViewModel: ObservableObject {
 
     func loadRemoteFileTransferHistory(profile: ServerProfile, repository: ServerRepository) {
         do {
-            remoteFileTransferJobs = try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+            let jobs = try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+            remoteFileTransferJobs = jobs.map { job in
+                guard job.status == .pending || job.status == .running else {
+                    return job
+                }
+                var interrupted = job
+                interrupted.status = .interrupted
+                interrupted.progressFraction = job.progressFraction ?? 0
+                interrupted.message = "Transfer was interrupted before completion."
+                interrupted.finishedAt = job.finishedAt ?? Date()
+                try? repository.upsertRemoteFileTransferJob(interrupted, serverId: profile.id)
+                return interrupted
+            }
         } catch {
             remoteFileErrorMessage = error.localizedDescription
         }
@@ -599,7 +611,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
         let jobId = enqueueRemoteFileTransferJob(
             direction: .upload,
             remotePath: remotePath,
-            localPath: localURL.path
+            localPath: localURL.path,
+            profile: profile,
+            repository: repository
         )
         remoteFileErrorMessage = nil
         remoteFileActionMessage = nil
@@ -638,7 +652,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
             let jobId = enqueueRemoteFileTransferJob(
                 direction: .upload,
                 remotePath: remotePath,
-                localPath: localURL.path
+                localPath: localURL.path,
+                profile: profile,
+                repository: repository
             )
             transferQueue.append(.upload(
                 jobId: jobId,
@@ -665,7 +681,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
         let jobId = enqueueRemoteFileTransferJob(
             direction: .download,
             remotePath: entry.path,
-            localPath: localURL.path
+            localPath: localURL.path,
+            profile: profile,
+            repository: repository
         )
         remoteFileErrorMessage = nil
         remoteFileActionMessage = nil
@@ -699,7 +717,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
             let jobId = enqueueRemoteFileTransferJob(
                 direction: .download,
                 remotePath: entry.path,
-                localPath: localURL.path
+                localPath: localURL.path,
+                profile: profile,
+                repository: repository
             )
             transferQueue.append(.download(
                 jobId: jobId,
@@ -724,10 +744,11 @@ final class ServerWorkspaceViewModel: ObservableObject {
     }
 
     func cancelPendingRemoteFileTransfers() {
-        let pendingIds = transferQueue.map(\.jobId)
+        let pendingRequests = transferQueue
         transferQueue.removeAll()
-        for id in pendingIds {
-            finishRemoteFileTransferJob(id, status: .cancelled, message: "Transfer cancelled.")
+        for request in pendingRequests {
+            finishRemoteFileTransferJob(request.jobId, status: .cancelled, message: "Transfer cancelled.")
+            persistRemoteFileTransferJob(request.jobId, profile: request.profile, repository: request.repository)
         }
     }
 
@@ -2702,7 +2723,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
     private func enqueueRemoteFileTransferJob(
         direction: RemoteFileTransferDirection,
         remotePath: String,
-        localPath: String
+        localPath: String,
+        profile: ServerProfile,
+        repository: ServerRepository?
     ) -> UUID {
         let id = UUID()
         remoteFileTransferJobs.insert(RemoteFileTransferJob(
@@ -2717,6 +2740,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
             startedAt: Date(),
             finishedAt: nil
         ), at: 0)
+        persistRemoteFileTransferJob(id, profile: profile, repository: repository)
         return id
     }
 
@@ -2726,6 +2750,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         runningTransferJobId = request.jobId
         isTransferringRemoteFile = true
         markRemoteFileTransferJobRunning(request.jobId)
+        persistRemoteFileTransferJob(request.jobId, profile: request.profile, repository: request.repository)
 
         transferTask = Task {
             switch request {
@@ -3041,6 +3066,24 @@ private enum QueuedRemoteFileTransfer {
             jobId
         case let .download(jobId, _, _, _, _, _, _):
             jobId
+        }
+    }
+
+    var profile: ServerProfile {
+        switch self {
+        case let .upload(_, _, _, profile, _, _, _, _):
+            profile
+        case let .download(_, _, _, profile, _, _, _):
+            profile
+        }
+    }
+
+    var repository: ServerRepository? {
+        switch self {
+        case let .upload(_, _, _, _, _, _, _, repository):
+            repository
+        case let .download(_, _, _, _, _, _, repository):
+            repository
         }
     }
 }

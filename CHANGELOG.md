@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - Added repository-versioned PNG snapshots for the macOS MVP v0.2 design.
 - Aligned the Phase 1 implementation plan and architecture documents with the local macOS v0.2 design flow.
 - Added Chinese implementation plans for all roadmap phases from Phase 1 to Phase 8.
+- Added persisted pending/running remote file transfer jobs with interrupted recovery on workspace reload.
 - Removed the internal English documentation mirror to avoid duplicated implementation planning drift.
 - Started the macOS native app with a SwiftUI server browser, server workspace, SQLite persistence, Keychain credential storage, host-key trust flow, and real OpenSSH smoke-test adapter.
 - Added the macOS unit test target covering repository, Keychain, server-management, form validation, and skipped-by-default SSH integration testing.
