@@ -93,6 +93,43 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.commandHistory.isEmpty)
     }
 
+    func testExecuteCommandFailureStoresFailureSummary() async throws {
+        let profile = makeProfile()
+        let client = MockSSHClient(error: SSHClientError.processFailed("exit 127: command not found"))
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.executeCommand("missing-tool", profile: profile, sshClient: client)
+        try await waitUntil { viewModel.isRunningCommand == false && viewModel.lastCommandFailure != nil }
+
+        XCTAssertEqual(viewModel.lastCommandFailure, CommandFailureSummary(
+            command: "missing-tool",
+            message: "exit 127: command not found"
+        ))
+        XCTAssertEqual(viewModel.errorMessage, "exit 127: command not found")
+        XCTAssertNil(viewModel.commandResult)
+    }
+
+    func testRerunCommandExecutesPersistedHistoryEntry() async throws {
+        let profile = makeProfile()
+        let client = MockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let entry = CommandHistoryEntry(
+            id: UUID(),
+            serverId: profile.id,
+            command: "df -h",
+            exitCode: 0,
+            duration: 0.1,
+            createdAt: Date()
+        )
+
+        viewModel.rerunCommand(entry, profile: profile, sshClient: client)
+        try await waitUntil { viewModel.isRunningCommand == false && viewModel.commandResult != nil }
+
+        XCTAssertEqual(viewModel.commandResult?.command, "df -h")
+        XCTAssertEqual(viewModel.commandResult?.stdout, "ran: df -h")
+        XCTAssertEqual(viewModel.commandHistory.map(\.command), ["df -h"])
+    }
+
     func testTrustPendingHostKeyResumesOriginalCommand() async throws {
         let profile = makeProfile()
         let hostKey = HostKeyInfo(

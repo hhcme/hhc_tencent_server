@@ -8,6 +8,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
+    @Published var lastCommandFailure: CommandFailureSummary?
     @Published var errorMessage: String?
     @Published var pendingHostKey: HostKeyInfo?
     private var pendingHostKeyAction: PendingHostKeyAction?
@@ -90,6 +91,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         isRunningCommand = true
         errorMessage = nil
         commandResult = nil
+        lastCommandFailure = nil
 
         Task {
             do {
@@ -118,6 +120,15 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func rerunCommand(
+        _ entry: CommandHistoryEntry,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        repository: ServerRepository? = nil
+    ) {
+        executeCommand(entry.command, profile: profile, sshClient: sshClient, repository: repository)
     }
 
     func trustPendingHostKey(profile: ServerProfile, sshClient: SSHClient) {
@@ -151,6 +162,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
 
     private func storeCommandResult(_ result: CommandResult) {
         commandResult = result
+        lastCommandFailure = nil
         commandHistory.insert(result, at: 0)
     }
 
@@ -191,6 +203,10 @@ final class ServerWorkspaceViewModel: ObservableObject {
         profile: ServerProfile,
         repository: ServerRepository?
     ) {
+        lastCommandFailure = CommandFailureSummary(
+            command: command,
+            message: error.localizedDescription
+        )
         guard let repository else { return }
         do {
             try repository.saveCommandHistory(CommandHistoryEntry(
@@ -215,6 +231,11 @@ final class ServerWorkspaceViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
     }
+}
+
+struct CommandFailureSummary: Equatable, Hashable {
+    var command: String
+    var message: String
 }
 
 private enum PendingHostKeyAction {

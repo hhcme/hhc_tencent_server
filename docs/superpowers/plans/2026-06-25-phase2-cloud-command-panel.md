@@ -155,10 +155,10 @@ CREATE TABLE operation_logs (
 - [ ] 实现命令输入、执行状态、取消、输出展示。
 - [x] 持久化 command、exit code、duration、created at 等命令元数据。
 - [x] 明确 stdout/stderr 默认只保留在本次会话中，不写入 SQLite。
-- [ ] stdout/stderr 分开展示。
-- [ ] 保存命令历史，不保存包含疑似密钥的命令输出。
-- [ ] 支持重复执行历史命令。
-- [ ] 命令执行失败时展示 exit code 和 stderr。
+- [x] stdout/stderr 分开展示。
+- [x] 保存命令历史，不保存包含疑似密钥的命令输出。
+- [x] 支持重复执行历史命令。
+- [x] 命令执行失败时展示 exit code 和 stderr。
 
 ### Task 7：测试
 
@@ -167,7 +167,7 @@ CREATE TABLE operation_logs (
 - [x] Tencent Cloud response parser 测试。
 - [x] 实例同步 upsert 测试。
 - [x] 命令历史测试。
-- [ ] 命令面板 ViewModel 测试。
+- [x] 命令面板 ViewModel 测试。
 
 ### Task 8：手动验收
 

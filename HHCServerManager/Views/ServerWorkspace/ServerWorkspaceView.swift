@@ -214,14 +214,20 @@ struct ServerWorkspaceView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    if viewModel.commandHistory.isEmpty && viewModel.persistedCommandHistory.isEmpty {
+                    if viewModel.commandHistory.isEmpty &&
+                        viewModel.persistedCommandHistory.isEmpty &&
+                        viewModel.lastCommandFailure == nil {
                         ContentUnavailableView(
                             "No Commands Yet",
                             systemImage: "terminal",
                             description: Text("Run a command to see stdout, stderr, exit code, and duration.")
                         )
                         .frame(maxWidth: .infinity, minHeight: 240)
-                    } else if !viewModel.commandHistory.isEmpty {
+                    } else {
+                        if let failure = viewModel.lastCommandFailure {
+                            CommandFailureView(failure: failure)
+                        }
+
                         ForEach(Array(viewModel.commandHistory.enumerated()), id: \.offset) { _, result in
                             CommandResultView(result: result)
                         }
@@ -261,6 +267,21 @@ struct ServerWorkspaceView: View {
                     }
 
                     Spacer()
+
+                    Button {
+                        commandText = entry.command
+                        viewModel.rerunCommand(
+                            entry,
+                            profile: profile,
+                            sshClient: appState.sshClient,
+                            repository: appState.repository
+                        )
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Run this command again")
+                    .disabled(viewModel.isRunningCommand)
                 }
                 .padding(10)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
@@ -358,25 +379,50 @@ private struct CommandResultView: View {
                     .foregroundStyle(.secondary)
             }
 
-            outputBlock(title: "stdout", value: result.stdout)
+            outputBlock(title: "stdout", value: result.stdout, isError: false)
             if !result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                outputBlock(title: "stderr", value: result.stderr)
+                outputBlock(title: "stderr", value: result.stderr, isError: true)
             }
         }
     }
 
-    private func outputBlock(title: String, value: String) -> some View {
+    private func outputBlock(title: String, value: String, isError: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isError ? .red : .secondary)
             Text(value.isEmpty ? "(empty)" : value)
                 .font(.system(.body, design: .monospaced))
                 .textSelection(.enabled)
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                .background(isError ? Color.red.opacity(0.08) : Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
         }
+    }
+}
+
+private struct CommandFailureView: View {
+    let failure: CommandFailureSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Command Failed", systemImage: "xmark.octagon")
+                .font(.headline)
+                .foregroundStyle(.red)
+
+            Text(failure.command)
+                .font(.system(.body, design: .monospaced))
+                .textSelection(.enabled)
+
+            Text(failure.message)
+                .font(.system(.body, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        }
+        .padding(12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
