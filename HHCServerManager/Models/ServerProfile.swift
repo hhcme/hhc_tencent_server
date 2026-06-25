@@ -625,6 +625,24 @@ enum RemoteOperationRiskFactory {
         )
     }
 
+    static func deploymentRollback(project: DeploymentProject, run: DeploymentRun) -> RemoteOperationRisk {
+        let targetCommit = run.previousCommit ?? "previous commit"
+        return RemoteOperationRisk(
+            id: "deployment-rollback-\(project.id)-\(run.id)",
+            level: .high,
+            title: "Rollback Deployment",
+            target: "\(project.name) -> \(targetCommit)",
+            commandPreview: "git checkout \(targetCommit) && git reset --hard \(targetCommit)",
+            impact: [
+                "The deployment working tree will be reset to the selected previous commit.",
+                "Configured build, restart, and health check commands will run again.",
+            ],
+            recovery: "Run a new deployment from the target branch if the rollback needs to be undone.",
+            auditTargetType: "deployment",
+            auditAction: "rollback"
+        )
+    }
+
     static func securityGroupChange(_ preview: CloudSecurityGroupRuleChangePreview) -> RemoteOperationRisk {
         let level: RemoteOperationRiskLevel
         if preview.warnings.contains(where: { $0.lowercased().contains("public internet") }) {

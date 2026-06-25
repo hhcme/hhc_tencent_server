@@ -89,8 +89,8 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - 部署项目列表、添加、编辑、删除。（已完成基础 UI）
 - 手动部署按钮和部署前预览。（已完成基础 UI）
 - 部署运行详情：步骤、状态、日志、耗时、失败原因。（已完成基础 UI；实时流式刷新后续增强）
-- 回滚按钮：展示 previous commit 并触发受控 rollback。（已完成基础 UI；风险说明后续接入统一确认）
-- webhook 设置：启用开关、secret、允许分支。（已完成配置、核心校验和本地 HTTP listener 基础；监听开关和地址展示后续接入 UI）
+- 回滚按钮：展示 previous commit，先展示统一风险确认，再触发受控 rollback。（已完成基础 UI 和风险确认）
+- webhook 设置：启用开关、secret、允许分支、本地 listener 启停和监听地址。（已完成配置、核心校验、listener 基础和 UI 接入）
 
 ## 7. 实施任务
 
@@ -129,6 +129,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] 重新执行构建和重启。
 - [x] 回滚也记录独立 run。
 - [x] 没有 previous commit 时禁用回滚。
+- [x] 回滚前复用统一风险确认，展示目标 commit、命令预览、影响和恢复说明。
 
 ### Task 6：Webhook
 
@@ -136,13 +137,14 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] 校验 GitLab `X-Gitlab-Token`，使用常量时间比较。
 - [x] 过滤项目、分支和事件类型。
 - [x] 触发部署前写入操作日志：webhook run 开始和结束都会写入 `operation_logs`，记录 project id、状态和摘要。
-- [ ] UI 明确说明桌面客户端离线时不会自动部署。
+- [x] UI 明确说明桌面客户端离线时不会自动部署，并提供本地 listener start/stop、端口和 URL 展示。
 
 ### Task 7：测试
 
 - [x] DeploymentProjectStore 测试：已覆盖项目持久化、更新、按服务器过滤、删除级联运行和日志。
 - [x] DeploymentRunner 状态机测试：已覆盖成功执行、日志持久化、commit 捕获、步骤失败停止和取消落库。
 - [x] Deployment workspace ViewModel 测试：已覆盖项目表单保存、命令预览和 UI 触发手动部署后读取运行日志。
+- [x] Deployment rollback 风险确认测试：已覆盖统一风险模型的级别、审计类型、动作和命令预览。
 - [x] 命令构建和目录白名单测试：已覆盖受控 clone/fetch/checkout/build/restart/health check 命令预览、危险路径拒绝、非法 branch/URL/多行命令拒绝。
 - [x] rollback 测试：已覆盖回滚 run、previous/target commit 捕获和 `git reset --hard <commit>` 命令。
 - [x] webhook secret 常量时间比较测试。

@@ -19,6 +19,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingNginxReload = false
     @State private var pendingNginxSave = false
     @State private var pendingEnvironmentSave = false
+    @State private var pendingDeploymentRollback: DeploymentRollbackRequest?
     @State private var securityGroupDraftDirection: CloudSecurityGroupRuleDirection = .ingress
     @State private var securityGroupDraftProtocol = "TCP"
     @State private var securityGroupDraftPort = "22"
@@ -167,6 +168,21 @@ struct ServerWorkspaceView: View {
             }
         } message: {
             Text(RemoteOperationRiskFactory.saveEnvironmentFile(path: viewModel.environmentFileContent?.file.path ?? "environment file").confirmationMessage)
+        }
+        .alert(item: $pendingDeploymentRollback) { request in
+            Alert(
+                title: Text("Rollback Deployment?"),
+                message: Text(request.risk.confirmationMessage),
+                primaryButton: .destructive(Text("Rollback")) {
+                    viewModel.rollbackDeployment(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        deploymentRunner: appState.deploymentRunner,
+                        repository: appState.repository
+                    )
+                },
+                secondaryButton: .cancel()
+            )
         }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
@@ -694,6 +710,10 @@ struct ServerWorkspaceView: View {
                         )
                         .textFieldStyle(.roundedBorder)
                     }
+                    GridRow {
+                        Text("Listener").foregroundStyle(.secondary)
+                        deploymentWebhookListenerControls
+                    }
                 }
             }
 
@@ -718,12 +738,7 @@ struct ServerWorkspaceView: View {
                 .disabled(viewModel.isRunningDeployment || viewModel.deploymentCommandPlan == nil)
 
                 Button {
-                    viewModel.rollbackDeployment(
-                        profile: profile,
-                        sshClient: appState.sshClient,
-                        deploymentRunner: appState.deploymentRunner,
-                        repository: appState.repository
-                    )
+                    prepareDeploymentRollback()
                 } label: {
                     Label("Rollback", systemImage: "arrow.uturn.backward")
                 }
@@ -765,6 +780,43 @@ struct ServerWorkspaceView: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        }
+    }
+
+    private var deploymentWebhookListenerControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                TextField("8787", text: $viewModel.deploymentWebhookListenerPortText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(width: 90)
+                    .disabled(viewModel.isDeploymentWebhookListenerRunning)
+
+                if viewModel.isDeploymentWebhookListenerRunning {
+                    Button {
+                        viewModel.stopDeploymentWebhookListener(appState.deploymentWebhookHTTPServer)
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                } else {
+                    Button {
+                        viewModel.startDeploymentWebhookListener(appState.deploymentWebhookHTTPServer)
+                    } label: {
+                        Label("Start", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                }
+            }
+
+            if let url = viewModel.deploymentWebhookListenerURL {
+                Text(url)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            Label("Automatic deployment only works while this Mac app is running and the listener is started.", systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -2221,6 +2273,18 @@ struct ServerWorkspaceView: View {
         }
     }
 
+    private func prepareDeploymentRollback() {
+        guard let project = viewModel.selectedDeploymentProject else {
+            viewModel.deploymentErrorMessage = "Select a deployment project before rollback."
+            return
+        }
+        guard let run = viewModel.selectedDeploymentRun, run.previousCommit != nil else {
+            viewModel.deploymentErrorMessage = "Selected run does not have a previous commit to roll back to."
+            return
+        }
+        pendingDeploymentRollback = DeploymentRollbackRequest(project: project, run: run)
+    }
+
     private var currentServerBinding: Binding<UUID> {
         Binding(
             get: { appState.selectedServerId ?? profile.id },
@@ -2487,6 +2551,19 @@ private struct CronActionRequest: Identifiable {
 
     var risk: RemoteOperationRisk {
         RemoteOperationRiskFactory.cron(action: action, entry: entry)
+    }
+}
+
+private struct DeploymentRollbackRequest: Identifiable {
+    var project: DeploymentProject
+    var run: DeploymentRun
+
+    var id: String {
+        "\(project.id)-\(run.id)"
+    }
+
+    var risk: RemoteOperationRisk {
+        RemoteOperationRiskFactory.deploymentRollback(project: project, run: run)
     }
 }
 

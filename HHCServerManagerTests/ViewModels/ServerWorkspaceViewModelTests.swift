@@ -47,6 +47,39 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         let environmentRisk = RemoteOperationRiskFactory.saveEnvironmentFile(path: "/srv/app/.env")
         XCTAssertEqual(environmentRisk.auditTargetType, "environment")
         XCTAssertTrue(environmentRisk.confirmationMessage.contains("Environment changes"))
+
+        let deploymentProject = DeploymentProject(
+            id: UUID(),
+            serverId: UUID(),
+            name: "Website",
+            repositoryURL: "git@gitlab.com:hhc/site.git",
+            branch: "main",
+            deployPath: "/srv/site",
+            buildCommand: "npm ci",
+            restartCommand: "systemctl restart site.service",
+            healthCheckCommand: nil,
+            webhookEnabled: true,
+            webhookSecretRef: "deployment_webhook_ref",
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        let deploymentRun = DeploymentRun(
+            id: UUID(),
+            projectId: deploymentProject.id,
+            triggerType: .manual,
+            requestedRef: "main",
+            previousCommit: "abc1234",
+            targetCommit: "def5678",
+            status: .succeeded,
+            startedAt: Date(),
+            finishedAt: Date(),
+            summary: "Deployment completed."
+        )
+        let rollbackRisk = RemoteOperationRiskFactory.deploymentRollback(project: deploymentProject, run: deploymentRun)
+        XCTAssertEqual(rollbackRisk.level, .high)
+        XCTAssertEqual(rollbackRisk.auditTargetType, "deployment")
+        XCTAssertEqual(rollbackRisk.auditAction, "rollback")
+        XCTAssertTrue(rollbackRisk.confirmationMessage.contains("git reset --hard abc1234"))
     }
 
     func testCloudSecurityGroupRuleChangePreviewBuildsDiffAndRisk() {

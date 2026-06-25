@@ -82,6 +82,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isLoadingDeployments = false
     @Published var isSavingDeploymentProject = false
     @Published var isRunningDeployment = false
+    @Published var isDeploymentWebhookListenerRunning = false
+    @Published var deploymentWebhookListenerPortText = "8787"
+    @Published var deploymentWebhookListenerURL: String?
     @Published var deploymentErrorMessage: String?
     @Published var deploymentActionMessage: String?
     @Published var commandResult: CommandResult?
@@ -1526,6 +1529,35 @@ final class ServerWorkspaceViewModel: ObservableObject {
 
     func cancelDeployment() {
         deploymentTask?.cancel()
+    }
+
+    func startDeploymentWebhookListener(_ server: DeploymentWebhookHTTPServer) {
+        let trimmedPort = deploymentWebhookListenerPortText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let port = UInt16(trimmedPort) else {
+            deploymentErrorMessage = "Webhook listener port must be between 0 and 65535."
+            return
+        }
+
+        do {
+            try server.start(port: port)
+            let activePort = server.port ?? port
+            deploymentWebhookListenerPortText = "\(activePort)"
+            deploymentWebhookListenerURL = "http://127.0.0.1:\(activePort)/webhooks/gitlab"
+            isDeploymentWebhookListenerRunning = true
+            deploymentActionMessage = "Webhook listener started."
+            deploymentErrorMessage = nil
+        } catch {
+            deploymentErrorMessage = error.localizedDescription
+            isDeploymentWebhookListenerRunning = false
+            deploymentWebhookListenerURL = nil
+        }
+    }
+
+    func stopDeploymentWebhookListener(_ server: DeploymentWebhookHTTPServer) {
+        server.stop()
+        isDeploymentWebhookListenerRunning = false
+        deploymentWebhookListenerURL = nil
+        deploymentActionMessage = "Webhook listener stopped."
     }
 
     private func resetDeploymentDraft(serverId: UUID) {
