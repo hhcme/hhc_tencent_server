@@ -228,10 +228,18 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
             .cleanup()
         }
 
+        let shouldResume = try await shouldResumeSFTPTransfer(
+            direction: direction,
+            remotePath: remotePath,
+            localPath: localURL.path,
+            profile: profile,
+            knownHostsURL: knownHostsURL
+        )
         let batchCommand = Self.sftpBatchCommand(
             direction: direction,
             localPath: localURL.path,
-            remotePath: remotePath
+            remotePath: remotePath,
+            resume: shouldResume
         )
         try batchCommand.write(to: batchURL, atomically: true, encoding: .utf8)
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: batchURL.path)
@@ -288,13 +296,11 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         }
 
         let sshCommand = (["ssh"] + authContext.arguments.map(Self.shellQuote)).joined(separator: " ")
-        let arguments = [
-            "--partial",
-            "--progress",
-            "-e", sshCommand,
-            rsyncSource,
-            rsyncDestination,
-        ]
+        let arguments = Self.rsyncTransferArguments(
+            source: rsyncSource,
+            destination: rsyncDestination,
+            sshCommand: sshCommand
+        )
         let processResult = try await runProcessStreaming(
             "/usr/bin/rsync",
             arguments: arguments,
@@ -489,18 +495,56 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
     static func sftpBatchCommand(
         direction: RemoteFileTransferDirection,
         localPath: String,
-        remotePath: String
+        remotePath: String,
+        resume: Bool = false
     ) -> String {
         switch direction {
         case .upload:
-            "put \(sftpBatchQuote(localPath)) \(sftpBatchQuote(remotePath))\n"
+            "\(resume ? "put -a" : "put") \(sftpBatchQuote(localPath)) \(sftpBatchQuote(remotePath))\n"
         case .download:
-            "get \(sftpBatchQuote(remotePath)) \(sftpBatchQuote(localPath))\n"
+            "\(resume ? "get -a" : "get") \(sftpBatchQuote(remotePath)) \(sftpBatchQuote(localPath))\n"
         }
     }
 
     private static func sftpBatchQuote(_ value: String) -> String {
         "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
+    }
+
+    static func rsyncTransferArguments(source: String, destination: String, sshCommand: String) -> [String] {
+        [
+            "--partial",
+            "--append-verify",
+            "--progress",
+            "-e", sshCommand,
+            source,
+            destination,
+        ]
+    }
+
+    private func shouldResumeSFTPTransfer(
+        direction: RemoteFileTransferDirection,
+        remotePath: String,
+        localPath: String,
+        profile: ServerProfile,
+        knownHostsURL: URL
+    ) async throws -> Bool {
+        switch direction {
+        case .upload:
+            let authContext = try makeAuthContext(profile: profile, knownHostsURL: knownHostsURL, portFlag: "-p")
+            defer {
+                authContext.cleanup()
+            }
+            var arguments = authContext.arguments
+            arguments.append("\(profile.username)@\(profile.host)")
+            arguments.append("test -f -- \(Self.shellQuote(remotePath))")
+            let result = try await runProcess("/usr/bin/ssh", arguments: arguments, environment: authContext.environment)
+            return result.exitCode == 0
+        case .download:
+            guard let size = (try? fileManager.attributesOfItem(atPath: localPath)[.size]) as? Int64 else {
+                return false
+            }
+            return size > 0
+        }
     }
 
     static func rsyncProgressUpdates(from output: String) -> [RemoteFileTransferProgress] {

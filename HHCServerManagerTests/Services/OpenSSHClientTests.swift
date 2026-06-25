@@ -85,6 +85,42 @@ final class OpenSSHClientTests: XCTestCase {
         XCTAssertEqual(download, "get \"/srv/app/app config.json\" \"/Users/hhc/Downloads/app config.json\"\n")
     }
 
+    func testSFTPBatchCommandsUseAppendModeWhenResuming() {
+        let upload = OpenSSHClient.sftpBatchCommand(
+            direction: .upload,
+            localPath: "/Users/hhc/Downloads/app.tar.gz",
+            remotePath: "/srv/app.tar.gz",
+            resume: true
+        )
+        let download = OpenSSHClient.sftpBatchCommand(
+            direction: .download,
+            localPath: "/Users/hhc/Downloads/app.tar.gz",
+            remotePath: "/srv/app.tar.gz",
+            resume: true
+        )
+
+        XCTAssertEqual(upload, "put -a \"/Users/hhc/Downloads/app.tar.gz\" \"/srv/app.tar.gz\"\n")
+        XCTAssertEqual(download, "get -a \"/srv/app.tar.gz\" \"/Users/hhc/Downloads/app.tar.gz\"\n")
+    }
+
+    func testRsyncTransferArgumentsUseAppendVerifyResumeMode() {
+        let arguments = OpenSSHClient.rsyncTransferArguments(
+            source: "/Users/hhc/Downloads/app.tar.gz",
+            destination: "root@example.internal:/srv/app.tar.gz",
+            sshCommand: "ssh -p 22"
+        )
+
+        XCTAssertEqual(arguments, [
+            "--partial",
+            "--append-verify",
+            "--progress",
+            "-e",
+            "ssh -p 22",
+            "/Users/hhc/Downloads/app.tar.gz",
+            "root@example.internal:/srv/app.tar.gz",
+        ])
+    }
+
     func testSSHConfigValueEscapesSpacesAndBackslashes() {
         XCTAssertEqual(
             OpenSSHClient.sshConfigValue("/Users/hhc/Library/Application Support/HHCServerManager/known_hosts"),

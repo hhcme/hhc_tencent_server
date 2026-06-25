@@ -20,11 +20,6 @@ final class SSHIntegrationTests: XCTestCase {
         let token = "hhc-transfer-\(UUID().uuidString)"
         let remoteBasePath = "/tmp/\(token)"
         let remoteUploadPath = "\(remoteBasePath)/uploaded.txt"
-        defer {
-            Task {
-                _ = try? await harness.sshClient.execute("rm -rf -- \(Self.shellQuote(remoteBasePath))", profile: harness.profile)
-            }
-        }
 
         let mkdir = try await harness.sshClient.execute("mkdir -p -- \(Self.shellQuote(remoteBasePath))", profile: harness.profile)
         XCTAssertEqual(mkdir.exitCode, 0, mkdir.stderr)
