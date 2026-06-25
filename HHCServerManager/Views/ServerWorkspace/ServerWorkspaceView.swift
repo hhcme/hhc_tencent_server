@@ -49,6 +49,8 @@ struct ServerWorkspaceView: View {
                     .tag("securityGroups")
                 Label("Deployments", systemImage: "arrow.down.doc")
                     .tag("deployments")
+                Label("Registries", systemImage: "shippingbox")
+                    .tag("registries")
                 Label("Environment", systemImage: "slider.horizontal.3")
                     .tag("environment")
                 Label("Cron", systemImage: "calendar.badge.clock")
@@ -279,6 +281,8 @@ struct ServerWorkspaceView: View {
             securityGroupsPanel
         case "deployments":
             deploymentsPanel
+        case "registries":
+            registriesPanel
         case "environment":
             environmentPanel
         case "cron":
@@ -617,6 +621,218 @@ struct ServerWorkspaceView: View {
         }
         .onAppear {
             viewModel.loadDeploymentProjects(profile: profile, repository: appState.repository)
+        }
+    }
+
+    private var registriesPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Package Registries")
+                            .font(.title2.weight(.semibold))
+                        Text("Verdaccio · \(viewModel.registryDraft.listenHost):\(viewModel.registryDraft.listenPort)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Button {
+                            viewModel.runRegistryPreflight(
+                                profile: profile,
+                                sshClient: appState.sshClient,
+                                registryPreflightChecker: appState.registryPreflightChecker
+                            )
+                        } label: {
+                            if viewModel.isRunningRegistryPreflight {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Preflight", systemImage: "checklist")
+                            }
+                        }
+                        .disabled(isRegistryBusy)
+
+                        Button {
+                            viewModel.loadVerdaccioStatus(
+                                profile: profile,
+                                sshClient: appState.sshClient,
+                                verdaccioManager: appState.verdaccioManager
+                            )
+                        } label: {
+                            if viewModel.isLoadingVerdaccioStatus {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Status", systemImage: "waveform.path.ecg")
+                            }
+                        }
+                        .disabled(isRegistryBusy)
+
+                        Button {
+                            viewModel.loadVerdaccioPackages(
+                                profile: profile,
+                                sshClient: appState.sshClient,
+                                verdaccioManager: appState.verdaccioManager
+                            )
+                        } label: {
+                            if viewModel.isLoadingVerdaccioPackages {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Packages", systemImage: "shippingbox")
+                            }
+                        }
+                        .disabled(isRegistryBusy)
+
+                        Button {
+                            viewModel.createVerdaccioBackup(
+                                profile: profile,
+                                sshClient: appState.sshClient,
+                                verdaccioManager: appState.verdaccioManager,
+                                repository: appState.repository
+                            )
+                        } label: {
+                            if viewModel.isCreatingVerdaccioBackup {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Backup", systemImage: "archivebox")
+                            }
+                        }
+                        .disabled(isRegistryBusy)
+                    }
+                }
+
+                if let message = viewModel.registryActionMessage {
+                    Label(message, systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
+                }
+                if let error = viewModel.registryErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Install Path").foregroundStyle(.secondary)
+                        Text(viewModel.registryDraft.installPath)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    GridRow {
+                        Text("Data Path").foregroundStyle(.secondary)
+                        Text(viewModel.registryDraft.dataPath)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    GridRow {
+                        Text("Service").foregroundStyle(.secondary)
+                        Text("\(viewModel.registryDraft.serviceName).service")
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    GridRow {
+                        Text("Version").foregroundStyle(.secondary)
+                        Text(viewModel.registryDraft.version)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                }
+
+                registryPreflightSection
+                verdaccioStatusSection
+                verdaccioPackagesSection
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Dart / Flutter")
+                        .font(.headline)
+                    Label(
+                        PubRegistryResearchHarness.currentReport().supportedProductPath,
+                        systemImage: "info.circle"
+                    )
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var registryPreflightSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Preflight")
+                .font(.headline)
+
+            if let report = viewModel.registryPreflightReport {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], spacing: 12) {
+                    ForEach(report.checks, id: \.id) { check in
+                        RegistryPreflightCheckTile(check: check)
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    "No Preflight Report",
+                    systemImage: "checklist",
+                    description: Text("Run preflight before installing or managing Verdaccio.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 140)
+            }
+        }
+    }
+
+    private var verdaccioStatusSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Status")
+                .font(.headline)
+
+            if let snapshot = viewModel.verdaccioStatusSnapshot {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
+                    RegistryStatusTile(title: "Service", value: snapshot.activeState, color: snapshot.isRunning ? .green : .orange)
+                    RegistryStatusTile(title: "Substate", value: snapshot.subState, color: snapshot.isRunning ? .green : .secondary)
+                    RegistryStatusTile(title: "Version", value: snapshot.version ?? "unknown", color: .secondary)
+                    RegistryStatusTile(title: "Storage", value: snapshot.storageBytes.map(formatBytes) ?? "unknown", color: .secondary)
+                }
+
+                if !snapshot.recentLogs.isEmpty {
+                    Text(snapshot.recentLogs)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                }
+            } else {
+                ContentUnavailableView("No Verdaccio Status", systemImage: "waveform.path.ecg")
+                    .frame(maxWidth: .infinity, minHeight: 140)
+            }
+        }
+    }
+
+    private var verdaccioPackagesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Packages")
+                .font(.headline)
+
+            if viewModel.verdaccioPackages.isEmpty {
+                ContentUnavailableView("No Packages Loaded", systemImage: "shippingbox")
+                    .frame(maxWidth: .infinity, minHeight: 140)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(viewModel.verdaccioPackages) { package in
+                        HStack(spacing: 12) {
+                            Image(systemName: "shippingbox")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(package.name)
+                                    .font(.headline)
+                                Text("\(package.versionCount) versions · latest \(package.latestVersion ?? "unknown")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(package.sizeBytes.map(formatBytes) ?? "unknown")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(10)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            }
         }
     }
 
@@ -2527,12 +2743,23 @@ struct ServerWorkspaceView: View {
             viewModel.isLoadingCloudSecurityGroupPolicies
     }
 
+    private var isRegistryBusy: Bool {
+        viewModel.isRunningRegistryPreflight ||
+            viewModel.isLoadingVerdaccioStatus ||
+            viewModel.isLoadingVerdaccioPackages ||
+            viewModel.isCreatingVerdaccioBackup
+    }
+
     private var isNginxDraftDirty: Bool {
         viewModel.nginxConfigDraft != (viewModel.nginxConfigContent?.content ?? "")
     }
 
     private var isEnvironmentDraftDirty: Bool {
         viewModel.environmentFileDraft != (viewModel.environmentFileContent?.content ?? "")
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 
@@ -2739,6 +2966,80 @@ private struct FirewallSummaryTile: View {
             }
 
             Spacer()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct RegistryPreflightCheckTile: View {
+    let check: RegistryPreflightCheck
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: iconName)
+                .foregroundStyle(color)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(check.title)
+                    .font(.headline)
+                Text(check.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let remediation = check.remediation {
+                    Text(remediation)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var iconName: String {
+        switch check.status {
+        case .passed:
+            "checkmark.circle"
+        case .warning:
+            "exclamationmark.triangle"
+        case .failed:
+            "xmark.octagon"
+        }
+    }
+
+    private var color: Color {
+        switch check.status {
+        case .passed:
+            .green
+        case .warning:
+            .orange
+        case .failed:
+            .red
+        }
+    }
+}
+
+private struct RegistryStatusTile: View {
+    let title: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value.isEmpty ? "unknown" : value)
+                .font(.headline)
+                .foregroundStyle(color)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -19,6 +19,8 @@ final class AppState: ObservableObject {
     let deploymentRunner: DeploymentRunner
     let deploymentWebhookService: DeploymentWebhookService
     let deploymentWebhookHTTPServer: DeploymentWebhookHTTPServer
+    let registryPreflightChecker: RegistryPreflightChecker
+    let verdaccioManager: VerdaccioManager
     let sshClient: OpenSSHClient
 
     @Published var servers: [ServerProfile] = []
@@ -48,6 +50,8 @@ final class AppState: ObservableObject {
             environmentFileManager = EnvironmentFileManager()
             remoteFileService = RemoteFileService()
             deploymentRunner = DeploymentRunner(repository: repository)
+            registryPreflightChecker = RegistryPreflightChecker()
+            verdaccioManager = VerdaccioManager()
             deploymentWebhookService = DeploymentWebhookService(
                 repository: repository,
                 keychain: keychain,
@@ -86,6 +90,8 @@ final class AppState: ObservableObject {
             environmentFileManager = EnvironmentFileManager()
             remoteFileService = RemoteFileService()
             deploymentRunner = DeploymentRunner(repository: repository)
+            registryPreflightChecker = RegistryPreflightChecker()
+            verdaccioManager = VerdaccioManager()
             deploymentWebhookService = DeploymentWebhookService(
                 repository: repository,
                 keychain: keychain,

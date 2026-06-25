@@ -87,6 +87,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var deploymentWebhookListenerURL: String?
     @Published var deploymentErrorMessage: String?
     @Published var deploymentActionMessage: String?
+    @Published var registryDraft = VerdaccioInstallDraft()
+    @Published var registryPreflightReport: RegistryPreflightReport?
+    @Published var verdaccioStatusSnapshot: VerdaccioStatusSnapshot?
+    @Published var verdaccioPackages: [VerdaccioPackageSummary] = []
+    @Published var verdaccioBackupResult: VerdaccioRegistryBackupResult?
+    @Published var isRunningRegistryPreflight = false
+    @Published var isLoadingVerdaccioStatus = false
+    @Published var isLoadingVerdaccioPackages = false
+    @Published var isCreatingVerdaccioBackup = false
+    @Published var registryErrorMessage: String?
+    @Published var registryActionMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -1691,6 +1702,130 @@ final class ServerWorkspaceViewModel: ObservableObject {
             "sub=\(unit.subState)",
             "description=\(unit.description)",
         ].joined(separator: "\n")
+    }
+
+    func runRegistryPreflight(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        registryPreflightChecker: RegistryPreflightChecker
+    ) {
+        guard !isRunningRegistryPreflight else { return }
+        isRunningRegistryPreflight = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+
+        Task {
+            do {
+                let report = try await registryPreflightChecker.run(
+                    draft: registryDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.registryPreflightReport = report
+                    self.registryActionMessage = report.isReady ? "Registry preflight passed." : "Registry preflight found blocking checks."
+                    self.isRunningRegistryPreflight = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isRunningRegistryPreflight = false
+                }
+            }
+        }
+    }
+
+    func loadVerdaccioStatus(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager
+    ) {
+        guard !isLoadingVerdaccioStatus else { return }
+        isLoadingVerdaccioStatus = true
+        registryErrorMessage = nil
+
+        Task {
+            do {
+                let snapshot = try await verdaccioManager.loadStatus(
+                    draft: registryDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.verdaccioStatusSnapshot = snapshot
+                    self.registryActionMessage = snapshot.isRunning ? "Verdaccio is running." : "Verdaccio status loaded."
+                    self.isLoadingVerdaccioStatus = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isLoadingVerdaccioStatus = false
+                }
+            }
+        }
+    }
+
+    func loadVerdaccioPackages(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager
+    ) {
+        guard !isLoadingVerdaccioPackages else { return }
+        isLoadingVerdaccioPackages = true
+        registryErrorMessage = nil
+
+        Task {
+            do {
+                let packages = try await verdaccioManager.listPackages(
+                    draft: registryDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.verdaccioPackages = packages
+                    self.registryActionMessage = "Loaded \(packages.count) Verdaccio packages."
+                    self.isLoadingVerdaccioPackages = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isLoadingVerdaccioPackages = false
+                }
+            }
+        }
+    }
+
+    func createVerdaccioBackup(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager,
+        repository: ServerRepository
+    ) {
+        guard !isCreatingVerdaccioBackup else { return }
+        isCreatingVerdaccioBackup = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+
+        Task {
+            do {
+                let result = try await verdaccioManager.createBackup(
+                    draft: registryDraft,
+                    profile: profile,
+                    sshClient: sshClient,
+                    repository: repository
+                )
+                await MainActor.run {
+                    self.verdaccioBackupResult = result
+                    self.registryActionMessage = "Created Verdaccio backup at \(result.backupPath)."
+                    self.isCreatingVerdaccioBackup = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isCreatingVerdaccioBackup = false
+                }
+            }
+        }
     }
 
     private func runSmokeTest(

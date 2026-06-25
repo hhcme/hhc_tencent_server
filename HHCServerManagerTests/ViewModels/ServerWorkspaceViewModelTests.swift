@@ -1142,6 +1142,46 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.cloudSecurityGroupErrorMessage)
     }
 
+    func testPrivateRegistriesWorkspaceLoadsVerdaccioStateAndCreatesBackup() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = RegistryViewModelMockSSHClient()
+        let preflight = RegistryPreflightChecker(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.runRegistryPreflight(
+            profile: profile,
+            sshClient: client,
+            registryPreflightChecker: preflight
+        )
+        try await waitUntil { viewModel.isRunningRegistryPreflight == false && viewModel.registryPreflightReport != nil }
+
+        viewModel.loadVerdaccioStatus(profile: profile, sshClient: client, verdaccioManager: manager)
+        try await waitUntil { viewModel.isLoadingVerdaccioStatus == false && viewModel.verdaccioStatusSnapshot != nil }
+
+        viewModel.loadVerdaccioPackages(profile: profile, sshClient: client, verdaccioManager: manager)
+        try await waitUntil { viewModel.isLoadingVerdaccioPackages == false && !viewModel.verdaccioPackages.isEmpty }
+
+        viewModel.createVerdaccioBackup(
+            profile: profile,
+            sshClient: client,
+            verdaccioManager: manager,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isCreatingVerdaccioBackup == false && viewModel.verdaccioBackupResult != nil }
+
+        XCTAssertTrue(viewModel.registryPreflightReport?.isReady == true)
+        XCTAssertTrue(viewModel.verdaccioStatusSnapshot?.isRunning == true)
+        XCTAssertEqual(viewModel.verdaccioPackages.first?.name, "@scope/pkg")
+        XCTAssertEqual(viewModel.verdaccioBackupResult?.sizeBytes, 2048)
+        XCTAssertTrue(viewModel.registryActionMessage?.contains("Created Verdaccio backup") == true)
+        XCTAssertTrue(client.commands.contains { $0.contains("command -v htpasswd") })
+        XCTAssertTrue(client.commands.contains { $0.contains("journalctl -u") })
+        XCTAssertTrue(client.commands.contains { $0.contains("find \"$data_path\"") })
+        XCTAssertTrue(client.commands.contains { $0.contains("tar -czf") })
+    }
+
     private func makeProfile() -> ServerProfile {
         ServerProfile(
             id: UUID(),
@@ -1888,6 +1928,67 @@ private final class EnvironmentViewModelMockSSHClient: SSHClient, @unchecked Sen
         else { return nil }
         return String(command[start.upperBound..<end.lowerBound])
     }
+}
+
+private final class RegistryViewModelMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("__HHC_REGISTRY_NODE_VERSION__") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                __HHC_REGISTRY_NODE_VERSION__v20.11.1
+                __HHC_REGISTRY_PACKAGE_MANAGER__npm 10.2.4
+                __HHC_REGISTRY_HTPASSWD__yes
+                __HHC_REGISTRY_SYSTEMD__yes
+                __HHC_REGISTRY_PORT_BUSY__no
+                __HHC_REGISTRY_INSTALL_PARENT_WRITABLE__yes
+                __HHC_REGISTRY_DATA_PARENT_WRITABLE__yes
+                __HHC_REGISTRY_DISK_AVAILABLE_KB__1048576
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("__HHC_VERDACCIO_ACTIVE_STATE__") {
+            let logs = Data("Verdaccio listening on 127.0.0.1:4873\n".utf8).base64EncodedString()
+            return CommandResult(
+                command: command,
+                stdout: """
+                __HHC_VERDACCIO_ACTIVE_STATE__active
+                __HHC_VERDACCIO_SUB_STATE__running
+                __HHC_VERDACCIO_VERSION__5.31.1
+                __HHC_VERDACCIO_STORAGE_BYTES__2048
+                __HHC_VERDACCIO_LOGS__\(logs)
+                """,
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("find \"$data_path\"") {
+            return CommandResult(
+                command: command,
+                stdout: "@scope/pkg\t2\t1.1.0\t2048\t1700000000\n",
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("tar -czf") {
+            return CommandResult(command: command, stdout: "2048\n", stderr: "", exitCode: 0, duration: 0)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
 }
 
 private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {

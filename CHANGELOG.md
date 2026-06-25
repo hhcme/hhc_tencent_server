@@ -83,6 +83,7 @@ All notable changes to this project will be documented in this file.
 - Added a Dart/Flutter pub registry research harness and documented the Phase 6 decision to avoid self-hosted pub installers until real publish/get validation passes.
 - Disabled parallel Xcode test workers in the shared CI script to reduce duplicate app-host icons during macOS app-hosted tests.
 - Added Verdaccio htpasswd user create, password update, and delete command foundations with backup-before-change behavior and preflight warnings when htpasswd is unavailable.
+- Added a macOS Registries workspace section for Verdaccio preflight, service status, package listing, backup creation, and Dart/Flutter hosted repository direction.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -161,3 +162,4 @@ All notable changes to this project will be documented in this file.
 - 添加 Dart/Flutter pub registry 调研结论模型，并记录 Phase 6 暂不实现自托管 pub installer，需等待真实 publish/get 验收通过后再开放。
 - 在共享 CI 脚本中关闭 Xcode 并行测试 worker，减少 macOS app-hosted tests 期间 Dock 同时出现多个测试宿主图标。
 - 添加 Verdaccio htpasswd 用户创建、改密和删除命令层，支持修改前备份，并在 htpasswd 缺失时通过 preflight warning 提示。
+- 添加 macOS Registries 工作台入口，支持 Verdaccio preflight、服务状态、包列表、备份创建，以及 Dart/Flutter hosted repository 方向展示。
