@@ -149,6 +149,8 @@ export HHC_TEST_VERDACCIO_REAL="1"
 
 部署集成测试复用同一组环境变量。它只会在远端 `/tmp/hhc-deploy-*` 下创建临时 source/bare/deploy 目录，完成 clone/fetch/checkout/build/health check 后尝试清理，不会触碰生产部署目录。
 
+如果 `xcodebuild test` 启动的 GUI 测试宿主读不到一次性 shell 变量，可以临时使用 `launchctl setenv HHC_TEST_DEPLOYMENT_REAL 1` 打开受保护测试，运行完成后立即 `launchctl unsetenv HHC_TEST_DEPLOYMENT_REAL`。
+
 Phase 4 systemd/Cron/Environment 真实写操作集成测试默认跳过。确认目标服务器允许创建临时 `/etc/systemd/system/hhc-phase4-*.service`、写入当前 SSH 用户 crontab、在当前 SSH 用户 `$HOME` 下创建临时 `hhc-phase4-env-*` 目录，并接受测试结束后恢复原 crontab 和清理临时文件后再显式启用：
 
 ```sh

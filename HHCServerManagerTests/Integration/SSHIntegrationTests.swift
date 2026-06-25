@@ -764,7 +764,9 @@ final class SSHIntegrationTests: XCTestCase {
             return environment
         }
 
-        environment.merge(localEnvironment) { processValue, _ in processValue }
+        environment.merge(localEnvironment) { processValue, localValue in
+            processValue.isEmpty ? localValue : processValue
+        }
         return environment
     }
 
