@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - Added the macOS unit test target covering repository, Keychain, server-management, form validation, and skipped-by-default SSH integration testing.
 - Added password authentication support to the bootstrap OpenSSH adapter through a temporary askpass flow backed by Keychain credentials.
 - Added workspace connection state, Connect/Disconnect controls, and ViewModel tests for success, failure, host-key trust, and disconnect flows.
+- Added server editing with profile updates, credential preservation/replacement, edit UI entry points, and test coverage.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -49,3 +50,4 @@ All notable changes to this project will be documented in this file.
 - 添加 macOS 单元测试 target，覆盖 repository、Keychain、服务器管理、表单校验，以及默认跳过的真实 SSH 集成测试入口。
 - 为 bootstrap OpenSSH 适配层加入 password 认证支持，通过临时 askpass 流程读取 Keychain 凭据。
 - 添加工作台连接状态、Connect/Disconnect 控制，并补充 ViewModel 成功、失败、主机指纹信任和断开连接流程测试。
+- 添加服务器编辑能力，支持配置更新、凭据保留/替换、编辑入口和测试覆盖。

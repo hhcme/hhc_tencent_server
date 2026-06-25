@@ -84,3 +84,8 @@ enum CredentialInput: Equatable {
     case password(String)
     case privateKey(data: Data, passphrase: String?)
 }
+
+enum CredentialUpdate: Equatable {
+    case keepExisting
+    case replace(CredentialInput)
+}

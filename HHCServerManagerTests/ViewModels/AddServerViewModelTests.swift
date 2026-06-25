@@ -38,4 +38,37 @@ final class AddServerViewModelTests: XCTestCase {
         viewModel.password = "secret"
         XCTAssertNil(viewModel.validationError)
     }
+
+    func testEditingExistingPasswordServerDoesNotRequireReenteringPassword() {
+        let viewModel = AddServerViewModel()
+        viewModel.configureForEditing(makeProfile(authType: .password))
+
+        XCTAssertNil(viewModel.validationError)
+        XCTAssertEqual(viewModel.name, "Tencent")
+        XCTAssertEqual(viewModel.authType, .password)
+        XCTAssertTrue(viewModel.password.isEmpty)
+    }
+
+    func testEditingExistingPrivateKeyServerDoesNotRequireSelectingKeyAgain() {
+        let viewModel = AddServerViewModel()
+        viewModel.configureForEditing(makeProfile(authType: .privateKey))
+
+        XCTAssertNil(viewModel.validationError)
+        XCTAssertEqual(viewModel.privateKeyFileName, "Existing private key")
+    }
+
+    private func makeProfile(authType: SSHAuthType) -> ServerProfile {
+        ServerProfile(
+            id: UUID(),
+            name: "Tencent",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            authType: authType,
+            keychainRef: "server_test",
+            groupName: "prod",
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+    }
 }

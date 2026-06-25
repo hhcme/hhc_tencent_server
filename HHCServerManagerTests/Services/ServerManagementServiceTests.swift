@@ -48,6 +48,63 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertNil(try harness.keychain.readPrivateKey(keychainRef: profile.keychainRef))
     }
 
+    func testUpdateServerCanKeepExistingCredential() throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "Tencent",
+            host: "old.example",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("original")
+        )
+
+        let updated = try harness.service.updateServer(
+            profile,
+            name: "Renamed",
+            host: "new.example",
+            port: 2222,
+            username: "ubuntu",
+            groupName: "prod",
+            authType: .password,
+            credentialUpdate: .keepExisting
+        )
+
+        XCTAssertEqual(updated.id, profile.id)
+        XCTAssertEqual(updated.keychainRef, profile.keychainRef)
+        XCTAssertEqual(updated.name, "Renamed")
+        XCTAssertEqual(updated.port, 2222)
+        XCTAssertEqual(try harness.keychain.readPassword(keychainRef: profile.keychainRef), "original")
+    }
+
+    func testUpdateServerCanReplaceCredentialWithoutChangingKeychainRef() throws {
+        let harness = try Harness()
+        let profile = try harness.service.createServer(
+            name: "Tencent",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("old")
+        )
+
+        let updated = try harness.service.updateServer(
+            profile,
+            name: profile.name,
+            host: profile.host,
+            port: profile.port,
+            username: profile.username,
+            groupName: nil,
+            authType: .password,
+            credentialUpdate: .replace(.password("new"))
+        )
+
+        XCTAssertEqual(updated.keychainRef, profile.keychainRef)
+        XCTAssertEqual(try harness.keychain.readPassword(keychainRef: profile.keychainRef), "new")
+    }
+
     private final class Harness {
         let repository: ServerRepository
         let keychain: KeychainService

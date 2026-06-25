@@ -4,6 +4,7 @@ struct ServerBrowserView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = ServerBrowserViewModel()
     @State private var showingAddServer = false
+    @State private var serverPendingEdit: ServerProfile?
     @State private var serverPendingDeletion: ServerProfile?
 
     var body: some View {
@@ -35,6 +36,12 @@ struct ServerBrowserView: View {
             AddServerSheet { profile in
                 appState.reloadServers()
                 viewModel.selectedServerId = profile.id
+            }
+        }
+        .sheet(item: $serverPendingEdit) { profile in
+            AddServerSheet(profile: profile) { updated in
+                appState.reloadServers()
+                viewModel.selectedServerId = updated.id
             }
         }
         .confirmationDialog(
@@ -88,6 +95,9 @@ struct ServerBrowserView: View {
                             Button("Open") {
                                 appState.openWorkspace(for: profile)
                             }
+                            Button("Edit") {
+                                serverPendingEdit = profile
+                            }
                             Button("Delete", role: .destructive) {
                                 serverPendingDeletion = profile
                             }
@@ -106,6 +116,9 @@ struct ServerBrowserView: View {
                     profile: profile,
                     open: {
                         appState.openWorkspace(for: profile)
+                    },
+                    edit: {
+                        serverPendingEdit = profile
                     },
                     delete: {
                         serverPendingDeletion = profile
@@ -162,6 +175,7 @@ private struct ServerRowView: View {
 private struct ServerSummaryPanel: View {
     let profile: ServerProfile
     let open: () -> Void
+    let edit: () -> Void
     let delete: () -> Void
 
     var body: some View {
@@ -203,6 +217,10 @@ private struct ServerSummaryPanel: View {
                     Label("Open", systemImage: "arrow.right.circle")
                 }
                 .buttonStyle(.borderedProminent)
+
+                Button(action: edit) {
+                    Label("Edit", systemImage: "pencil")
+                }
 
                 Button(role: .destructive, action: delete) {
                     Label("Delete", systemImage: "trash")

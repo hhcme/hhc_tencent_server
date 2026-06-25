@@ -5,11 +5,17 @@ struct AddServerSheet: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = AddServerViewModel()
 
+    let profile: ServerProfile?
     let onSaved: (ServerProfile) -> Void
+
+    init(profile: ServerProfile? = nil, onSaved: @escaping (ServerProfile) -> Void) {
+        self.profile = profile
+        self.onSaved = onSaved
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Add Server")
+            Text(profile == nil ? "Add Server" : "Edit Server")
                 .font(.title2.weight(.semibold))
                 .padding([.horizontal, .top], 22)
 
@@ -30,7 +36,7 @@ struct AddServerSheet: View {
                     }
 
                     if viewModel.authType == .password {
-                        SecureField("Password", text: $viewModel.password)
+                        SecureField(profile == nil ? "Password" : "New Password", text: $viewModel.password)
                     } else {
                         HStack {
                             Text(viewModel.privateKeyFileName.isEmpty ? "No private key selected" : viewModel.privateKeyFileName)
@@ -42,7 +48,7 @@ struct AddServerSheet: View {
                                 Label("Choose", systemImage: "key")
                             }
                         }
-                        SecureField("Passphrase", text: $viewModel.passphrase)
+                        SecureField(profile == nil ? "Passphrase" : "New Passphrase", text: $viewModel.passphrase)
                     }
                 }
 
@@ -74,6 +80,11 @@ struct AddServerSheet: View {
             .padding(16)
         }
         .frame(width: 520, height: 560)
+        .onAppear {
+            if let profile {
+                viewModel.configureForEditing(profile)
+            }
+        }
     }
 
     private func save() {

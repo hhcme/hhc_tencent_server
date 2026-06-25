@@ -15,6 +15,7 @@ final class AddServerViewModel: ObservableObject {
     @Published var passphrase = ""
     @Published var errorMessage: String?
     @Published var isSaving = false
+    private var editingProfile: ServerProfile?
 
     var canSave: Bool {
         validationError == nil
@@ -35,15 +36,33 @@ final class AddServerViewModel: ObservableObject {
         }
         switch authType {
         case .password:
-            if password.isEmpty {
+            if password.isEmpty && editingProfile?.authType != .password {
                 return "Password is required."
             }
         case .privateKey:
-            if privateKeyData == nil {
+            if privateKeyData == nil && editingProfile?.authType != .privateKey {
                 return "Private key is required."
             }
         }
         return nil
+    }
+
+    var isEditing: Bool {
+        editingProfile != nil
+    }
+
+    func configureForEditing(_ profile: ServerProfile) {
+        editingProfile = profile
+        name = profile.name
+        host = profile.host
+        port = "\(profile.port)"
+        username = profile.username
+        groupName = profile.groupName ?? ""
+        authType = profile.authType
+        password = ""
+        privateKeyData = nil
+        privateKeyFileName = profile.authType == .privateKey ? "Existing private key" : ""
+        passphrase = ""
     }
 
     func choosePrivateKey() {
@@ -72,6 +91,30 @@ final class AddServerViewModel: ObservableObject {
         defer { isSaving = false }
 
         let portValue = Int(port) ?? 22
+        if let editingProfile {
+            let update: CredentialUpdate
+            switch authType {
+            case .password:
+                update = password.isEmpty ? .keepExisting : .replace(.password(password))
+            case .privateKey:
+                if let privateKeyData {
+                    update = .replace(.privateKey(data: privateKeyData, passphrase: passphrase.nilIfBlank))
+                } else {
+                    update = .keepExisting
+                }
+            }
+            return try service.updateServer(
+                editingProfile,
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                host: host.trimmingCharacters(in: .whitespacesAndNewlines),
+                port: portValue,
+                username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+                groupName: groupName,
+                authType: authType,
+                credentialUpdate: update
+            )
+        }
+
         let credential: CredentialInput
         switch authType {
         case .password:
