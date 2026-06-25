@@ -33,6 +33,62 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task SqliteRepositoryFileDoesNotContainCredentialMaterial()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hhc-windows-phase8-{Guid.NewGuid():N}.sqlite");
+        var connectionString = $"Data Source={databasePath}";
+        var password = "phase8-password-should-not-be-in-sqlite";
+        var privateKey = """
+            -----BEGIN OPENSSH PRIVATE KEY-----
+            phase8-private-key-should-not-be-in-sqlite
+            -----END OPENSSH PRIVATE KEY-----
+            """;
+        var passphrase = "phase8-passphrase-should-not-be-in-sqlite";
+
+        try
+        {
+            await using (var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:"))
+            await using (var repository = new SqliteServerRepository(connectionString))
+            {
+                var credentials = new InMemoryCredentialStore();
+                var service = new ServerManagementService(repository, hostKeys, credentials);
+
+                await service.AddServerAsync(
+                    "Password",
+                    "password.example.internal",
+                    22,
+                    "root",
+                    SshAuthType.Password,
+                    null,
+                    new CredentialInput.Password(password));
+                await service.AddServerAsync(
+                    "Private Key",
+                    "private-key.example.internal",
+                    22,
+                    "root",
+                    SshAuthType.PrivateKey,
+                    "ops",
+                    new CredentialInput.PrivateKey(System.Text.Encoding.UTF8.GetBytes(privateKey), passphrase));
+            }
+
+            var databaseText = System.Text.Encoding.UTF8.GetString(await File.ReadAllBytesAsync(databasePath));
+
+            Assert.DoesNotContain(password, databaseText);
+            Assert.DoesNotContain(privateKey, databaseText);
+            Assert.DoesNotContain("phase8-private-key-should-not-be-in-sqlite", databaseText);
+            Assert.DoesNotContain(passphrase, databaseText);
+            Assert.DoesNotContain("BEGIN OPENSSH PRIVATE KEY", databaseText);
+        }
+        finally
+        {
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+        }
+    }
+
+    [Fact]
     public async Task HostKeyTrustStoreDetectsTrustedAndMismatchedKeys()
     {
         await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");

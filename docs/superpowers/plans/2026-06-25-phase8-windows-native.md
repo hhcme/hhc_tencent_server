@@ -147,6 +147,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] Domain model 测试。
 - [x] SQLite repository 测试。
 - [x] Credential store 平台边界测试。
+- [x] SQLite 凭据隔离测试：使用真实临时 SQLite 文件验证密码、私钥内容和 passphrase 不会写入业务库。
 - [x] Host key trust 测试。
 - [x] SSH 状态机测试：覆盖首次 host key trust、确认后 smoke test、mismatch 阻断和 reject。
 - [ ] 可选真实 SSH 集成测试。
@@ -155,7 +156,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 
 - [ ] Windows app 可启动。
 - [ ] 添加服务器配置。
-- [ ] 凭据不写入 SQLite。
+- [ ] 凭据不写入 SQLite：核心自动测试已覆盖真实 SQLite 文件；仍待 Windows 主机确认 Credential Manager 实际读写路径。
 - [ ] 首次连接弹出 host key trust dialog。
 - [ ] 确认后连接成功。
 - [ ] smoke test 返回 `hhc-ssh-ok`。
