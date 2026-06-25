@@ -2321,4 +2321,31 @@ private struct SecurityGroupViewModelMockCloudAdapter: CloudProviderAdapter {
             capturedAt: capturedAt
         )
     }
+
+    func fetchDisks(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudDisk] {
+        []
+    }
+
+    func fetchSnapshots(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudSnapshot] {
+        []
+    }
+
+    func fetchBillingStates(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudBillingState] {
+        []
+    }
 }

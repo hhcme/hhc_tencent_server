@@ -172,6 +172,122 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testProviderCapabilityMatrixShowsRegisteredAndMissingAdapters() {
+        let registry = CloudProviderRegistry(adapters: [
+            MockCloudProviderAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .cloudDisks]
+            )
+        ])
+
+        let matrix = ProviderCapabilityMatrixBuilder.build(registry: registry)
+
+        XCTAssertEqual(matrix.status(providerId: .tencentCloud, capability: .regions)?.isRegistered, true)
+        XCTAssertEqual(matrix.status(providerId: .tencentCloud, capability: .cloudDisks)?.isSupported, true)
+        XCTAssertEqual(matrix.status(providerId: .tencentCloud, capability: .cloudSnapshots)?.isSupported, false)
+        XCTAssertEqual(matrix.status(providerId: .alibabaCloud, capability: .instanceDiscovery)?.isRegistered, false)
+        XCTAssertEqual(matrix.status(providerId: .huaweiCloud, capability: .instanceDiscovery)?.providerName, "Huawei Cloud")
+    }
+
+    func testCloudResourceSearchUnifiesFiltersAndSearchesResources() {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let resources = CloudResourceSearchService.unifiedResources(
+            instances: [
+                CloudInstanceLink(
+                    id: UUID(),
+                    serverId: nil,
+                    accountId: accountId,
+                    providerId: .tencentCloud,
+                    regionId: "ap-guangzhou",
+                    instanceId: "ins-123",
+                    displayName: "prod-api",
+                    publicIp: "203.0.113.8",
+                    privateIp: "10.0.0.8",
+                    status: "RUNNING",
+                    instanceType: "S5.SMALL1",
+                    zoneId: "ap-guangzhou-3",
+                    vpcId: "vpc-123",
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                ),
+            ],
+            securityGroups: [
+                CloudSecurityGroup(
+                    accountId: accountId,
+                    providerId: .tencentCloud,
+                    regionId: "ap-guangzhou",
+                    securityGroupId: "sg-123",
+                    name: "web",
+                    description: "public ingress",
+                    projectId: nil,
+                    isDefault: false,
+                    createdTime: nil,
+                    updatedTime: nil
+                ),
+            ],
+            disks: [
+                CloudDisk(
+                    id: UUID(),
+                    accountId: accountId,
+                    providerId: .tencentCloud,
+                    regionId: "ap-guangzhou",
+                    diskId: "disk-123",
+                    instanceId: "ins-123",
+                    name: "prod-data",
+                    diskType: "CLOUD_PREMIUM",
+                    sizeGB: 100,
+                    status: "ATTACHED",
+                    billingType: "POSTPAID_BY_HOUR",
+                    expiredTime: nil,
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                ),
+            ],
+            snapshots: [
+                CloudSnapshot(
+                    id: UUID(),
+                    accountId: accountId,
+                    providerId: .tencentCloud,
+                    regionId: "ap-guangzhou",
+                    snapshotId: "snap-123",
+                    diskId: "disk-123",
+                    name: "prod-before-upgrade",
+                    status: "NORMAL",
+                    sizeGB: 100,
+                    createdAtProvider: capturedAt,
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                ),
+            ],
+            billingStates: [
+                CloudBillingState(
+                    id: UUID(),
+                    accountId: accountId,
+                    providerId: .tencentCloud,
+                    resourceType: "disk",
+                    resourceId: "disk-123",
+                    billingType: "POSTPAID_BY_HOUR",
+                    expireAt: nil,
+                    status: "ATTACHED",
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                ),
+            ]
+        )
+
+        XCTAssertEqual(resources.count, 5)
+        XCTAssertEqual(
+            Set(CloudResourceSearchService.search(resources, query: CloudResourceSearchQuery(text: "prod", kinds: [.instance, .disk, .snapshot])).map(\.kind)),
+            Set([.instance, .disk, .snapshot])
+        )
+        XCTAssertEqual(
+            CloudResourceSearchService.search(resources, query: CloudResourceSearchQuery(providerId: .tencentCloud, regionId: "ap-guangzhou", kinds: [.disk], status: "ATTACHED")).map(\.resourceId),
+            ["disk-123"]
+        )
+        XCTAssertTrue(CloudResourceSearchService.search(resources, query: CloudResourceSearchQuery(text: "public ingress")).contains { $0.kind == .securityGroup })
+    }
+
     func testCloudProviderRequestRunnerReturnsBeforeTimeout() async throws {
         let value = try await CloudProviderRequestRunner.withTimeout(0.2) {
             try await Task.sleep(nanoseconds: 1_000_000)
@@ -2153,6 +2269,41 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(persisted.lastSyncedAt, Date(timeIntervalSince1970: 1_700_000_100))
     }
 
+    func testCloudAdvancedResourceSyncPersistsAndSearchesResources() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .tencentCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .cloudDisks, .cloudSnapshots, .cloudBilling]
+        )
+        let syncedAt = Date(timeIntervalSince1970: 1_700_000_200)
+        let harness = try Harness(adapters: [adapter], now: { syncedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+
+        _ = try await harness.cloudInstanceSyncService.syncInstances(account: account, regionId: "ap-guangzhou")
+        let disks = try await harness.cloudInstanceSyncService.syncDisks(account: account, regionId: "ap-guangzhou")
+        let snapshots = try await harness.cloudInstanceSyncService.syncSnapshots(account: account, regionId: "ap-guangzhou")
+        let billingStates = try await harness.cloudInstanceSyncService.syncBillingStates(account: account, regionId: "ap-guangzhou")
+
+        XCTAssertEqual(disks.map(\.diskId), ["disk-123"])
+        XCTAssertEqual(snapshots.map(\.snapshotId), ["snap-123"])
+        XCTAssertEqual(billingStates.map(\.resourceId), ["ins-123"])
+        XCTAssertEqual(try harness.repository.fetchCloudDisks(accountId: account.id).first?.lastSyncedAt, syncedAt)
+        XCTAssertEqual(try harness.repository.fetchCloudSnapshots(accountId: account.id).first?.lastSyncedAt, syncedAt)
+        XCTAssertEqual(try harness.repository.fetchCloudBillingStates(accountId: account.id).first?.lastSyncedAt, syncedAt)
+
+        let searchResults = try harness.cloudInstanceSyncService.loadUnifiedCloudResources(
+            accountId: account.id,
+            regionId: "ap-guangzhou",
+            query: CloudResourceSearchQuery(text: "disk", kinds: [.disk, .snapshot, .billing])
+        )
+
+        XCTAssertEqual(Set(searchResults.map(\.kind)), [.disk, .snapshot])
+        XCTAssertEqual(Set(searchResults.map(\.resourceId)), ["disk-123", "snap-123"])
+    }
+
     func testCloudInstanceSyncCreatesServerFromInstanceAndLinksIt() throws {
         let harness = try Harness()
         let account = try harness.cloudAccountService.createAccount(
@@ -2454,6 +2605,137 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].jsonBody?["SecurityGroupId"] as? String, "sg-123")
     }
 
+    func testTencentCloudAdapterFetchesDisksSnapshotsAndBillingStates() async throws {
+        let transport = MockTencentCloudTransport(responses: [
+            """
+            {
+              "Response": {
+                "TotalCount": 1,
+                "DiskSet": [
+                  {
+                    "DiskId": "disk-123",
+                    "DiskName": "prod-data",
+                    "DiskType": "CLOUD_PREMIUM",
+                    "DiskUsage": "DATA_DISK",
+                    "DiskSize": 100,
+                    "DiskState": "ATTACHED",
+                    "InstanceId": "ins-123",
+                    "DiskChargeType": "POSTPAID_BY_HOUR",
+                    "DeadlineTime": "2026-07-01 00:00:00"
+                  }
+                ],
+                "RequestId": "request-disks"
+              }
+            }
+            """,
+            """
+            {
+              "Response": {
+                "TotalCount": 1,
+                "SnapshotSet": [
+                  {
+                    "SnapshotId": "snap-123",
+                    "SnapshotName": "before-upgrade",
+                    "SnapshotState": "NORMAL",
+                    "DiskId": "disk-123",
+                    "DiskSize": 100,
+                    "CreateTime": "2026-06-25 12:00:00"
+                  }
+                ],
+                "RequestId": "request-snapshots"
+              }
+            }
+            """,
+            """
+            {
+              "Response": {
+                "TotalCount": 1,
+                "InstanceSet": [
+                  {
+                    "InstanceId": "ins-123",
+                    "InstanceName": "prod",
+                    "InstanceState": "RUNNING",
+                    "InstanceType": "S5.SMALL1",
+                    "PublicIpAddresses": ["203.0.113.8"],
+                    "PrivateIpAddresses": ["10.0.0.8"],
+                    "Placement": {"Zone": "ap-guangzhou-3"},
+                    "VirtualPrivateCloud": {"VpcId": "vpc-123"},
+                    "InstanceChargeType": "PREPAID",
+                    "ExpiredTime": "2026-07-10 00:00:00"
+                  }
+                ],
+                "RequestId": "request-instances"
+              }
+            }
+            """,
+            """
+            {
+              "Response": {
+                "TotalCount": 1,
+                "DiskSet": [
+                  {
+                    "DiskId": "disk-123",
+                    "DiskName": "prod-data",
+                    "DiskType": "CLOUD_PREMIUM",
+                    "DiskSize": 100,
+                    "DiskState": "ATTACHED",
+                    "InstanceId": "ins-123",
+                    "DiskChargeType": "POSTPAID_BY_HOUR"
+                  }
+                ],
+                "RequestId": "request-disks-2"
+              }
+            }
+            """,
+        ])
+        let adapter = TencentCloudAdapter(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_551_113_065) },
+            timeout: 1
+        )
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let credential = CloudProviderCredential(secretId: "AKIDEXAMPLE", secretKey: "SECRETEXAMPLE")
+
+        let disks = try await adapter.fetchDisks(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-guangzhou",
+            capturedAt: capturedAt
+        )
+        let snapshots = try await adapter.fetchSnapshots(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-guangzhou",
+            capturedAt: capturedAt
+        )
+        let billing = try await adapter.fetchBillingStates(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-guangzhou",
+            capturedAt: capturedAt
+        )
+
+        XCTAssertEqual(disks.map(\.diskId), ["disk-123"])
+        XCTAssertEqual(disks[0].name, "prod-data")
+        XCTAssertEqual(disks[0].sizeGB, 100)
+        XCTAssertEqual(disks[0].billingType, "POSTPAID_BY_HOUR")
+        XCTAssertEqual(snapshots.map(\.snapshotId), ["snap-123"])
+        XCTAssertEqual(snapshots[0].diskId, "disk-123")
+        XCTAssertEqual(snapshots[0].status, "NORMAL")
+        XCTAssertEqual(billing.map(\.resourceType), ["instance", "disk"])
+        XCTAssertEqual(billing.first { $0.resourceType == "instance" }?.billingType, "PREPAID")
+        XCTAssertEqual(billing.first { $0.resourceType == "disk" }?.billingType, "POSTPAID_BY_HOUR")
+
+        XCTAssertEqual(transport.requests[0].url?.host, "cbs.intl.tencentcloudapi.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Action"), "DescribeDisks")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "X-TC-Version"), "2017-03-12")
+        XCTAssertEqual(transport.requests[0].jsonBody?["Limit"] as? Int, 100)
+        XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "X-TC-Action"), "DescribeSnapshots")
+        XCTAssertEqual(transport.requests[2].value(forHTTPHeaderField: "X-TC-Action"), "DescribeInstances")
+        XCTAssertEqual(transport.requests[3].value(forHTTPHeaderField: "X-TC-Action"), "DescribeDisks")
+    }
+
     func testCloudSecurityGroupServiceLoadsLinkedServerGroupsAndPolicies() async throws {
         let harness = try Harness(adapters: [
             MockCloudProviderAdapter(
@@ -2661,6 +2943,8 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
                 instanceType: "mock",
                 zoneId: "\(regionId)-1",
                 vpcId: "vpc-123",
+                billingType: "POSTPAID_BY_HOUR",
+                expiredTime: nil,
                 rawJSON: nil
             ),
         ]
@@ -2736,6 +3020,78 @@ private struct MockCloudProviderAdapter: CloudProviderAdapter {
             ],
             capturedAt: capturedAt
         )
+    }
+
+    func fetchDisks(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudDisk] {
+        [
+            CloudDisk(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000123")!,
+                accountId: accountId,
+                providerId: providerId,
+                regionId: regionId,
+                diskId: "disk-123",
+                instanceId: "ins-123",
+                name: "system-disk",
+                diskType: "CLOUD_PREMIUM",
+                sizeGB: 50,
+                status: "ATTACHED",
+                billingType: "POSTPAID_BY_HOUR",
+                expiredTime: nil,
+                rawJSON: nil,
+                lastSyncedAt: capturedAt
+            ),
+        ]
+    }
+
+    func fetchSnapshots(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudSnapshot] {
+        [
+            CloudSnapshot(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000456")!,
+                accountId: accountId,
+                providerId: providerId,
+                regionId: regionId,
+                snapshotId: "snap-123",
+                diskId: "disk-123",
+                name: "before-upgrade",
+                status: "NORMAL",
+                sizeGB: 50,
+                createdAtProvider: Date(timeIntervalSince1970: 1_700_000_000),
+                rawJSON: nil,
+                lastSyncedAt: capturedAt
+            ),
+        ]
+    }
+
+    func fetchBillingStates(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudBillingState] {
+        [
+            CloudBillingState(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000789")!,
+                accountId: accountId,
+                providerId: providerId,
+                resourceType: "instance",
+                resourceId: "ins-123",
+                billingType: "POSTPAID_BY_HOUR",
+                expireAt: nil,
+                status: "RUNNING",
+                rawJSON: nil,
+                lastSyncedAt: capturedAt
+            ),
+        ]
     }
 }
 

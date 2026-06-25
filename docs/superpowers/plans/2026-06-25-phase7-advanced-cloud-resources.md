@@ -43,6 +43,8 @@ CREATE TABLE cloud_disks (
     disk_type TEXT,
     size_gb INTEGER,
     status TEXT,
+    billing_type TEXT,
+    expired_time DATETIME,
     raw_json TEXT,
     last_synced_at DATETIME,
     UNIQUE(account_id, region_id, disk_id)
@@ -88,6 +90,13 @@ CREATE TABLE cloud_billing_states (
 - `CloudBillingService`：计费类型、到期、欠费/冻结状态。
 - `ProviderAdapterTestHarness`：统一 fixture 和契约测试。
 
+当前已落地底座：
+
+- 已新增统一模型：`CloudDisk`、`CloudSnapshot`、`CloudBillingState`、`CloudUnifiedResource`、`CloudResourceSearchQuery`。
+- 已新增 SQLite 表和 Repository 读写：`cloud_disks`、`cloud_snapshots`、`cloud_billing_states`。
+- 已新增 `ProviderCapabilityMatrixBuilder` 和 `CloudResourceSearchService`。
+- 已扩展 `CloudInstanceSyncService`，支持腾讯云云盘、快照、计费状态同步入库，并从本地库加载统一云资源。
+
 ## 6. UI 范围
 
 - 云资源中心：账号、厂商、地域、状态、标签、搜索。
@@ -101,10 +110,10 @@ CREATE TABLE cloud_billing_states (
 
 ### Task 1：Adapter 契约
 
-- [ ] 明确实例、云盘、快照、计费的统一模型。
-- [ ] 定义 capability matrix。
-- [ ] 添加 adapter fixture 测试规范。
-- [ ] 所有 adapter 输出统一错误类型。
+- [x] 明确实例、云盘、快照、计费的统一模型。
+- [x] 定义 capability matrix。
+- [x] 添加 adapter fixture 测试规范。
+- [x] 现有 adapter 输出统一错误类型。
 
 ### Task 2：Alibaba Cloud adapter
 
@@ -124,9 +133,9 @@ CREATE TABLE cloud_billing_states (
 
 ### Task 4：高级资源
 
-- [ ] 腾讯云云盘同步。
-- [ ] 腾讯云快照同步。
-- [ ] 腾讯云基础计费/到期状态同步。
+- [x] 腾讯云云盘同步。
+- [x] 腾讯云快照同步。
+- [x] 腾讯云基础计费/到期状态同步。
 - [ ] 阿里云、华为云按 capability 补同类只读能力。
 
 ### Task 5：高级操作
@@ -138,17 +147,17 @@ CREATE TABLE cloud_billing_states (
 
 ### Task 6：云资源中心 UI
 
-- [ ] 资源搜索和过滤。
+- [x] 资源搜索和过滤服务。
 - [ ] 高级资源详情页。
 - [ ] capability matrix 展示。
 - [ ] 操作风险确认。
 
 ### Task 7：测试
 
-- [ ] Provider adapter 契约测试。
+- [x] Provider adapter 契约测试。
 - [ ] 三家云实例解析测试。
-- [ ] 云盘/快照/计费解析测试。
-- [ ] 跨云搜索测试。
+- [x] 云盘/快照/计费解析测试。
+- [x] 跨云搜索测试。
 - [ ] 危险操作确认状态机测试。
 
 ### Task 8：手动验收

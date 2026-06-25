@@ -338,6 +338,144 @@ final class ServerRepository: @unchecked Sendable {
         )
     }
 
+    func fetchCloudDisks(accountId: UUID? = nil, regionId: String? = nil) throws -> [CloudDisk] {
+        let baseSQL = """
+            SELECT id, account_id, provider_id, region_id, disk_id, instance_id, name,
+                   disk_type, size_gb, status, billing_type, expired_time, raw_json, last_synced_at
+            FROM cloud_disks
+        """
+        let (whereClause, bindings) = Self.cloudResourceWhereClause(accountId: accountId, regionId: regionId)
+        return try database.query("""
+            \(baseSQL)
+            \(whereClause)
+            ORDER BY last_synced_at DESC, name ASC, disk_id ASC
+        """, bindings: bindings) { statement in
+            try Self.mapCloudDisk(statement)
+        }
+    }
+
+    func upsertCloudDisk(_ disk: CloudDisk) throws {
+        try database.execute("""
+            INSERT INTO cloud_disks (
+                id, account_id, provider_id, region_id, disk_id, instance_id, name,
+                disk_type, size_gb, status, billing_type, expired_time, raw_json, last_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, region_id, disk_id) DO UPDATE SET
+                provider_id = excluded.provider_id,
+                instance_id = excluded.instance_id,
+                name = excluded.name,
+                disk_type = excluded.disk_type,
+                size_gb = excluded.size_gb,
+                status = excluded.status,
+                billing_type = excluded.billing_type,
+                expired_time = excluded.expired_time,
+                raw_json = excluded.raw_json,
+                last_synced_at = excluded.last_synced_at
+        """, bindings: [
+            .text(disk.id.uuidString),
+            .text(disk.accountId.uuidString),
+            .text(disk.providerId.rawValue),
+            .text(disk.regionId),
+            .text(disk.diskId),
+            disk.instanceId.map(SQLiteValue.text) ?? .null,
+            disk.name.map(SQLiteValue.text) ?? .null,
+            disk.diskType.map(SQLiteValue.text) ?? .null,
+            disk.sizeGB.map(SQLiteValue.int) ?? .null,
+            disk.status.map(SQLiteValue.text) ?? .null,
+            disk.billingType.map(SQLiteValue.text) ?? .null,
+            disk.expiredTime.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+            disk.rawJSON.map(SQLiteValue.text) ?? .null,
+            disk.lastSyncedAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+        ])
+    }
+
+    func fetchCloudSnapshots(accountId: UUID? = nil, regionId: String? = nil) throws -> [CloudSnapshot] {
+        let baseSQL = """
+            SELECT id, account_id, provider_id, region_id, snapshot_id, disk_id, name,
+                   status, size_gb, created_at_provider, raw_json, last_synced_at
+            FROM cloud_snapshots
+        """
+        let (whereClause, bindings) = Self.cloudResourceWhereClause(accountId: accountId, regionId: regionId)
+        return try database.query("""
+            \(baseSQL)
+            \(whereClause)
+            ORDER BY last_synced_at DESC, created_at_provider DESC, name ASC, snapshot_id ASC
+        """, bindings: bindings) { statement in
+            try Self.mapCloudSnapshot(statement)
+        }
+    }
+
+    func upsertCloudSnapshot(_ snapshot: CloudSnapshot) throws {
+        try database.execute("""
+            INSERT INTO cloud_snapshots (
+                id, account_id, provider_id, region_id, snapshot_id, disk_id, name,
+                status, size_gb, created_at_provider, raw_json, last_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, region_id, snapshot_id) DO UPDATE SET
+                provider_id = excluded.provider_id,
+                disk_id = excluded.disk_id,
+                name = excluded.name,
+                status = excluded.status,
+                size_gb = excluded.size_gb,
+                created_at_provider = excluded.created_at_provider,
+                raw_json = excluded.raw_json,
+                last_synced_at = excluded.last_synced_at
+        """, bindings: [
+            .text(snapshot.id.uuidString),
+            .text(snapshot.accountId.uuidString),
+            .text(snapshot.providerId.rawValue),
+            .text(snapshot.regionId),
+            .text(snapshot.snapshotId),
+            snapshot.diskId.map(SQLiteValue.text) ?? .null,
+            snapshot.name.map(SQLiteValue.text) ?? .null,
+            snapshot.status.map(SQLiteValue.text) ?? .null,
+            snapshot.sizeGB.map(SQLiteValue.int) ?? .null,
+            snapshot.createdAtProvider.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+            snapshot.rawJSON.map(SQLiteValue.text) ?? .null,
+            snapshot.lastSyncedAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+        ])
+    }
+
+    func fetchCloudBillingStates(accountId: UUID? = nil) throws -> [CloudBillingState] {
+        let whereClause = accountId.map { _ in "WHERE account_id = ?" } ?? ""
+        let bindings: [SQLiteValue] = accountId.map { [.text($0.uuidString)] } ?? []
+        return try database.query("""
+            SELECT id, account_id, provider_id, resource_type, resource_id, billing_type,
+                   expire_at, status, raw_json, last_synced_at
+            FROM cloud_billing_states
+            \(whereClause)
+            ORDER BY last_synced_at DESC, resource_type ASC, resource_id ASC
+        """, bindings: bindings) { statement in
+            try Self.mapCloudBillingState(statement)
+        }
+    }
+
+    func upsertCloudBillingState(_ state: CloudBillingState) throws {
+        try database.execute("""
+            INSERT INTO cloud_billing_states (
+                id, account_id, provider_id, resource_type, resource_id, billing_type,
+                expire_at, status, raw_json, last_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, provider_id, resource_type, resource_id) DO UPDATE SET
+                billing_type = excluded.billing_type,
+                expire_at = excluded.expire_at,
+                status = excluded.status,
+                raw_json = excluded.raw_json,
+                last_synced_at = excluded.last_synced_at
+        """, bindings: [
+            .text(state.id.uuidString),
+            .text(state.accountId.uuidString),
+            .text(state.providerId.rawValue),
+            .text(state.resourceType),
+            .text(state.resourceId),
+            state.billingType.map(SQLiteValue.text) ?? .null,
+            state.expireAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+            state.status.map(SQLiteValue.text) ?? .null,
+            state.rawJSON.map(SQLiteValue.text) ?? .null,
+            state.lastSyncedAt.map { .text(AppDatabase.string(from: $0)) } ?? .null,
+        ])
+    }
+
     func fetchDeploymentProjects(serverId: UUID? = nil) throws -> [DeploymentProject] {
         if let serverId {
             return try database.query("""
@@ -711,6 +849,57 @@ final class ServerRepository: @unchecked Sendable {
         )
     }
 
+    private static func mapCloudDisk(_ statement: OpaquePointer) throws -> CloudDisk {
+        CloudDisk(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            accountId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            providerId: CloudProviderID(rawValue: string(statement, 2)) ?? .tencentCloud,
+            regionId: string(statement, 3),
+            diskId: string(statement, 4),
+            instanceId: optionalString(statement, 5),
+            name: optionalString(statement, 6),
+            diskType: optionalString(statement, 7),
+            sizeGB: optionalInt(statement, 8),
+            status: optionalString(statement, 9),
+            billingType: optionalString(statement, 10),
+            expiredTime: optionalDate(statement, 11),
+            rawJSON: optionalString(statement, 12),
+            lastSyncedAt: optionalDate(statement, 13)
+        )
+    }
+
+    private static func mapCloudSnapshot(_ statement: OpaquePointer) throws -> CloudSnapshot {
+        CloudSnapshot(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            accountId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            providerId: CloudProviderID(rawValue: string(statement, 2)) ?? .tencentCloud,
+            regionId: string(statement, 3),
+            snapshotId: string(statement, 4),
+            diskId: optionalString(statement, 5),
+            name: optionalString(statement, 6),
+            status: optionalString(statement, 7),
+            sizeGB: optionalInt(statement, 8),
+            createdAtProvider: optionalDate(statement, 9),
+            rawJSON: optionalString(statement, 10),
+            lastSyncedAt: optionalDate(statement, 11)
+        )
+    }
+
+    private static func mapCloudBillingState(_ statement: OpaquePointer) throws -> CloudBillingState {
+        CloudBillingState(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            accountId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            providerId: CloudProviderID(rawValue: string(statement, 2)) ?? .tencentCloud,
+            resourceType: string(statement, 3),
+            resourceId: string(statement, 4),
+            billingType: optionalString(statement, 5),
+            expireAt: optionalDate(statement, 6),
+            status: optionalString(statement, 7),
+            rawJSON: optionalString(statement, 8),
+            lastSyncedAt: optionalDate(statement, 9)
+        )
+    }
+
     private static func mapDeploymentProject(_ statement: OpaquePointer) throws -> DeploymentProject {
         DeploymentProject(
             id: UUID(uuidString: string(statement, 0)) ?? UUID(),
@@ -821,8 +1010,28 @@ final class ServerRepository: @unchecked Sendable {
         return sqlite3_column_int64(statement, index)
     }
 
+    private static func optionalInt(_ statement: OpaquePointer, _ index: Int32) -> Int? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return Int(sqlite3_column_int(statement, index))
+    }
+
     private static func optionalDuration(_ statement: OpaquePointer, _ index: Int32) -> TimeInterval? {
         guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
         return TimeInterval(sqlite3_column_int(statement, index)) / 1_000
+    }
+
+    private static func cloudResourceWhereClause(accountId: UUID?, regionId: String?) -> (String, [SQLiteValue]) {
+        var conditions: [String] = []
+        var bindings: [SQLiteValue] = []
+        if let accountId {
+            conditions.append("account_id = ?")
+            bindings.append(.text(accountId.uuidString))
+        }
+        if let regionId {
+            conditions.append("region_id = ?")
+            bindings.append(.text(regionId))
+        }
+        guard !conditions.isEmpty else { return ("", []) }
+        return ("WHERE \(conditions.joined(separator: " AND "))", bindings)
     }
 }

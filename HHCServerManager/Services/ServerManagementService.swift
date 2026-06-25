@@ -255,6 +255,88 @@ final class CloudInstanceSyncService: @unchecked Sendable {
         return links
     }
 
+    func syncDisks(account: CloudProviderAccount, regionId: String) async throws -> [CloudDisk] {
+        guard account.enabled else {
+            throw CloudProviderError.providerFailure("Cloud account is disabled.")
+        }
+
+        try registry.require(.cloudDisks, providerId: account.providerId)
+        let syncedAt = now()
+        let credential = try credential(for: account)
+        let disks = try await registry.adapter(for: account.providerId).fetchDisks(
+            credential: credential,
+            accountId: account.id,
+            regionId: regionId,
+            capturedAt: syncedAt
+        )
+
+        for disk in disks {
+            try repository.upsertCloudDisk(disk)
+        }
+        return disks
+    }
+
+    func syncSnapshots(account: CloudProviderAccount, regionId: String) async throws -> [CloudSnapshot] {
+        guard account.enabled else {
+            throw CloudProviderError.providerFailure("Cloud account is disabled.")
+        }
+
+        try registry.require(.cloudSnapshots, providerId: account.providerId)
+        let syncedAt = now()
+        let credential = try credential(for: account)
+        let snapshots = try await registry.adapter(for: account.providerId).fetchSnapshots(
+            credential: credential,
+            accountId: account.id,
+            regionId: regionId,
+            capturedAt: syncedAt
+        )
+
+        for snapshot in snapshots {
+            try repository.upsertCloudSnapshot(snapshot)
+        }
+        return snapshots
+    }
+
+    func syncBillingStates(account: CloudProviderAccount, regionId: String) async throws -> [CloudBillingState] {
+        guard account.enabled else {
+            throw CloudProviderError.providerFailure("Cloud account is disabled.")
+        }
+
+        try registry.require(.cloudBilling, providerId: account.providerId)
+        let syncedAt = now()
+        let credential = try credential(for: account)
+        let states = try await registry.adapter(for: account.providerId).fetchBillingStates(
+            credential: credential,
+            accountId: account.id,
+            regionId: regionId,
+            capturedAt: syncedAt
+        )
+
+        for state in states {
+            try repository.upsertCloudBillingState(state)
+        }
+        return states
+    }
+
+    func loadUnifiedCloudResources(
+        accountId: UUID? = nil,
+        regionId: String? = nil,
+        query: CloudResourceSearchQuery = CloudResourceSearchQuery()
+    ) throws -> [CloudUnifiedResource] {
+        let resources = CloudResourceSearchService.unifiedResources(
+            instances: try repository.fetchCloudInstanceLinks(accountId: accountId),
+            disks: try repository.fetchCloudDisks(accountId: accountId, regionId: regionId),
+            snapshots: try repository.fetchCloudSnapshots(accountId: accountId, regionId: regionId),
+            billingStates: try repository.fetchCloudBillingStates(accountId: accountId)
+        )
+        let scoped = regionId.map { region in
+            resources.filter { resource in
+                resource.regionId == nil || resource.regionId == region
+            }
+        } ?? resources
+        return CloudResourceSearchService.search(scoped, query: query)
+    }
+
     func linkInstance(_ link: CloudInstanceLink, to server: ServerProfile) throws -> CloudInstanceLink {
         var linked = link
         linked.serverId = server.id
@@ -4227,6 +4309,24 @@ protocol CloudProviderAdapter: Sendable {
         group: CloudSecurityGroup,
         capturedAt: Date
     ) async throws -> CloudSecurityGroupPolicySnapshot
+    func fetchDisks(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudDisk]
+    func fetchSnapshots(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudSnapshot]
+    func fetchBillingStates(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudBillingState]
 }
 
 enum CloudProviderError: LocalizedError, Equatable {
@@ -4301,6 +4401,165 @@ struct CloudProviderRegistry: Sendable {
     }
 }
 
+struct ProviderCapabilityStatus: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { "\(providerId.rawValue)-\(capability.rawValue)" }
+    var providerId: CloudProviderID
+    var providerName: String
+    var capability: CloudCapability
+    var isRegistered: Bool
+    var isSupported: Bool
+}
+
+struct ProviderCapabilityMatrix: Equatable, Hashable, Sendable {
+    var rows: [ProviderCapabilityStatus]
+
+    func status(providerId: CloudProviderID, capability: CloudCapability) -> ProviderCapabilityStatus? {
+        rows.first { $0.providerId == providerId && $0.capability == capability }
+    }
+}
+
+enum ProviderCapabilityMatrixBuilder {
+    static func build(
+        registry: CloudProviderRegistry,
+        providerIds: [CloudProviderID] = CloudProviderID.allCases,
+        capabilities: [CloudCapability] = CloudCapability.allCases
+    ) -> ProviderCapabilityMatrix {
+        ProviderCapabilityMatrix(rows: providerIds.flatMap { providerId in
+            let adapter = try? registry.adapter(for: providerId)
+            let supported = adapter?.capabilities ?? []
+            return capabilities.map { capability in
+                ProviderCapabilityStatus(
+                    providerId: providerId,
+                    providerName: adapter?.displayName ?? providerId.displayName,
+                    capability: capability,
+                    isRegistered: adapter != nil,
+                    isSupported: supported.contains(capability)
+                )
+            }
+        })
+    }
+}
+
+enum CloudResourceSearchService {
+    static func unifiedResources(
+        instances: [CloudInstanceLink],
+        securityGroups: [CloudSecurityGroup] = [],
+        disks: [CloudDisk] = [],
+        snapshots: [CloudSnapshot] = [],
+        billingStates: [CloudBillingState] = []
+    ) -> [CloudUnifiedResource] {
+        var resources: [CloudUnifiedResource] = []
+        resources.append(contentsOf: instances.map { instance in
+            CloudUnifiedResource(
+                id: "instance:\(instance.accountId.uuidString):\(instance.regionId):\(instance.instanceId)",
+                kind: .instance,
+                accountId: instance.accountId,
+                providerId: instance.providerId,
+                regionId: instance.regionId,
+                resourceId: instance.instanceId,
+                displayName: instance.displayName ?? instance.instanceId,
+                status: instance.status,
+                primaryAddress: instance.publicIp ?? instance.privateIp,
+                secondaryText: instance.instanceType,
+                lastSyncedAt: instance.lastSyncedAt
+            )
+        })
+        resources.append(contentsOf: securityGroups.map { group in
+            CloudUnifiedResource(
+                id: "security-group:\(group.accountId.uuidString):\(group.regionId):\(group.securityGroupId)",
+                kind: .securityGroup,
+                accountId: group.accountId,
+                providerId: group.providerId,
+                regionId: group.regionId,
+                resourceId: group.securityGroupId,
+                displayName: group.name,
+                status: group.isDefault == true ? "default" : nil,
+                primaryAddress: nil,
+                secondaryText: group.description,
+                lastSyncedAt: nil
+            )
+        })
+        resources.append(contentsOf: disks.map { disk in
+            CloudUnifiedResource(
+                id: "disk:\(disk.accountId.uuidString):\(disk.regionId):\(disk.diskId)",
+                kind: .disk,
+                accountId: disk.accountId,
+                providerId: disk.providerId,
+                regionId: disk.regionId,
+                resourceId: disk.diskId,
+                displayName: disk.name ?? disk.diskId,
+                status: disk.status,
+                primaryAddress: disk.instanceId,
+                secondaryText: [disk.diskType, disk.sizeGB.map { "\($0) GB" }].compactMap { $0 }.joined(separator: " · ").nilIfEmpty,
+                lastSyncedAt: disk.lastSyncedAt
+            )
+        })
+        resources.append(contentsOf: snapshots.map { snapshot in
+            CloudUnifiedResource(
+                id: "snapshot:\(snapshot.accountId.uuidString):\(snapshot.regionId):\(snapshot.snapshotId)",
+                kind: .snapshot,
+                accountId: snapshot.accountId,
+                providerId: snapshot.providerId,
+                regionId: snapshot.regionId,
+                resourceId: snapshot.snapshotId,
+                displayName: snapshot.name ?? snapshot.snapshotId,
+                status: snapshot.status,
+                primaryAddress: snapshot.diskId,
+                secondaryText: snapshot.sizeGB.map { "\($0) GB" },
+                lastSyncedAt: snapshot.lastSyncedAt
+            )
+        })
+        resources.append(contentsOf: billingStates.map { billing in
+            CloudUnifiedResource(
+                id: "billing:\(billing.accountId.uuidString):\(billing.providerId.rawValue):\(billing.resourceType):\(billing.resourceId)",
+                kind: .billing,
+                accountId: billing.accountId,
+                providerId: billing.providerId,
+                regionId: nil,
+                resourceId: billing.resourceId,
+                displayName: "\(billing.resourceType) \(billing.resourceId)",
+                status: billing.status,
+                primaryAddress: billing.billingType,
+                secondaryText: billing.expireAt.map(AppDatabase.string(from:)),
+                lastSyncedAt: billing.lastSyncedAt
+            )
+        })
+        return resources.sorted {
+            if $0.providerId.rawValue != $1.providerId.rawValue {
+                return $0.providerId.rawValue < $1.providerId.rawValue
+            }
+            if ($0.regionId ?? "") != ($1.regionId ?? "") {
+                return ($0.regionId ?? "") < ($1.regionId ?? "")
+            }
+            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+
+    static func search(_ resources: [CloudUnifiedResource], query: CloudResourceSearchQuery) -> [CloudUnifiedResource] {
+        let normalizedText = query.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return resources.filter { resource in
+            if let providerId = query.providerId, resource.providerId != providerId { return false }
+            if let accountId = query.accountId, resource.accountId != accountId { return false }
+            if let regionId = query.regionId, resource.regionId != regionId { return false }
+            if !query.kinds.contains(resource.kind) { return false }
+            if let status = query.status, resource.status?.localizedCaseInsensitiveCompare(status) != .orderedSame { return false }
+            guard !normalizedText.isEmpty else { return true }
+            return [
+                resource.resourceId,
+                resource.displayName,
+                resource.status,
+                resource.primaryAddress,
+                resource.secondaryText,
+                resource.regionId,
+                resource.providerId.displayName,
+                resource.kind.displayName,
+            ]
+            .compactMap { $0?.lowercased() }
+            .contains { $0.contains(normalizedText) }
+        }
+    }
+}
+
 enum CloudProviderRequestRunner {
     static func withTimeout<T: Sendable>(
         _ seconds: TimeInterval,
@@ -4345,7 +4604,16 @@ final class URLSessionTencentCloudHTTPTransport: TencentCloudHTTPTransport, @unc
 final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     let providerId: CloudProviderID = .tencentCloud
     let displayName = "Tencent Cloud"
-    let capabilities: Set<CloudCapability> = [.regions, .instanceDiscovery, .instanceMetadata, .cloudMetrics, .securityGroups]
+    let capabilities: Set<CloudCapability> = [
+        .regions,
+        .instanceDiscovery,
+        .instanceMetadata,
+        .cloudMetrics,
+        .securityGroups,
+        .cloudDisks,
+        .cloudSnapshots,
+        .cloudBilling,
+    ]
 
     private let transport: TencentCloudHTTPTransport
     private let now: @Sendable () -> Date
@@ -4424,6 +4692,8 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
                     instanceType: instance.instanceType,
                     zoneId: instance.placement?.zone,
                     vpcId: instance.virtualPrivateCloud?.vpcId,
+                    billingType: instance.instanceChargeType,
+                    expiredTime: instance.expiredTime.flatMap(Self.parseTencentDate),
                     rawJSON: instance.rawJSONString
                 )
             })
@@ -4542,6 +4812,150 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             egress: Self.mapSecurityGroupRules(policySet?.egress ?? [], direction: .egress),
             capturedAt: capturedAt
         )
+    }
+
+    func fetchDisks(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudDisk] {
+        var offset = 0
+        let limit = 100
+        var disks: [CloudDisk] = []
+        var totalCount: Int?
+
+        repeat {
+            let payload = TencentPagedPayload(offset: offset, limit: limit)
+            let response: TencentCloudEnvelope<TencentDescribeDisksResponse> = try await request(
+                credential: credential,
+                endpoint: TencentCloudEndpoint(
+                    host: "cbs.intl.tencentcloudapi.com",
+                    service: "cbs",
+                    action: "DescribeDisks",
+                    version: "2017-03-12",
+                    region: regionId
+                ),
+                payload: payload
+            )
+            try throwIfNeeded(response.response.error)
+            let page = response.response.diskSet ?? []
+            disks.append(contentsOf: page.map { disk in
+                CloudDisk(
+                    id: UUID(),
+                    accountId: accountId,
+                    providerId: .tencentCloud,
+                    regionId: regionId,
+                    diskId: disk.diskId,
+                    instanceId: disk.instanceId,
+                    name: disk.diskName,
+                    diskType: disk.diskType ?? disk.diskUsage,
+                    sizeGB: disk.diskSize,
+                    status: disk.diskState,
+                    billingType: disk.diskChargeType,
+                    expiredTime: disk.deadlineTime.flatMap(Self.parseTencentDate),
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                )
+            })
+            totalCount = response.response.totalCount
+            offset += page.count
+        } while offset < (totalCount ?? 0) && offset > 0
+
+        return disks
+    }
+
+    func fetchSnapshots(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudSnapshot] {
+        var offset = 0
+        let limit = 100
+        var snapshots: [CloudSnapshot] = []
+        var totalCount: Int?
+
+        repeat {
+            let payload = TencentPagedPayload(offset: offset, limit: limit)
+            let response: TencentCloudEnvelope<TencentDescribeSnapshotsResponse> = try await request(
+                credential: credential,
+                endpoint: TencentCloudEndpoint(
+                    host: "cbs.intl.tencentcloudapi.com",
+                    service: "cbs",
+                    action: "DescribeSnapshots",
+                    version: "2017-03-12",
+                    region: regionId
+                ),
+                payload: payload
+            )
+            try throwIfNeeded(response.response.error)
+            let page = response.response.snapshotSet ?? []
+            snapshots.append(contentsOf: page.map { snapshot in
+                CloudSnapshot(
+                    id: UUID(),
+                    accountId: accountId,
+                    providerId: .tencentCloud,
+                    regionId: regionId,
+                    snapshotId: snapshot.snapshotId,
+                    diskId: snapshot.diskId,
+                    name: snapshot.snapshotName,
+                    status: snapshot.snapshotState,
+                    sizeGB: snapshot.diskSize,
+                    createdAtProvider: snapshot.createTime.flatMap(Self.parseTencentDate),
+                    rawJSON: nil,
+                    lastSyncedAt: capturedAt
+                )
+            })
+            totalCount = response.response.totalCount
+            offset += page.count
+        } while offset < (totalCount ?? 0) && offset > 0
+
+        return snapshots
+    }
+
+    func fetchBillingStates(
+        credential: CloudProviderCredential,
+        accountId: UUID,
+        regionId: String,
+        capturedAt: Date
+    ) async throws -> [CloudBillingState] {
+        let instances = try await fetchInstances(credential: credential, regionId: regionId)
+        let disks = try await fetchDisks(
+            credential: credential,
+            accountId: accountId,
+            regionId: regionId,
+            capturedAt: capturedAt
+        )
+        var states = instances.map { instance in
+            CloudBillingState(
+                id: UUID(),
+                accountId: accountId,
+                providerId: .tencentCloud,
+                resourceType: "instance",
+                resourceId: instance.id,
+                billingType: instance.billingType,
+                expireAt: instance.expiredTime,
+                status: instance.status,
+                rawJSON: instance.rawJSON,
+                lastSyncedAt: capturedAt
+            )
+        }
+        states.append(contentsOf: disks.map { disk in
+            CloudBillingState(
+                id: UUID(),
+                accountId: accountId,
+                providerId: .tencentCloud,
+                resourceType: "disk",
+                resourceId: disk.diskId,
+                billingType: disk.billingType,
+                expireAt: disk.expiredTime,
+                status: disk.status,
+                rawJSON: disk.rawJSON,
+                lastSyncedAt: capturedAt
+            )
+        })
+        return states
     }
 
     private func request<Payload: Encodable, Response: Decodable>(
@@ -4667,6 +5081,25 @@ final class TencentCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         return formatter.string(from: date)
     }
 
+    private static func parseTencentDate(_ text: String) -> Date? {
+        let formats = [
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX",
+        ]
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = format
+            if let date = formatter.date(from: text) {
+                return date
+            }
+        }
+        return nil
+    }
+
     private static func mapSecurityGroupRules(
         _ rules: [TencentSecurityGroupPolicy],
         direction: CloudSecurityGroupRuleDirection
@@ -4720,6 +5153,16 @@ private struct TencentDescribeRegionsPayload: Encodable {
 }
 
 private struct TencentDescribeInstancesPayload: Encodable {
+    var offset: Int
+    var limit: Int
+
+    enum CodingKeys: String, CodingKey {
+        case offset = "Offset"
+        case limit = "Limit"
+    }
+}
+
+private struct TencentPagedPayload: Encodable {
     var offset: Int
     var limit: Int
 
@@ -4871,6 +5314,30 @@ private struct TencentDescribeSecurityGroupPoliciesResponse: Decodable {
     }
 }
 
+private struct TencentDescribeDisksResponse: Decodable {
+    var totalCount: Int?
+    var diskSet: [TencentDisk]?
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCount = "TotalCount"
+        case diskSet = "DiskSet"
+        case error = "Error"
+    }
+}
+
+private struct TencentDescribeSnapshotsResponse: Decodable {
+    var totalCount: Int?
+    var snapshotSet: [TencentSnapshot]?
+    var error: TencentCloudAPIError?
+
+    enum CodingKeys: String, CodingKey {
+        case totalCount = "TotalCount"
+        case snapshotSet = "SnapshotSet"
+        case error = "Error"
+    }
+}
+
 private struct TencentMonitorDataPoint: Decodable {
     var dimensions: [TencentMonitorDimensionValue]?
     var timestamps: [Int]
@@ -4949,6 +5416,48 @@ private struct TencentMonitorDimensionValue: Decodable {
     }
 }
 
+private struct TencentDisk: Decodable {
+    var diskId: String
+    var diskName: String?
+    var diskType: String?
+    var diskUsage: String?
+    var diskSize: Int?
+    var diskState: String?
+    var instanceId: String?
+    var diskChargeType: String?
+    var deadlineTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case diskId = "DiskId"
+        case diskName = "DiskName"
+        case diskType = "DiskType"
+        case diskUsage = "DiskUsage"
+        case diskSize = "DiskSize"
+        case diskState = "DiskState"
+        case instanceId = "InstanceId"
+        case diskChargeType = "DiskChargeType"
+        case deadlineTime = "DeadlineTime"
+    }
+}
+
+private struct TencentSnapshot: Decodable {
+    var snapshotId: String
+    var snapshotName: String?
+    var snapshotState: String?
+    var diskId: String?
+    var diskSize: Int?
+    var createTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case snapshotId = "SnapshotId"
+        case snapshotName = "SnapshotName"
+        case snapshotState = "SnapshotState"
+        case diskId = "DiskId"
+        case diskSize = "DiskSize"
+        case createTime = "CreateTime"
+    }
+}
+
 private struct TencentInstance: Decodable {
     var instanceId: String
     var instanceName: String?
@@ -4958,6 +5467,8 @@ private struct TencentInstance: Decodable {
     var privateIpAddresses: [String]?
     var placement: TencentPlacement?
     var virtualPrivateCloud: TencentVirtualPrivateCloud?
+    var instanceChargeType: String?
+    var expiredTime: String?
     var rawJSONString: String?
 
     enum CodingKeys: String, CodingKey {
@@ -4969,6 +5480,8 @@ private struct TencentInstance: Decodable {
         case privateIpAddresses = "PrivateIpAddresses"
         case placement = "Placement"
         case virtualPrivateCloud = "VirtualPrivateCloud"
+        case instanceChargeType = "InstanceChargeType"
+        case expiredTime = "ExpiredTime"
     }
 
     init(from decoder: Decoder) throws {
@@ -4981,6 +5494,8 @@ private struct TencentInstance: Decodable {
         privateIpAddresses = try container.decodeIfPresent([String].self, forKey: .privateIpAddresses)
         placement = try container.decodeIfPresent(TencentPlacement.self, forKey: .placement)
         virtualPrivateCloud = try container.decodeIfPresent(TencentVirtualPrivateCloud.self, forKey: .virtualPrivateCloud)
+        instanceChargeType = try container.decodeIfPresent(String.self, forKey: .instanceChargeType)
+        expiredTime = try container.decodeIfPresent(String.self, forKey: .expiredTime)
         rawJSONString = nil
     }
 }

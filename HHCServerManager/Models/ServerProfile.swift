@@ -720,6 +720,8 @@ enum RemoteOperationRiskFactory {
 
 enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
     case tencentCloud = "tencent_cloud"
+    case alibabaCloud = "alibaba_cloud"
+    case huaweiCloud = "huawei_cloud"
 
     var id: String { rawValue }
 
@@ -727,6 +729,10 @@ enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .tencentCloud:
             "Tencent Cloud"
+        case .alibabaCloud:
+            "Alibaba Cloud"
+        case .huaweiCloud:
+            "Huawei Cloud"
         }
     }
 }
@@ -737,9 +743,41 @@ enum CloudCapability: String, Codable, CaseIterable, Identifiable, Sendable {
     case instanceMetadata
     case cloudMetrics
     case securityGroups
+    case cloudDisks
+    case cloudSnapshots
+    case cloudBilling
+    case snapshotActions
+    case diskAttachmentActions
     case powerActions
 
     var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .regions:
+            "Regions"
+        case .instanceDiscovery:
+            "Instance Discovery"
+        case .instanceMetadata:
+            "Instance Metadata"
+        case .cloudMetrics:
+            "Cloud Metrics"
+        case .securityGroups:
+            "Security Groups"
+        case .cloudDisks:
+            "Cloud Disks"
+        case .cloudSnapshots:
+            "Cloud Snapshots"
+        case .cloudBilling:
+            "Billing"
+        case .snapshotActions:
+            "Snapshot Actions"
+        case .diskAttachmentActions:
+            "Disk Attachment Actions"
+        case .powerActions:
+            "Power Actions"
+        }
+    }
 }
 
 struct CloudProviderAccount: Identifiable, Codable, Equatable, Hashable {
@@ -792,7 +830,118 @@ struct CloudProviderInstance: Identifiable, Codable, Equatable, Hashable {
     var instanceType: String?
     var zoneId: String?
     var vpcId: String?
+    var billingType: String?
+    var expiredTime: Date?
     var rawJSON: String?
+}
+
+struct CloudDisk: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var accountId: UUID
+    var providerId: CloudProviderID
+    var regionId: String
+    var diskId: String
+    var instanceId: String?
+    var name: String?
+    var diskType: String?
+    var sizeGB: Int?
+    var status: String?
+    var billingType: String?
+    var expiredTime: Date?
+    var rawJSON: String?
+    var lastSyncedAt: Date?
+}
+
+struct CloudSnapshot: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var accountId: UUID
+    var providerId: CloudProviderID
+    var regionId: String
+    var snapshotId: String
+    var diskId: String?
+    var name: String?
+    var status: String?
+    var sizeGB: Int?
+    var createdAtProvider: Date?
+    var rawJSON: String?
+    var lastSyncedAt: Date?
+}
+
+struct CloudBillingState: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var accountId: UUID
+    var providerId: CloudProviderID
+    var resourceType: String
+    var resourceId: String
+    var billingType: String?
+    var expireAt: Date?
+    var status: String?
+    var rawJSON: String?
+    var lastSyncedAt: Date?
+}
+
+enum CloudResourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case instance
+    case securityGroup
+    case disk
+    case snapshot
+    case billing
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .instance:
+            "Instance"
+        case .securityGroup:
+            "Security Group"
+        case .disk:
+            "Disk"
+        case .snapshot:
+            "Snapshot"
+        case .billing:
+            "Billing"
+        }
+    }
+}
+
+struct CloudUnifiedResource: Identifiable, Equatable, Hashable, Sendable {
+    var id: String
+    var kind: CloudResourceKind
+    var accountId: UUID
+    var providerId: CloudProviderID
+    var regionId: String?
+    var resourceId: String
+    var displayName: String
+    var status: String?
+    var primaryAddress: String?
+    var secondaryText: String?
+    var lastSyncedAt: Date?
+}
+
+struct CloudResourceSearchQuery: Equatable, Hashable, Sendable {
+    var text: String
+    var providerId: CloudProviderID?
+    var accountId: UUID?
+    var regionId: String?
+    var kinds: Set<CloudResourceKind>
+    var status: String?
+
+    init(
+        text: String = "",
+        providerId: CloudProviderID? = nil,
+        accountId: UUID? = nil,
+        regionId: String? = nil,
+        kinds: Set<CloudResourceKind> = Set(CloudResourceKind.allCases),
+        status: String? = nil
+    ) {
+        self.text = text
+        self.providerId = providerId
+        self.accountId = accountId
+        self.regionId = regionId
+        self.kinds = kinds
+        self.status = status
+    }
 }
 
 struct CloudSecurityGroup: Identifiable, Equatable, Hashable, Sendable {

@@ -235,6 +235,69 @@ final class AppDatabase: @unchecked Sendable {
             ON cloud_instance_links(server_id)
         """)
         try execute("""
+            CREATE TABLE IF NOT EXISTS cloud_disks (
+                id TEXT PRIMARY KEY NOT NULL,
+                account_id TEXT NOT NULL REFERENCES cloud_provider_accounts(id) ON DELETE CASCADE,
+                provider_id TEXT NOT NULL,
+                region_id TEXT NOT NULL,
+                disk_id TEXT NOT NULL,
+                instance_id TEXT,
+                name TEXT,
+                disk_type TEXT,
+                size_gb INTEGER,
+                status TEXT,
+                billing_type TEXT,
+                expired_time TEXT,
+                raw_json TEXT,
+                last_synced_at TEXT,
+                UNIQUE(account_id, region_id, disk_id)
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_cloud_disks_account_region
+            ON cloud_disks(account_id, region_id)
+        """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS cloud_snapshots (
+                id TEXT PRIMARY KEY NOT NULL,
+                account_id TEXT NOT NULL REFERENCES cloud_provider_accounts(id) ON DELETE CASCADE,
+                provider_id TEXT NOT NULL,
+                region_id TEXT NOT NULL,
+                snapshot_id TEXT NOT NULL,
+                disk_id TEXT,
+                name TEXT,
+                status TEXT,
+                size_gb INTEGER,
+                created_at_provider TEXT,
+                raw_json TEXT,
+                last_synced_at TEXT,
+                UNIQUE(account_id, region_id, snapshot_id)
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_cloud_snapshots_account_region
+            ON cloud_snapshots(account_id, region_id)
+        """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS cloud_billing_states (
+                id TEXT PRIMARY KEY NOT NULL,
+                account_id TEXT NOT NULL REFERENCES cloud_provider_accounts(id) ON DELETE CASCADE,
+                provider_id TEXT NOT NULL,
+                resource_type TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                billing_type TEXT,
+                expire_at TEXT,
+                status TEXT,
+                raw_json TEXT,
+                last_synced_at TEXT,
+                UNIQUE(account_id, provider_id, resource_type, resource_id)
+            )
+        """)
+        try execute("""
+            CREATE INDEX IF NOT EXISTS idx_cloud_billing_states_account
+            ON cloud_billing_states(account_id)
+        """)
+        try execute("""
             CREATE TABLE IF NOT EXISTS deployment_projects (
                 id TEXT PRIMARY KEY NOT NULL,
                 server_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
