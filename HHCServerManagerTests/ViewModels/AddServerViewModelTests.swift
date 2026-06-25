@@ -227,6 +227,110 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.supportsRuntimeCapability(.cloudDisks, providerId: .tencentCloud))
     }
 
+    func testCloudResourceCenterRefreshAppliesLocalFiltersAndResetsSelection() throws {
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.cloud-resource-center.\(UUID().uuidString)")
+        let appState = AppState(repository: repository, keychain: keychain)
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let account = CloudProviderAccount(
+            id: UUID(),
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            keychainRef: "cloud_test",
+            enabled: true,
+            createdAt: capturedAt,
+            updatedAt: capturedAt
+        )
+        try repository.upsertCloudProviderAccount(account)
+        try repository.upsertCloudInstanceLink(CloudInstanceLink(
+            id: UUID(),
+            serverId: nil,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-prod",
+            displayName: "prod-web",
+            publicIp: "203.0.113.10",
+            privateIp: nil,
+            status: "RUNNING",
+            instanceType: "S5.SMALL1",
+            zoneId: nil,
+            vpcId: nil,
+            securityGroupIds: [],
+            rawJSON: nil,
+            lastSyncedAt: capturedAt
+        ))
+        try repository.upsertCloudDisk(CloudDisk(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            diskId: "disk-data",
+            instanceId: "ins-prod",
+            name: "prod-data",
+            diskType: "CLOUD_PREMIUM",
+            sizeGB: 100,
+            status: "ATTACHED",
+            billingType: "POSTPAID_BY_HOUR",
+            expiredTime: nil,
+            rawJSON: nil,
+            lastSyncedAt: capturedAt
+        ))
+        try repository.upsertCloudDisk(CloudDisk(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-shanghai",
+            diskId: "disk-other-region",
+            instanceId: nil,
+            name: "prod-data",
+            diskType: "CLOUD_PREMIUM",
+            sizeGB: 200,
+            status: "ATTACHED",
+            billingType: "POSTPAID_BY_HOUR",
+            expiredTime: nil,
+            rawJSON: nil,
+            lastSyncedAt: capturedAt
+        ))
+        try repository.upsertCloudSnapshot(CloudSnapshot(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            snapshotId: "snap-before-upgrade",
+            diskId: "disk-data",
+            name: "before-upgrade",
+            status: "NORMAL",
+            sizeGB: 100,
+            createdAtProvider: capturedAt,
+            rawJSON: nil,
+            lastSyncedAt: capturedAt
+        ))
+        appState.reloadServers()
+
+        let viewModel = CloudResourceCenterViewModel()
+        viewModel.selectedAccountId = account.id
+        viewModel.selectedRegionId = "ap-guangzhou"
+        viewModel.kindFilter = .disk
+        viewModel.statusFilter = "ATTACHED"
+        viewModel.searchText = "data"
+
+        viewModel.refreshLocalResources(appState: appState)
+
+        XCTAssertEqual(viewModel.resources.map(\.resourceId), ["disk-data"])
+        XCTAssertEqual(viewModel.selectedResourceId, "disk:\(account.id.uuidString):ap-guangzhou:disk-data")
+        XCTAssertEqual(viewModel.statusMessage, "Loaded 1 cached cloud resources.")
+
+        viewModel.kindFilter = .snapshot
+        viewModel.statusFilter = ""
+        viewModel.searchText = "upgrade"
+
+        viewModel.refreshLocalResources(appState: appState)
+
+        XCTAssertEqual(viewModel.resources.map(\.resourceId), ["snap-before-upgrade"])
+        XCTAssertEqual(viewModel.selectedResourceId, "snapshot:\(account.id.uuidString):ap-guangzhou:snap-before-upgrade")
+    }
+
     private func makeProfile(authType: SSHAuthType) -> ServerProfile {
         ServerProfile(
             id: UUID(),

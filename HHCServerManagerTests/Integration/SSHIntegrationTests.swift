@@ -783,11 +783,15 @@ final class SSHIntegrationTests: XCTestCase {
     }
 
     private static func trustHostKeyIfNeeded(_ sshClient: OpenSSHClient, profile: ServerProfile) async throws {
-        do {
-            _ = try await sshClient.runSmokeTest(profile: profile)
-        } catch SSHClientError.unknownHostKey(let hostKey) {
-            try sshClient.trustHostKey(hostKey, for: profile)
+        for _ in 0..<3 {
+            do {
+                _ = try await sshClient.runSmokeTest(profile: profile)
+                return
+            } catch SSHClientError.unknownHostKey(let hostKey) {
+                try sshClient.trustHostKey(hostKey, for: profile)
+            }
         }
+        _ = try await sshClient.runSmokeTest(profile: profile)
     }
 
     private static func shellQuote(_ value: String) -> String {

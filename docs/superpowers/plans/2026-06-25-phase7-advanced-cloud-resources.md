@@ -215,6 +215,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 三家云危险操作风险确认文案测试，覆盖阿里云快照/云盘和华为云实例电源操作的 provider-aware 预览。
 - [x] 危险云操作失败路径测试：覆盖快照创建、云盘挂载和实例电源操作失败时写入 failed 审计日志，且不污染本地快照、云盘和实例状态缓存。
 - [x] 云资源中心运行时权限降级 ViewModel 测试，覆盖 permission denied 降级和非权限错误不降级。
+- [x] 云资源中心本地筛选 ViewModel 测试，覆盖 account、region、kind、status、text filter 和过滤结果变化后的 selected resource 重置。
 
 ### Task 8：手动验收
 
