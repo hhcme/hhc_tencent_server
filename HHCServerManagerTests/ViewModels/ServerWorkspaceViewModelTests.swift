@@ -662,6 +662,37 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.dashboardErrorMessage)
     }
 
+    func testRefreshDashboardHandlesMissingProcAndCommandsAsWarnings() async throws {
+        let profile = makeProfile()
+        let client = DashboardNoProcMockSSHClient()
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.refreshDashboard(
+            profile: profile,
+            sshClient: client,
+            dashboardService: DashboardService(now: { Date(timeIntervalSince1970: 1_700_000_000) }),
+            repository: repository
+        )
+        try await waitUntil { viewModel.isRefreshingDashboard == false && viewModel.dashboardSnapshot != nil }
+
+        let snapshot = try XCTUnwrap(viewModel.dashboardSnapshot)
+        XCTAssertEqual(snapshot.capabilities.osName, "Alpine Linux 3.20")
+        XCTAssertFalse(snapshot.capabilities.hasProc)
+        XCTAssertFalse(snapshot.capabilities.hasSystemd)
+        XCTAssertFalse(snapshot.capabilities.hasSFTP)
+        XCTAssertEqual(snapshot.metrics.map(\.name), ["Root Disk", "CPU Cores"])
+        XCTAssertEqual(snapshot.warnings, [
+            DashboardWarning(source: "Load Average", message: "/proc unavailable"),
+            DashboardWarning(source: "Memory", message: "/proc unavailable"),
+            DashboardWarning(source: "Network", message: "/proc unavailable"),
+            DashboardWarning(source: "Processes", message: "ps unavailable"),
+        ])
+        XCTAssertNil(viewModel.dashboardErrorMessage)
+        XCTAssertEqual(try repository.fetchLatestDashboardSnapshot(serverId: profile.id), snapshot)
+    }
+
     func testDashboardAutoRefreshRunsImmediatelyAndStopsWhenDisabled() async throws {
         let profile = makeProfile()
         let client = DashboardMockSSHClient()
@@ -2069,6 +2100,46 @@ private final class DashboardPartialFailureMockSSHClient: SSHClient, @unchecked 
             throw SSHClientError.processFailed("network unavailable")
         }
         return try await successClient.execute(command, profile: profile)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+}
+
+private final class DashboardNoProcMockSSHClient: SSHClient, @unchecked Sendable {
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        if command.contains("/proc/loadavg") ||
+            command.contains("/proc/meminfo") ||
+            command.contains("/proc/net/dev") {
+            throw SSHClientError.processFailed("/proc unavailable")
+        }
+        if command.contains("ps -eo stat=") {
+            throw SSHClientError.processFailed("ps unavailable")
+        }
+
+        let stdout: String
+        if command.contains("/etc/os-release") {
+            stdout = """
+            NAME="Alpine Linux"
+            VERSION_ID=3.20
+            """
+        } else if command == "uname -r" {
+            stdout = "6.6.0\n"
+        } else if command.contains("test -d /proc") ||
+            command.contains("systemctl") ||
+            command.contains("sftp") {
+            stdout = "no\n"
+        } else if command.contains("df -kP") {
+            stdout = "/dev/vda1 10485760 2097152 8388608 20% /\n"
+        } else if command.contains("_NPROCESSORS_ONLN") {
+            stdout = "2\n"
+        } else {
+            stdout = ""
+        }
+        return CommandResult(command: command, stdout: stdout, stderr: "", exitCode: 0, duration: 0)
     }
 
     func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}

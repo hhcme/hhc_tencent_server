@@ -3424,7 +3424,10 @@ final class DashboardService: @unchecked Sendable {
 
     static func parseOSRelease(_ text: String) -> (name: String?, version: String?) {
         let values = Self.parseOSReleaseFields(text)
-        let fallbackName = Self.compactOSName(name: values["NAME"], version: values["VERSION"])
+        let fallbackName = Self.compactOSName(
+            name: values["NAME"],
+            version: Self.nonEmptyOSReleaseValue(values["VERSION"]) ?? values["VERSION_ID"]
+        )
         return (
             Self.nonEmptyOSReleaseValue(values["PRETTY_NAME"]) ?? fallbackName,
             Self.nonEmptyOSReleaseValue(values["VERSION_ID"]) ?? Self.nonEmptyOSReleaseValue(values["VERSION"])

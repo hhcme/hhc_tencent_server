@@ -166,7 +166,7 @@ CREATE TABLE file_transfer_jobs (
 ### Task 8：手动验收
 
 - [x] 连接一台 Linux 服务器后 Dashboard 能展示基础指标。
-- [ ] 无 `/proc` 或命令缺失时 UI 不崩溃。
+- [x] 无 `/proc` 或命令缺失时 UI 不崩溃：Dashboard 刷新会保留可用指标、把缺失命令记录为 warning，并通过 ViewModel 测试覆盖无 `/proc` 降级路径。
 - [ ] 已关联腾讯云实例时能展示云侧指标。当前已有 mock/contract 测试，真实云账号手动验收待补。
 - [x] 文件列表能浏览目录。
 - [x] 小文件上传、下载、重命名成功。
