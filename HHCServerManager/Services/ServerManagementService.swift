@@ -6740,6 +6740,7 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .instanceMetadata,
         .cloudDisks,
         .cloudSnapshots,
+        .cloudBilling,
         .securityGroups,
         .securityGroupActions,
         .snapshotActions,
@@ -7066,7 +7067,42 @@ final class HuaweiCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         capturedAt: Date
     ) async throws -> [CloudBillingState] {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudBilling)
+        let instances = try await fetchInstances(credential: credential, regionId: regionId)
+        let disks = try await fetchDisks(
+            credential: credential,
+            accountId: accountId,
+            regionId: regionId,
+            capturedAt: capturedAt
+        )
+        var states = instances.map { instance in
+            CloudBillingState(
+                id: UUID(),
+                accountId: accountId,
+                providerId: .huaweiCloud,
+                resourceType: "instance",
+                resourceId: instance.id,
+                billingType: instance.billingType,
+                expireAt: instance.expiredTime,
+                status: instance.status,
+                rawJSON: instance.rawJSON,
+                lastSyncedAt: capturedAt
+            )
+        }
+        states.append(contentsOf: disks.map { disk in
+            CloudBillingState(
+                id: UUID(),
+                accountId: accountId,
+                providerId: .huaweiCloud,
+                resourceType: "disk",
+                resourceId: disk.diskId,
+                billingType: disk.billingType,
+                expireAt: disk.expiredTime,
+                status: disk.status,
+                rawJSON: disk.rawJSON,
+                lastSyncedAt: capturedAt
+            )
+        })
+        return states
     }
 
     func createSnapshot(

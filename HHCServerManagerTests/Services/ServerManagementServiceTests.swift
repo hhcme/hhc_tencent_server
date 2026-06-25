@@ -4819,6 +4819,70 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].queryValue("to"), "1700000600000")
     }
 
+    func testHuaweiCloudAdapterFetchesBillingStatesFromInstancesAndDisks() async throws {
+        let accountId = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockHuaweiCloudTransport(responses: [
+            """
+            {
+              "count": 1,
+              "servers": [
+                {
+                  "id": "server-1",
+                  "name": "prod-hw",
+                  "status": "ACTIVE",
+                  "metadata": {"charging_mode": "prePaid"},
+                  "addresses": {}
+                }
+              ]
+            }
+            """,
+            """
+            {
+              "count": 1,
+              "volumes": [
+                {
+                  "id": "vol-1",
+                  "name": "prod-system",
+                  "size": 80,
+                  "status": "in-use",
+                  "volume_type": "SSD",
+                  "metadata": {"billingMode": "postPaid"}
+                }
+              ]
+            }
+            """,
+        ])
+        let adapter = HuaweiCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "HUAWEIAK", secretKey: "HUAWEISK")
+
+        let states = try await adapter.fetchBillingStates(
+            credential: credential,
+            accountId: accountId,
+            regionId: "ap-southeast-1|project-1",
+            capturedAt: capturedAt
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.cloudBilling))
+        XCTAssertEqual(states.map(\.resourceType), ["instance", "disk"])
+        XCTAssertEqual(states.map(\.resourceId), ["server-1", "vol-1"])
+        XCTAssertEqual(states.map(\.providerId), [.huaweiCloud, .huaweiCloud])
+        XCTAssertEqual(states.map(\.accountId), [accountId, accountId])
+        XCTAssertEqual(states.map(\.billingType), ["prePaid", "postPaid"])
+        XCTAssertEqual(states.map(\.status), ["ACTIVE", "in-use"])
+        XCTAssertEqual(states.map(\.lastSyncedAt), [capturedAt, capturedAt])
+
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(transport.requests[0].url?.host, "ecs.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[0].url?.path, "/v1.1/project-1/cloudservers/detail")
+        XCTAssertEqual(transport.requests[1].url?.host, "evs.ap-southeast-1.myhuaweicloud.com")
+        XCTAssertEqual(transport.requests[1].url?.path, "/v2/project-1/cloudvolumes/detail")
+    }
+
     func testHuaweiCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedVPCAPI() async throws {
         let accountId = UUID()
         let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
