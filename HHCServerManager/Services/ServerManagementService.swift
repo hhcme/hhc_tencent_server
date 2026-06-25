@@ -6002,6 +6002,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .snapshotActions,
         .diskAttachmentActions,
         .powerActions,
+        .cloudMetrics,
     ]
 
     private let transport: AlibabaCloudHTTPTransport
@@ -6083,7 +6084,35 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
     }
 
     func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .cloudMetrics)
+        let dimensions = try Self.alibabaMetricDimensions(instanceId: query.instanceId)
+        let response: AlibabaDescribeMetricListResponse = try await request(
+            credential: credential,
+            host: "metrics.\(query.regionId).aliyuncs.com",
+            action: "DescribeMetricList",
+            queryItems: [
+                URLQueryItem(name: "Namespace", value: Self.alibabaMetricNamespace(query.namespace)),
+                URLQueryItem(name: "MetricName", value: Self.alibabaMetricName(query.metricName)),
+                URLQueryItem(name: "Dimensions", value: dimensions),
+                URLQueryItem(name: "StartTime", value: "\(Self.millisecondsSince1970(query.startTime))"),
+                URLQueryItem(name: "EndTime", value: "\(Self.millisecondsSince1970(query.endTime))"),
+                URLQueryItem(name: "Period", value: "\(query.period)"),
+            ],
+            version: "2019-01-01"
+        )
+        let samples = try Self.parseAlibabaMetricDatapoints(response.datapoints)
+            .sorted { $0.timestamp < $1.timestamp }
+            .compactMap { datapoint -> (timestamp: Double, value: Double)? in
+                guard let value = datapoint.value else { return nil }
+                return (datapoint.timestamp, value)
+            }
+        return CloudMetricSeries(
+            metricName: query.metricName,
+            instanceId: query.instanceId,
+            regionId: query.regionId,
+            unit: "%",
+            values: samples.map(\.value),
+            timestamps: samples.map { Self.dateFromAlibabaMetricTimestamp($0.timestamp) }
+        )
     }
 
     func fetchSecurityGroups(
@@ -6449,9 +6478,16 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         credential: CloudProviderCredential,
         host: String,
         action: String,
-        queryItems: [URLQueryItem]
+        queryItems: [URLQueryItem],
+        version: String = "2014-05-26"
     ) async throws -> Response {
-        let request = try signedRequest(credential: credential, host: host, action: action, queryItems: queryItems)
+        let request = try signedRequest(
+            credential: credential,
+            host: host,
+            action: action,
+            queryItems: queryItems,
+            version: version
+        )
         let (data, httpResponse) = try await CloudProviderRequestRunner.withTimeout(timeout) {
             try await self.transport.send(request)
         }
@@ -6469,7 +6505,8 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         credential: CloudProviderCredential,
         host: String,
         action: String,
-        queryItems: [URLQueryItem]
+        queryItems: [URLQueryItem],
+        version: String = "2014-05-26"
     ) throws -> URLRequest {
         var components = URLComponents()
         components.scheme = "https"
@@ -6489,7 +6526,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
             ("x-acs-content-sha256", hashedPayload),
             ("x-acs-date", date),
             ("x-acs-signature-nonce", nonce()),
-            ("x-acs-version", "2014-05-26"),
+            ("x-acs-version", version),
         ]
         let canonicalHeaders = headers
             .map { "\($0.0):\($0.1.trimmingCharacters(in: .whitespacesAndNewlines))\n" }
@@ -6561,6 +6598,44 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: text)
+    }
+
+    private static func millisecondsSince1970(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1_000).rounded())
+    }
+
+    private static func dateFromAlibabaMetricTimestamp(_ timestamp: Double) -> Date {
+        if timestamp > 10_000_000_000 {
+            return Date(timeIntervalSince1970: timestamp / 1_000)
+        }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    private static func alibabaMetricNamespace(_ namespace: String) -> String {
+        namespace == "QCE/CVM" ? "acs_ecs_dashboard" : namespace
+    }
+
+    private static func alibabaMetricName(_ metricName: String) -> String {
+        metricName == "CPUUsage" ? "CPUUtilization" : metricName
+    }
+
+    private static func alibabaMetricDimensions(instanceId: String) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: ["instanceId": instanceId], options: [.sortedKeys])
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw CloudProviderError.providerFailure("Could not encode Alibaba Cloud metric dimensions.")
+        }
+        return text
+    }
+
+    private static func parseAlibabaMetricDatapoints(_ text: String?) throws -> [AlibabaMetricDatapoint] {
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return []
+        }
+        do {
+            return try JSONDecoder().decode([AlibabaMetricDatapoint].self, from: Data(text.utf8))
+        } catch {
+            throw CloudProviderError.providerFailure("Could not decode Alibaba Cloud metric datapoints: \(error.localizedDescription)")
+        }
     }
 
     private static func mapAlibabaSecurityGroupPermissions(
@@ -7451,6 +7526,58 @@ private struct AlibabaDescribeInstancesResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case totalCount = "TotalCount"
         case instances = "Instances"
+    }
+}
+
+private struct AlibabaDescribeMetricListResponse: Decodable {
+    var datapoints: String?
+
+    enum CodingKeys: String, CodingKey {
+        case datapoints = "Datapoints"
+    }
+}
+
+private struct AlibabaMetricDatapoint: Decodable {
+    var timestamp: Double
+    var value: Double?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: AlibabaDynamicCodingKey.self)
+        timestamp = try container.decodeFlexibleDouble(forKeys: ["timestamp", "Timestamp"])
+            ?? 0
+        value = try container.decodeFlexibleDouble(forKeys: ["Average", "average", "Value", "value", "Maximum", "maximum"])
+    }
+}
+
+private struct AlibabaDynamicCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+
+    init(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(intValue: Int) {
+        self.stringValue = "\(intValue)"
+        self.intValue = intValue
+    }
+}
+
+private extension KeyedDecodingContainer where Key == AlibabaDynamicCodingKey {
+    func decodeFlexibleDouble(forKeys names: [String]) throws -> Double? {
+        for name in names {
+            let key = AlibabaDynamicCodingKey(stringValue: name)
+            if let double = try? decodeIfPresent(Double.self, forKey: key) {
+                return double
+            }
+            if let int = try? decodeIfPresent(Int.self, forKey: key) {
+                return Double(int)
+            }
+            if let string = try? decodeIfPresent(String.self, forKey: key), let double = Double(string) {
+                return double
+            }
+        }
+        return nil
     }
 }
 

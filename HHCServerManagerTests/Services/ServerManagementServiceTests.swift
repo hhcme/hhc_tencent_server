@@ -4110,6 +4110,65 @@ final class ServerManagementServiceTests: XCTestCase {
         }
     }
 
+    func testAlibabaCloudAdapterFetchesMetricSeriesUsesCloudMonitorAPI() async throws {
+        let startTime = Date(timeIntervalSince1970: 1_700_000_000)
+        let endTime = Date(timeIntervalSince1970: 1_700_000_600)
+        let transport = MockAlibabaCloudTransport(responses: [
+            #"""
+            {
+              "RequestId": "aliyun-metrics",
+              "Code": "200",
+              "Datapoints": "[{\"timestamp\":1700000600000,\"Average\":25.75},{\"timestamp\":1700000300000,\"Average\":\"20.5\"}]",
+              "Period": "300"
+            }
+            """#,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { startTime },
+            nonce: { "nonce-metric" },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK")
+
+        let series = try await adapter.fetchMetricSeries(
+            credential: credential,
+            query: CloudMetricQuery(
+                namespace: "QCE/CVM",
+                metricName: "CPUUsage",
+                instanceId: "i-1",
+                regionId: "ap-southeast-1",
+                period: 300,
+                startTime: startTime,
+                endTime: endTime
+            )
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.cloudMetrics))
+        XCTAssertEqual(series.metricName, "CPUUsage")
+        XCTAssertEqual(series.instanceId, "i-1")
+        XCTAssertEqual(series.regionId, "ap-southeast-1")
+        XCTAssertEqual(series.unit, "%")
+        XCTAssertEqual(series.values, [20.5, 25.75])
+        XCTAssertEqual(series.timestamps, [
+            Date(timeIntervalSince1970: 1_700_000_300),
+            Date(timeIntervalSince1970: 1_700_000_600),
+        ])
+
+        XCTAssertEqual(transport.requests.count, 1)
+        XCTAssertEqual(transport.requests[0].url?.host, "metrics.ap-southeast-1.aliyuncs.com")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-action"), "DescribeMetricList")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-version"), "2019-01-01")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "x-acs-signature-nonce"), "nonce-metric")
+        XCTAssertTrue(transport.requests[0].value(forHTTPHeaderField: "Authorization")?.hasPrefix("ACS3-HMAC-SHA256 Credential=ALIYUNAK") == true)
+        XCTAssertEqual(transport.requests[0].queryValue("Namespace"), "acs_ecs_dashboard")
+        XCTAssertEqual(transport.requests[0].queryValue("MetricName"), "CPUUtilization")
+        XCTAssertEqual(transport.requests[0].queryValue("Dimensions"), #"{"instanceId":"i-1"}"#)
+        XCTAssertEqual(transport.requests[0].queryValue("StartTime"), "1700000000000")
+        XCTAssertEqual(transport.requests[0].queryValue("EndTime"), "1700000600000")
+        XCTAssertEqual(transport.requests[0].queryValue("Period"), "300")
+    }
+
     func testAlibabaCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedECSAPI() async throws {
         let accountId = UUID()
         let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)

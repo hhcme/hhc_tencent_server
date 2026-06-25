@@ -108,8 +108,8 @@ CREATE TABLE file_transfer_jobs (
 
 ### Task 3：云监控接入
 
-- [x] 在腾讯云 adapter 中补基础云监控查询：已接入 Cloud Monitor `GetMonitorData` 的 CVM `CPUUsage`。
-- [x] 将云监控指标与 SSH 指标分开展示：DashboardMetric 使用 `Cloud API` 来源标记，当前先聚合显示 Cloud CPU。
+- [x] 在云厂商 adapter 中补基础云监控查询：已接入腾讯云 Cloud Monitor `GetMonitorData` 的 CVM `CPUUsage`，以及阿里云 CMS `DescribeMetricList` 的 ECS `CPUUtilization`。
+- [x] 将云监控指标与 SSH 指标分开展示：DashboardMetric 使用 `Cloud API` 来源标记，当前聚合显示 Cloud CPU。
 - [x] 无云账号或无关联实例时隐藏云指标入口；权限或凭据错误以 warning 降级。
 
 ### Task 4：Dashboard UI
