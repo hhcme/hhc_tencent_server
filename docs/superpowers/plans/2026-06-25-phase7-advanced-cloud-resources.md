@@ -107,6 +107,7 @@ CREATE TABLE cloud_billing_states (
 - 已为阿里云 ECS 接入云盘挂载/卸载操作，云资源中心会按 `diskAttachmentActions` capability 展示操作；挂载仅允许 `Available` 云盘，卸载仅允许 `In_use` 云盘，执行后本地缓存进入 `ATTACHING`/`DETACHING` 并写入云端变更审计。
 - 已为华为云 EVS 接入云盘挂载/卸载操作，云资源中心会按 `diskAttachmentActions` capability 展示操作；挂载仅允许 `available` 云盘，卸载仅允许 `in-use` 云盘，执行后本地缓存进入 `ATTACHING`/`DETACHING` 并写入云端变更审计。
 - 已为腾讯云 CVM 接入实例启动、停止、重启操作，云资源中心会按 `powerActions` capability 展示操作；启动仅允许 `STOPPED` 实例，停止/重启仅允许 `RUNNING` 实例，执行后本地缓存进入 `STARTING`/`STOPPING`/`REBOOTING` 并写入云端变更审计。
+- 已为阿里云 ECS 接入实例启动、停止、重启操作，云资源中心会按 `powerActions` capability 展示操作；启动仅允许 `Stopped` 实例，停止/重启仅允许 `Running` 实例，执行后本地缓存进入 `STARTING`/`STOPPING`/`REBOOTING` 并写入云端变更审计。
 
 ## 6. UI 范围
 
@@ -174,7 +175,8 @@ CREATE TABLE cloud_billing_states (
 - [x] 阿里云云盘挂载/卸载操作。
 - [x] 华为云云盘挂载/卸载操作。
 - [x] 腾讯云实例启动/停止/重启操作。
-- [ ] 阿里云、华为云实例电源操作按 capability 补齐。
+- [x] 阿里云实例启动/停止/重启操作。
+- [ ] 华为云实例电源操作按 capability 补齐。
 - [x] 已接入的危险云操作写入变更审计日志。
 
 ### Task 6：云资源中心 UI

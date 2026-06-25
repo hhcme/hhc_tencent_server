@@ -5965,6 +5965,7 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         .securityGroups,
         .snapshotActions,
         .diskAttachmentActions,
+        .powerActions,
     ]
 
     private let transport: AlibabaCloudHTTPTransport
@@ -6332,7 +6333,12 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         instanceId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+        try await performInstanceAction(
+            credential: credential,
+            regionId: regionId,
+            instanceId: instanceId,
+            action: "StartInstance"
+        )
     }
 
     func stopInstance(
@@ -6340,7 +6346,12 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         instanceId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+        try await performInstanceAction(
+            credential: credential,
+            regionId: regionId,
+            instanceId: instanceId,
+            action: "StopInstance"
+        )
     }
 
     func rebootInstance(
@@ -6348,7 +6359,29 @@ final class AlibabaCloudAdapter: CloudProviderAdapter, @unchecked Sendable {
         regionId: String,
         instanceId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .powerActions)
+        try await performInstanceAction(
+            credential: credential,
+            regionId: regionId,
+            instanceId: instanceId,
+            action: "RebootInstance"
+        )
+    }
+
+    private func performInstanceAction(
+        credential: CloudProviderCredential,
+        regionId: String,
+        instanceId: String,
+        action: String
+    ) async throws {
+        let _: AlibabaInstanceActionResponse = try await request(
+            credential: credential,
+            host: "ecs.\(regionId).aliyuncs.com",
+            action: action,
+            queryItems: [
+                URLQueryItem(name: "RegionId", value: regionId),
+                URLQueryItem(name: "InstanceId", value: instanceId),
+            ]
+        )
     }
 
     private func request<Response: Decodable>(
@@ -7271,6 +7304,14 @@ private struct AlibabaDeleteSnapshotResponse: Decodable {
 }
 
 private struct AlibabaDiskActionResponse: Decodable {
+    var requestId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case requestId = "RequestId"
+    }
+}
+
+private struct AlibabaInstanceActionResponse: Decodable {
     var requestId: String?
 
     enum CodingKeys: String, CodingKey {

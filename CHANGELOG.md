@@ -212,6 +212,7 @@ All notable changes to this project will be documented in this file.
 - 添加阿里云 ECS 云盘挂载/卸载操作，包含按厂商区分 `Available` / `In_use` 状态门禁、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。
 - 添加华为云 EVS 云盘挂载/卸载操作，包含 `os-attach` / `os-detach` 签名 action、`available` / `in-use` 状态门禁、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。
 - 添加腾讯云 CVM 实例启动/停止/重启操作，包含状态门禁、风险确认、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。
+- 添加阿里云 ECS 实例启动/停止/重启操作，包含 `Stopped` / `Running` 状态门禁、本地过渡状态缓存、远程变更审计日志和 API fixture 测试。
 - 添加 Dashboard 快照持久化，成功刷新会缓存到 SQLite，重新打开服务器工作台时恢复最近快照。
 - 添加远程文件传输历史持久化，macOS 工作台可恢复最近传输记录和进度状态。
 - 添加受限防火墙规则新增/删除动作，包含输入校验、风险确认、规则快照刷新和远程变更审计日志。

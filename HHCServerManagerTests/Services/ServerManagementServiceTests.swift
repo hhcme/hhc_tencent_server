@@ -2752,6 +2752,88 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(logs.first { $0.action == "stop_instance" }?.status, "success")
     }
 
+    func testCloudInstancePowerActionsAllowAlibabaStatuses() async throws {
+        let adapter = MockCloudProviderAdapter(
+            providerId: .alibabaCloud,
+            capabilities: [.regions, .instanceDiscovery, .instanceMetadata, .powerActions]
+        )
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_520)
+        let harness = try Harness(adapters: [adapter], now: { capturedAt })
+        let account = try harness.cloudAccountService.createAccount(
+            providerId: .alibabaCloud,
+            displayName: "Alibaba",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        var link = CloudInstanceLink(
+            id: UUID(),
+            serverId: nil,
+            accountId: account.id,
+            providerId: .alibabaCloud,
+            regionId: "ap-southeast-1",
+            instanceId: "i-power",
+            displayName: "prod",
+            publicIp: "203.0.113.12",
+            privateIp: "10.0.0.12",
+            status: "Stopped",
+            instanceType: "ecs.g7.large",
+            zoneId: "ap-southeast-1a",
+            vpcId: "vpc-1",
+            rawJSON: nil,
+            lastSyncedAt: nil
+        )
+        try harness.repository.upsertCloudInstanceLink(link)
+
+        try await harness.cloudInstanceSyncService.startInstance(
+            account: account,
+            regionId: "ap-southeast-1",
+            instanceId: "i-power",
+            currentStatus: "Stopped"
+        )
+
+        var storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-southeast-1",
+            instanceId: "i-power"
+        )
+        XCTAssertEqual(storedLink.status, "STARTING")
+        XCTAssertEqual(storedLink.lastSyncedAt, capturedAt)
+
+        link.status = "Running"
+        try harness.repository.upsertCloudInstanceLink(link)
+        try await harness.cloudInstanceSyncService.rebootInstance(
+            account: account,
+            regionId: "ap-southeast-1",
+            instanceId: "i-power",
+            currentStatus: "Running"
+        )
+        storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-southeast-1",
+            instanceId: "i-power"
+        )
+        XCTAssertEqual(storedLink.status, "REBOOTING")
+
+        link.status = "Running"
+        try harness.repository.upsertCloudInstanceLink(link)
+        try await harness.cloudInstanceSyncService.stopInstance(
+            account: account,
+            regionId: "ap-southeast-1",
+            instanceId: "i-power",
+            currentStatus: "Running"
+        )
+        storedLink = try harness.repository.fetchCloudInstanceLink(
+            accountId: account.id,
+            regionId: "ap-southeast-1",
+            instanceId: "i-power"
+        )
+        XCTAssertEqual(storedLink.status, "STOPPING")
+        let logs = try harness.repository.fetchRemoteChangeLogs()
+        XCTAssertEqual(logs.first { $0.action == "start_instance" }?.providerId, .alibabaCloud)
+        XCTAssertEqual(logs.first { $0.action == "start_instance" }?.status, "success")
+        XCTAssertEqual(logs.first { $0.action == "reboot_instance" }?.status, "success")
+        XCTAssertEqual(logs.first { $0.action == "stop_instance" }?.status, "success")
+    }
+
     func testCloudInstanceSyncCreatesServerFromInstanceAndLinksIt() throws {
         let harness = try Harness()
         let account = try harness.cloudAccountService.createAccount(
@@ -3896,6 +3978,54 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[1].queryValue("RegionId"), "ap-southeast-1")
         XCTAssertEqual(transport.requests[1].queryValue("DiskId"), "d-1")
         XCTAssertNil(transport.requests[1].queryValue("InstanceId"))
+    }
+
+    func testAlibabaCloudAdapterRunsInstancePowerActionsUsesSignedECSAPI() async throws {
+        let capturedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let transport = MockAlibabaCloudTransport(responses: [
+            #"{"RequestId":"aliyun-start"}"#,
+            #"{"RequestId":"aliyun-stop"}"#,
+            #"{"RequestId":"aliyun-reboot"}"#,
+        ])
+        let adapter = AlibabaCloudAdapter(
+            transport: transport,
+            now: { capturedAt },
+            nonce: { "nonce-power-action" },
+            timeout: 1
+        )
+        let credential = CloudProviderCredential(secretId: "ALIYUNAK", secretKey: "ALIYUNSK")
+
+        try await adapter.startInstance(
+            credential: credential,
+            regionId: "ap-southeast-1",
+            instanceId: "i-1"
+        )
+        try await adapter.stopInstance(
+            credential: credential,
+            regionId: "ap-southeast-1",
+            instanceId: "i-1"
+        )
+        try await adapter.rebootInstance(
+            credential: credential,
+            regionId: "ap-southeast-1",
+            instanceId: "i-1"
+        )
+
+        XCTAssertTrue(adapter.capabilities.contains(.powerActions))
+        XCTAssertEqual(transport.requests.count, 3)
+        XCTAssertEqual(transport.requests.map { $0.value(forHTTPHeaderField: "x-acs-action") }, [
+            "StartInstance",
+            "StopInstance",
+            "RebootInstance",
+        ])
+        for request in transport.requests {
+            XCTAssertEqual(request.url?.host, "ecs.ap-southeast-1.aliyuncs.com")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-acs-version"), "2014-05-26")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-acs-signature-nonce"), "nonce-power-action")
+            XCTAssertTrue(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("ACS3-HMAC-SHA256 Credential=ALIYUNAK") == true)
+            XCTAssertEqual(request.queryValue("RegionId"), "ap-southeast-1")
+            XCTAssertEqual(request.queryValue("InstanceId"), "i-1")
+        }
     }
 
     func testAlibabaCloudAdapterFetchesSecurityGroupsAndPoliciesUsesSignedECSAPI() async throws {
