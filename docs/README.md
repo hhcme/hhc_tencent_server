@@ -6,6 +6,7 @@
 - [云厂商 API 增强层设计](superpowers/specs/2026-06-25-cloud-provider-integration.md)
 - [Windows 原生版技术选型](superpowers/specs/2026-06-25-windows-native-client-strategy.md)
 - [全部 Phase 实施计划](superpowers/plans/README.md)
+- [开发与验证说明](development.md)
 
 ## 文档维护原则
 

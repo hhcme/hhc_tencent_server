@@ -26,7 +26,7 @@ enum SSHClientError: LocalizedError {
     }
 }
 
-final class OpenSSHClient: @unchecked Sendable {
+final class OpenSSHClient: SSHClient, @unchecked Sendable {
     private let repository: ServerRepository
     private let keychain: KeychainService
     private let fileManager: FileManager

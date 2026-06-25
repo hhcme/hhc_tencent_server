@@ -22,7 +22,23 @@
 		100000000000000000000113 /* ServerBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000013 /* ServerBrowserView.swift */; };
 		100000000000000000000114 /* AddServerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* AddServerSheet.swift */; };
 		100000000000000000000115 /* ServerWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000015 /* ServerWorkspaceView.swift */; };
+		100000000000000000000116 /* SSHClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000019 /* SSHClient.swift */; };
+		900000000000000000000101 /* ServerRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000001 /* ServerRepositoryTests.swift */; };
+		900000000000000000000102 /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000002 /* KeychainServiceTests.swift */; };
+		900000000000000000000103 /* ServerManagementServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000003 /* ServerManagementServiceTests.swift */; };
+		900000000000000000000104 /* AddServerViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000004 /* AddServerViewModelTests.swift */; };
+		900000000000000000000105 /* SSHIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000005 /* SSHIntegrationTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		900000000000000000000301 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000601 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 100000000000000000000401;
+			remoteInfo = HHCServerManager;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		100000000000000000000001 /* HHCServerManagerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HHCServerManagerApp.swift; sourceTree = "<group>"; };
@@ -43,10 +59,24 @@
 		100000000000000000000016 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		100000000000000000000017 /* HHCServerManager.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HHCServerManager.entitlements; sourceTree = "<group>"; };
 		100000000000000000000018 /* HHCServerManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HHCServerManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000019 /* SSHClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHClient.swift; sourceTree = "<group>"; };
+		900000000000000000000001 /* ServerRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRepositoryTests.swift; sourceTree = "<group>"; };
+		900000000000000000000002 /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
+		900000000000000000000003 /* ServerManagementServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementServiceTests.swift; sourceTree = "<group>"; };
+		900000000000000000000004 /* AddServerViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddServerViewModelTests.swift; sourceTree = "<group>"; };
+		900000000000000000000005 /* SSHIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHIntegrationTests.swift; sourceTree = "<group>"; };
+		900000000000000000000006 /* HHCServerManagerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HHCServerManagerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		100000000000000000000201 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000201 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -60,6 +90,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000302 /* HHCServerManager */,
+				900000000000000000000302 /* HHCServerManagerTests */,
 				100000000000000000000303 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -81,6 +112,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000018 /* HHCServerManager.app */,
+				900000000000000000000006 /* HHCServerManagerTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -155,6 +187,7 @@
 		100000000000000000000311 /* SSH */ = {
 			isa = PBXGroup;
 			children = (
+				100000000000000000000019 /* SSHClient.swift */,
 				100000000000000000000008 /* OpenSSHClient.swift */,
 			);
 			path = SSH;
@@ -184,6 +217,50 @@
 			path = Sheets;
 			sourceTree = "<group>";
 		};
+		900000000000000000000302 /* HHCServerManagerTests */ = {
+			isa = PBXGroup;
+			children = (
+				900000000000000000000310 /* Storage */,
+				900000000000000000000311 /* Services */,
+				900000000000000000000312 /* ViewModels */,
+				900000000000000000000313 /* Integration */,
+			);
+			path = HHCServerManagerTests;
+			sourceTree = "<group>";
+		};
+		900000000000000000000310 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				900000000000000000000001 /* ServerRepositoryTests.swift */,
+				900000000000000000000002 /* KeychainServiceTests.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+		900000000000000000000311 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				900000000000000000000003 /* ServerManagementServiceTests.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		900000000000000000000312 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				900000000000000000000004 /* AddServerViewModelTests.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		900000000000000000000313 /* Integration */ = {
+			isa = PBXGroup;
+			children = (
+				900000000000000000000005 /* SSHIntegrationTests.swift */,
+			);
+			path = Integration;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -204,6 +281,24 @@
 			productReference = 100000000000000000000018 /* HHCServerManager.app */;
 			productType = "com.apple.product-type.application";
 		};
+		900000000000000000000401 /* HHCServerManagerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 900000000000000000000701 /* Build configuration list for PBXNativeTarget "HHCServerManagerTests" */;
+			buildPhases = (
+				900000000000000000000501 /* Sources */,
+				900000000000000000000201 /* Frameworks */,
+				900000000000000000000502 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				900000000000000000000303 /* PBXTargetDependency */,
+			);
+			name = HHCServerManagerTests;
+			productName = HHCServerManagerTests;
+			productReference = 900000000000000000000006 /* HHCServerManagerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -216,6 +311,10 @@
 				TargetAttributes = {
 					100000000000000000000401 = {
 						CreatedOnToolsVersion = 26.5;
+					};
+					900000000000000000000401 = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = 100000000000000000000401;
 					};
 				};
 			};
@@ -233,12 +332,20 @@
 			projectRoot = "";
 			targets = (
 				100000000000000000000401 /* HHCServerManager */,
+				900000000000000000000401 /* HHCServerManagerTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		100000000000000000000502 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000502 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -260,6 +367,7 @@
 				100000000000000000000106 /* KeychainService.swift in Sources */,
 				100000000000000000000107 /* ServerManagementService.swift in Sources */,
 				100000000000000000000108 /* OpenSSHClient.swift in Sources */,
+				100000000000000000000116 /* SSHClient.swift in Sources */,
 				100000000000000000000109 /* AddServerViewModel.swift in Sources */,
 				100000000000000000000110 /* ServerBrowserViewModel.swift in Sources */,
 				100000000000000000000111 /* ServerWorkspaceViewModel.swift in Sources */,
@@ -270,7 +378,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		900000000000000000000501 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				900000000000000000000101 /* ServerRepositoryTests.swift in Sources */,
+				900000000000000000000102 /* KeychainServiceTests.swift in Sources */,
+				900000000000000000000103 /* ServerManagementServiceTests.swift in Sources */,
+				900000000000000000000104 /* AddServerViewModelTests.swift in Sources */,
+				900000000000000000000105 /* SSHIntegrationTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		900000000000000000000303 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 100000000000000000000401 /* HHCServerManager */;
+			targetProxy = 900000000000000000000301 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		100000000000000000000801 /* Debug */ = {
@@ -446,6 +574,54 @@
 			};
 			name = Release;
 		};
+		900000000000000000000801 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = me.hhc.HHCServerManagerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HHCServerManager.app/Contents/MacOS/HHCServerManager";
+				WRAPPER_EXTENSION = xctest;
+			};
+			name = Debug;
+		};
+		900000000000000000000802 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = me.hhc.HHCServerManagerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HHCServerManager.app/Contents/MacOS/HHCServerManager";
+				WRAPPER_EXTENSION = xctest;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -463,6 +639,15 @@
 			buildConfigurations = (
 				100000000000000000000801 /* Debug */,
 				100000000000000000000802 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		900000000000000000000701 /* Build configuration list for PBXNativeTarget "HHCServerManagerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				900000000000000000000801 /* Debug */,
+				900000000000000000000802 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

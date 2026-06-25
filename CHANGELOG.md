@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Added Chinese implementation plans for all roadmap phases from Phase 1 to Phase 8.
 - Removed the internal English documentation mirror to avoid duplicated implementation planning drift.
 - Started the macOS native app with a SwiftUI server browser, server workspace, SQLite persistence, Keychain credential storage, host-key trust flow, and real OpenSSH smoke-test adapter.
+- Added the macOS unit test target covering repository, Keychain, server-management, form validation, and skipped-by-default SSH integration testing.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -43,3 +44,4 @@ All notable changes to this project will be documented in this file.
 - 补齐 Phase 1 到 Phase 8 的中文实施计划。
 - 移除内部英文文档镜像，避免实施计划重复维护后漂移。
 - 启动 macOS 原生应用实现，加入 SwiftUI 服务器列表、单服务器工作台、SQLite 持久化、Keychain 凭据存储、主机指纹信任流程和真实 OpenSSH smoke test 适配层。
+- 添加 macOS 单元测试 target，覆盖 repository、Keychain、服务器管理、表单校验，以及默认跳过的真实 SSH 集成测试入口。

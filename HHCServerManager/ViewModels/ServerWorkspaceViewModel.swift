@@ -7,7 +7,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var pendingHostKey: HostKeyInfo?
 
-    func runSmokeTest(profile: ServerProfile, sshClient: OpenSSHClient) {
+    func runSmokeTest(profile: ServerProfile, sshClient: SSHClient) {
         isRunningSmokeTest = true
         errorMessage = nil
         commandResult = nil
@@ -33,7 +33,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
-    func trustPendingHostKey(profile: ServerProfile, sshClient: OpenSSHClient) {
+    func trustPendingHostKey(profile: ServerProfile, sshClient: SSHClient) {
         guard let pendingHostKey else { return }
         do {
             try sshClient.trustHostKey(pendingHostKey, for: profile)
