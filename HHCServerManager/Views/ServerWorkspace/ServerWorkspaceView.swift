@@ -3815,6 +3815,13 @@ private struct CommandResultView: View {
                 Label("Exit \(result.exitCode)", systemImage: result.exitCode == 0 ? "checkmark.circle" : "xmark.octagon")
                 Text(String(format: "%.2fs", result.duration))
                     .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    copyResult()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
             }
 
             outputBlock(title: "stdout", value: result.stdout, isError: false)
@@ -3836,6 +3843,12 @@ private struct CommandResultView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(isError ? Color.red.opacity(0.08) : Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
         }
+    }
+
+    private func copyResult() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(result.clipboardText, forType: .string)
     }
 }
 

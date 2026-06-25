@@ -3,6 +3,30 @@ import XCTest
 
 @MainActor
 final class ServerWorkspaceViewModelTests: XCTestCase {
+    func testCommandResultClipboardTextIncludesOutputAndMetadata() {
+        let result = CommandResult(
+            command: "printf hhc-ssh-ok",
+            stdout: "hhc-ssh-ok\n",
+            stderr: "warn\n",
+            exitCode: 0,
+            duration: 0.123
+        )
+
+        XCTAssertEqual(result.clipboardText, """
+        $ printf hhc-ssh-ok
+        exit: 0
+        duration: 0.12s
+
+        stdout:
+        hhc-ssh-ok
+
+
+        stderr:
+        warn
+
+        """)
+    }
+
     func testRemoteOperationRiskFactoryBuildsConfirmationMessages() {
         let unit = SystemdUnit(
             name: "nginx.service",

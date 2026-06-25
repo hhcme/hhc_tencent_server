@@ -523,7 +523,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 - [ ] 表单校验准确。
 - [ ] 首次连接出现指纹确认。
 - [ ] 指纹变更出现阻断警告。
-- [ ] Smoke test 输出可复制。
+- [x] Smoke test 输出可复制：`CommandResultView` 提供 Copy 按钮，复制内容由 `CommandResult.clipboardText` 统一生成，包含命令、退出码、耗时、stdout 和 stderr；`ServerWorkspaceViewModelTests` 覆盖复制格式。
 
 ### Task 9: 测试
 

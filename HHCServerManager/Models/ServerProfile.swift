@@ -58,6 +58,25 @@ struct CommandResult: Equatable, Hashable {
     var stderr: String
     var exitCode: Int32
     var duration: TimeInterval
+
+    var clipboardText: String {
+        var lines = [
+            "$ \(command)",
+            "exit: \(exitCode)",
+            String(format: "duration: %.2fs", duration),
+            "",
+            "stdout:",
+            stdout.isEmpty ? "(empty)" : stdout,
+        ]
+        if !stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append(contentsOf: [
+                "",
+                "stderr:",
+                stderr,
+            ])
+        }
+        return lines.joined(separator: "\n")
+    }
 }
 
 struct ServerCapabilities: Codable, Equatable, Hashable, Sendable {
