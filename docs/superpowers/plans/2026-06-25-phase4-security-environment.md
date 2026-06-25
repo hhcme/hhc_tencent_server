@@ -144,12 +144,12 @@ CREATE TABLE environment_profiles (
 - [x] 无云账号时安全组页不可用但 SSH 功能正常：ViewModel 测试覆盖未关联云实例时仅显示安全组不可用提示，并保持已连接 SSH 状态和命令结果不变。
 - [ ] 腾讯云安全组可读取。当前 mock/contract 测试已通过，真实腾讯云账号手动验收待执行。
 - [x] 新增安全组规则前显示预览和确认基础：当前安全组详情页可生成拟新增规则预览并展示风险，确认后执行腾讯云单条规则写入。
-- [x] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，并通过受控临时 oneshot unit 验证真实 restart 写操作、远端 marker 和 `remote_change_logs` 审计。
+- [x] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，并通过受控临时 oneshot unit 验证真实 restart 写操作、远端 marker 和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过。
 - [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，且已加入受保护的临时配置写入/reload 集成入口。当前测试服务器 nginx 服务未运行，真实配置写入/reload 仍待合适环境谨慎验收。
 - [x] 防火墙后端探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作已有 mock/contract 测试覆盖，其中 nftables 仅写入已有兼容 chain 且只删除 HHC 标记规则，真实服务器写入仍需谨慎手动验收。
-- [x] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，并通过受控临时 cron entry 验证 add/disable/enable/delete、原 crontab 恢复和 `remote_change_logs` 审计；`/etc/cron.d` 系统任务只读发现已接入 contract 测试和受保护真实测试断言，真实系统条目是否存在取决于目标服务器。
-- [x] Environment 文件保存可备份并审计。当前真实服务器已通过受控临时 `.env` 验证保存、`.hhc-backup-*` 备份、远端内容变更和 `remote_change_logs` 审计。
-- [ ] 所有写操作可在操作日志中查到。当前 systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`；systemd/Cron/Environment 真实服务器写操作审计已验收，Nginx/Firewall 真实服务器写操作和真实云账号验收仍需继续补齐。
+- [x] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，并通过受控临时 cron entry 验证 add/disable/enable/delete、原 crontab 恢复和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过；`/etc/cron.d` 系统任务只读发现已接入 contract 测试和受保护真实测试断言，真实系统条目是否存在取决于目标服务器。
+- [x] Environment 文件保存可备份并审计。当前真实服务器已通过受控临时 `.env` 验证保存、`.hhc-backup-*` 备份、远端内容变更和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过。
+- [ ] 所有写操作可在操作日志中查到。当前 systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`；systemd/Cron/Environment 真实服务器写操作审计已于 2026-06-26 用当前代码重新验收，Nginx/Firewall 真实服务器写操作和真实云账号验收仍需继续补齐。
 
 ## 8. 完成标志
 
