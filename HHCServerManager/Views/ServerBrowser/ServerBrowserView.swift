@@ -588,22 +588,28 @@ private struct CloudImportSheet: View {
 
             HSplitView {
                 Form {
-                    Section("Tencent Cloud Account") {
+                    Section("Cloud Account") {
+                        Picker("Provider", selection: $viewModel.selectedProviderId) {
+                            ForEach(appState.cloudProviderRegistry.registeredProviderIds) { providerId in
+                                Text(providerId.displayName).tag(providerId)
+                            }
+                        }
+
                         Picker("Account", selection: $viewModel.selectedAccountId) {
                             Text("Select an account").tag(Optional<UUID>.none)
                             ForEach(appState.cloudProviderAccounts) { account in
-                                Text(account.displayName).tag(Optional(account.id))
+                                Text("\(account.displayName) · \(account.providerId.displayName)").tag(Optional(account.id))
                             }
                         }
 
                         TextField("Display Name", text: $viewModel.accountDisplayName)
-                        TextField("SecretId", text: $viewModel.secretId)
-                        SecureField("SecretKey", text: $viewModel.secretKey)
+                        TextField("Access Key ID / SecretId", text: $viewModel.secretId)
+                        SecureField("Access Key Secret / SecretKey", text: $viewModel.secretKey)
 
                         HStack {
                             Button {
                                 Task {
-                                    await viewModel.addTencentAccount(appState: appState)
+                                    await viewModel.addCloudAccount(appState: appState)
                                 }
                             } label: {
                                 Label("Add & Verify", systemImage: "checkmark.shield")
@@ -681,7 +687,7 @@ private struct CloudImportSheet: View {
                         ContentUnavailableView(
                             "No Instances",
                             systemImage: "cloud",
-                            description: Text("Add an account, load regions, then sync CVM instances.")
+                            description: Text("Add an account, load regions, then sync cloud instances.")
                         )
                     } else {
                         List(viewModel.instances, selection: $viewModel.selectedInstanceId) { instance in
@@ -723,7 +729,11 @@ private struct CloudImportSheet: View {
             appState.reloadServers()
             viewModel.selectDefaultAccount(from: appState.cloudProviderAccounts)
         }
+        .onChange(of: viewModel.selectedProviderId) {
+            viewModel.selectProvider(viewModel.selectedProviderId)
+        }
         .onChange(of: viewModel.selectedAccountId) {
+            viewModel.clearSyncedState()
             Task {
                 await viewModel.loadRegions(appState: appState)
             }

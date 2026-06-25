@@ -61,6 +61,7 @@ final class AddServerViewModelTests: XCTestCase {
         let viewModel = CloudImportViewModel()
 
         XCTAssertFalse(viewModel.canAddAccount)
+        XCTAssertEqual(viewModel.selectedProviderId, .tencentCloud)
         viewModel.accountDisplayName = "Tencent"
         viewModel.secretId = "sid"
         viewModel.secretKey = "skey"
@@ -97,6 +98,49 @@ final class AddServerViewModelTests: XCTestCase {
         viewModel.authType = .password
         viewModel.password = "secret"
         XCTAssertTrue(viewModel.canImport)
+    }
+
+    func testCloudImportViewModelSwitchesProviderAndClearsSyncedState() {
+        let viewModel = CloudImportViewModel()
+        let instanceId = UUID()
+
+        viewModel.secretId = "sid"
+        viewModel.secretKey = "skey"
+        viewModel.selectedAccountId = UUID()
+        viewModel.regions = [CloudRegion(id: "ap-guangzhou", displayName: "Guangzhou", available: true)]
+        viewModel.selectedRegionId = "ap-guangzhou"
+        viewModel.instances = [
+            CloudInstanceLink(
+                id: instanceId,
+                serverId: nil,
+                accountId: UUID(),
+                providerId: .tencentCloud,
+                regionId: "ap-guangzhou",
+                instanceId: "ins-123",
+                displayName: "prod",
+                publicIp: "203.0.113.1",
+                privateIp: nil,
+                status: "RUNNING",
+                instanceType: "S5.SMALL1",
+                zoneId: nil,
+                vpcId: nil,
+                rawJSON: nil,
+                lastSyncedAt: Date()
+            ),
+        ]
+        viewModel.selectedInstanceId = instanceId
+
+        viewModel.selectProvider(.huaweiCloud)
+
+        XCTAssertEqual(viewModel.selectedProviderId, .huaweiCloud)
+        XCTAssertEqual(viewModel.accountDisplayName, "Huawei Cloud")
+        XCTAssertTrue(viewModel.secretId.isEmpty)
+        XCTAssertTrue(viewModel.secretKey.isEmpty)
+        XCTAssertNil(viewModel.selectedAccountId)
+        XCTAssertTrue(viewModel.regions.isEmpty)
+        XCTAssertTrue(viewModel.selectedRegionId.isEmpty)
+        XCTAssertTrue(viewModel.instances.isEmpty)
+        XCTAssertNil(viewModel.selectedInstanceId)
     }
 
     func testCloudResourceCenterKindFiltersMapToSearchKinds() {

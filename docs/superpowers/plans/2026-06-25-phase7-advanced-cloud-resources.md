@@ -98,6 +98,7 @@ CREATE TABLE cloud_billing_states (
 - 已扩展 `CloudInstanceSyncService`，支持腾讯云云盘、快照、计费状态同步入库，并从本地库加载统一云资源。
 - 已新增 macOS 云资源中心，支持按账号/地域同步、跨资源搜索过滤、能力矩阵展示和资源详情查看。
 - 已新增 `AlibabaCloudAdapter` 和 `HuaweiCloudAdapter`，支持签名后的只读地域/项目发现、ECS 实例发现、分页和核心字段映射，并通过 fixture 测试覆盖请求签名与解析。
+- 已泛化 macOS 云导入入口，三家云账号可在同一流程中选择 provider、验证凭据、加载地域/项目、同步实例并导入 SSH profile。
 
 ## 6. UI 范围
 
@@ -152,6 +153,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 资源搜索和过滤服务。
 - [x] 高级资源详情页。
 - [x] capability matrix 展示。
+- [x] 三家云账号导入入口。
 - [ ] 操作风险确认。
 
 ### Task 7：测试

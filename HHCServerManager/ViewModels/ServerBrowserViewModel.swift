@@ -43,6 +43,7 @@ final class ServerBrowserViewModel: ObservableObject {
 
 @MainActor
 final class CloudImportViewModel: ObservableObject {
+    @Published var selectedProviderId: CloudProviderID = .tencentCloud
     @Published var accountDisplayName = "Tencent Cloud"
     @Published var secretId = ""
     @Published var secretKey = ""
@@ -108,23 +109,43 @@ final class CloudImportViewModel: ObservableObject {
         }
     }
 
-    func addTencentAccount(appState: AppState) async {
-        await run("Validating Tencent Cloud account...") {
+    func selectProvider(_ providerId: CloudProviderID) {
+        selectedProviderId = providerId
+        accountDisplayName = providerId.displayName
+        secretId = ""
+        secretKey = ""
+        selectedAccountId = nil
+        clearSyncedState()
+        statusMessage = nil
+        errorMessage = nil
+    }
+
+    func clearSyncedState() {
+        regions = []
+        selectedRegionId = ""
+        instances = []
+        selectedInstanceId = nil
+    }
+
+    func addCloudAccount(appState: AppState) async {
+        let providerId = selectedProviderId
+        await run("Validating \(providerId.displayName) account...") {
             let credential = CloudProviderCredential(
                 secretId: secretId.trimmingCharacters(in: .whitespacesAndNewlines),
                 secretKey: secretKey.trimmingCharacters(in: .whitespacesAndNewlines)
             )
-            try await appState.cloudProviderRegistry.adapter(for: .tencentCloud).validateCredential(credential)
+            try await appState.cloudProviderRegistry.adapter(for: providerId).validateCredential(credential)
             let account = try appState.cloudAccountService.createAccount(
-                providerId: .tencentCloud,
-                displayName: accountDisplayName,
+                providerId: providerId,
+                displayName: accountDisplayName.trimmingCharacters(in: .whitespacesAndNewlines),
                 credential: credential
             )
             appState.reloadServers()
             selectedAccountId = account.id
             secretId = ""
             secretKey = ""
-            statusMessage = "Account added and verified."
+            clearSyncedState()
+            statusMessage = "\(providerId.displayName) account added and verified."
         }
     }
 
@@ -134,20 +155,22 @@ final class CloudImportViewModel: ObservableObject {
             regions = try await appState.cloudInstanceSyncService.fetchRegions(account: account)
                 .filter(\.available)
             selectedRegionId = regions.first?.id ?? ""
-            statusMessage = regions.isEmpty ? "No available CVM regions returned." : "Regions loaded."
+            instances = []
+            selectedInstanceId = nil
+            statusMessage = regions.isEmpty ? "No available regions returned." : "Regions loaded."
         }
     }
 
     func syncInstances(appState: AppState) async {
         guard let account = selectedAccount(from: appState.cloudProviderAccounts) else { return }
-        await run("Syncing CVM instances...") {
+        await run("Syncing cloud instances...") {
             instances = try await appState.cloudInstanceSyncService.syncInstances(
                 account: account,
                 regionId: selectedRegionId
             )
             selectedInstanceId = instances.first?.id
             appState.reloadServers()
-            statusMessage = instances.isEmpty ? "No CVM instances found in this region." : "Instances synced."
+            statusMessage = instances.isEmpty ? "No cloud instances found in this region." : "Instances synced."
         }
     }
 

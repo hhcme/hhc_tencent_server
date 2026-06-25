@@ -93,6 +93,7 @@ All notable changes to this project will be documented in this file.
 - Started Phase 7 advanced cloud resources with Tencent Cloud CBS disk and snapshot read APIs, billing/expiry state extraction, SQLite persistence, provider capability matrix, and unified resource search.
 - Added a macOS Cloud Resources center for account/region scoped sync, cross-resource filtering, provider capability matrix display, and resource detail inspection.
 - Added Alibaba Cloud and Huawei Cloud read-only adapters for signed region/project discovery and ECS instance discovery, with fixture-backed request signing and field mapping tests.
+- Generalized the macOS cloud import sheet so Tencent Cloud, Alibaba Cloud, and Huawei Cloud accounts can be selected, verified, loaded, synced, and imported through one flow.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -181,3 +182,4 @@ All notable changes to this project will be documented in this file.
 - 启动 Phase 7 高级云资源能力，加入腾讯云 CBS 云盘/快照只读 API、计费/到期状态提取、SQLite 持久化、provider capability matrix 和统一资源搜索。
 - 添加 macOS 云资源中心，支持按账号/地域同步、跨资源过滤、provider capability matrix 展示和资源详情查看。
 - 添加阿里云和华为云只读 adapter，支持签名后的地域/项目发现、ECS 实例发现，并补充请求签名和字段映射 fixture 测试。
+- 泛化 macOS 云导入入口，腾讯云、阿里云和华为云账号现在可通过同一流程选择、验证、加载地域/项目、同步实例并导入 SSH profile。
