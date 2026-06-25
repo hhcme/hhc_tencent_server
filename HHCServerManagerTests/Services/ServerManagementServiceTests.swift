@@ -48,6 +48,35 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertNil(try harness.keychain.readPrivateKey(keychainRef: profile.keychainRef))
     }
 
+    @MainActor
+    func testAppStateDeletingSelectedServerClearsSelectionConnectionAndCredential() throws {
+        let database = try AppDatabase.inMemory()
+        let repository = ServerRepository(database: database)
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.app-state.\(UUID().uuidString)")
+        let appState = AppState(repository: repository, keychain: keychain)
+        let profile = try appState.serverManagementService.createServer(
+            name: "Selected",
+            host: "example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("secret")
+        )
+        appState.reloadServers()
+        appState.openWorkspace(for: profile)
+        appState.setConnectionState(.connected, for: profile)
+
+        appState.delete(profile)
+
+        XCTAssertNil(appState.selectedServerId)
+        XCTAssertNil(appState.selectedServer)
+        XCTAssertEqual(appState.connectionState(for: profile), .disconnected)
+        XCTAssertTrue(appState.servers.isEmpty)
+        XCTAssertTrue(try repository.fetchServers().isEmpty)
+        XCTAssertNil(try keychain.readPassword(keychainRef: profile.keychainRef))
+    }
+
     func testUpdateServerCanKeepExistingCredential() throws {
         let harness = try Harness()
         let profile = try harness.service.createServer(
