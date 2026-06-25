@@ -145,6 +145,37 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.selectedInstanceId)
     }
 
+    func testCloudImportViewModelDoesNotCreateAccountWhenValidationFails() async throws {
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.cloud-import-failure.\(UUID().uuidString)")
+        let appState = AppState(
+            repository: repository,
+            keychain: keychain,
+            registry: CloudProviderRegistry(adapters: [
+                MockResourceCenterCloudAdapter(
+                    providerId: .tencentCloud,
+                    capabilities: [.regions, .instanceDiscovery],
+                    validationError: .authenticationFailed("invalid cloud secret")
+                ),
+            ])
+        )
+        let viewModel = CloudImportViewModel()
+        viewModel.accountDisplayName = " Tencent Invalid "
+        viewModel.secretId = " sid "
+        viewModel.secretKey = " skey "
+
+        await viewModel.addCloudAccount(appState: appState)
+
+        XCTAssertFalse(viewModel.isWorking)
+        XCTAssertNil(viewModel.statusMessage)
+        XCTAssertTrue(viewModel.errorMessage?.contains("invalid cloud secret") == true)
+        XCTAssertNil(viewModel.selectedAccountId)
+        XCTAssertEqual(viewModel.secretId, " sid ")
+        XCTAssertEqual(viewModel.secretKey, " skey ")
+        XCTAssertTrue(try repository.fetchCloudProviderAccounts().isEmpty)
+        XCTAssertTrue(appState.cloudProviderAccounts.isEmpty)
+    }
+
     func testCloudResourceCenterKindFiltersMapToSearchKinds() {
         XCTAssertEqual(CloudResourceKindFilter.all.queryKinds, Set(CloudResourceKind.allCases))
         XCTAssertEqual(CloudResourceKindFilter.instance.queryKinds, [.instance])
@@ -351,8 +382,13 @@ private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
     let providerId: CloudProviderID
     let displayName = "Mock Cloud"
     let capabilities: Set<CloudCapability>
+    var validationError: CloudProviderError?
 
-    func validateCredential(_ credential: CloudProviderCredential) async throws {}
+    func validateCredential(_ credential: CloudProviderCredential) async throws {
+        if let validationError {
+            throw validationError
+        }
+    }
 
     func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion] { [] }
 
