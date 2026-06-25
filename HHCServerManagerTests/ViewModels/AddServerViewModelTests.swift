@@ -216,6 +216,86 @@ final class AddServerViewModelTests: XCTestCase {
         ))
     }
 
+    func testCloudImportViewModelSyncsImportsAndBrowserSeparatesCloudFromManualServers() async throws {
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.cloud-import-sync.\(UUID().uuidString)")
+        let appState = AppState(
+            repository: repository,
+            keychain: keychain,
+            registry: CloudProviderRegistry(adapters: [
+                MockResourceCenterCloudAdapter(
+                    providerId: .tencentCloud,
+                    capabilities: [.regions, .instanceDiscovery],
+                    regions: [CloudRegion(id: "ap-guangzhou", displayName: "Guangzhou", available: true)],
+                    instances: [
+                        CloudProviderInstance(
+                            id: "ins-prod",
+                            providerId: .tencentCloud,
+                            regionId: "ap-guangzhou",
+                            displayName: "prod-web",
+                            publicIp: "203.0.113.20",
+                            privateIp: "10.0.0.20",
+                            status: "RUNNING",
+                            instanceType: "S5.SMALL1",
+                            zoneId: "ap-guangzhou-3",
+                            vpcId: "vpc-prod",
+                            securityGroupIds: ["sg-prod"],
+                            billingType: nil,
+                            expiredTime: nil,
+                            rawJSON: nil
+                        ),
+                    ]
+                ),
+            ])
+        )
+        let manualServer = try appState.serverManagementService.createServer(
+            name: "Manual SSH",
+            host: "manual.example.internal",
+            port: 22,
+            username: "root",
+            groupName: nil,
+            authType: .password,
+            credential: .password("manual-secret")
+        )
+        let viewModel = CloudImportViewModel()
+        viewModel.accountDisplayName = "Tencent Read Only"
+        viewModel.secretId = "sid-sync"
+        viewModel.secretKey = "skey-sync"
+        await viewModel.addCloudAccount(appState: appState)
+        let account = try XCTUnwrap(appState.cloudProviderAccounts.first)
+        defer {
+            keychain.deleteCredentials(keychainRef: account.keychainRef)
+            keychain.deleteCredentials(keychainRef: manualServer.keychainRef)
+            if let imported = try? repository.fetchServers().first(where: { $0.id != manualServer.id }) {
+                keychain.deleteCredentials(keychainRef: imported.keychainRef)
+            }
+        }
+
+        await viewModel.loadRegions(appState: appState)
+        await viewModel.syncInstances(appState: appState)
+
+        XCTAssertEqual(viewModel.selectedRegionId, "ap-guangzhou")
+        XCTAssertEqual(viewModel.instances.map(\.instanceId), ["ins-prod"])
+        XCTAssertEqual(viewModel.selectedInstance?.displayName, "prod-web")
+        XCTAssertEqual(viewModel.statusMessage, "Instances synced.")
+
+        viewModel.authType = .password
+        viewModel.password = "cloud-secret"
+        let imported = try viewModel.importSelectedInstance(appState: appState)
+
+        XCTAssertEqual(imported.name, "prod-web")
+        XCTAssertEqual(imported.host, "203.0.113.20")
+        XCTAssertEqual(imported.groupName, "Tencent Cloud")
+        XCTAssertEqual(try keychain.readPassword(keychainRef: imported.keychainRef), "cloud-secret")
+        XCTAssertEqual(try repository.fetchCloudInstanceLinks().first { $0.instanceId == "ins-prod" }?.serverId, imported.id)
+
+        let browser = ServerBrowserViewModel()
+        browser.sourceFilter = .cloud
+        XCTAssertEqual(browser.filteredServers(from: appState.servers, links: appState.cloudInstanceLinks).map(\.id), [imported.id])
+        browser.sourceFilter = .manual
+        XCTAssertEqual(browser.filteredServers(from: appState.servers, links: appState.cloudInstanceLinks).map(\.id), [manualServer.id])
+    }
+
     func testCloudResourceCenterKindFiltersMapToSearchKinds() {
         XCTAssertEqual(CloudResourceKindFilter.all.queryKinds, Set(CloudResourceKind.allCases))
         XCTAssertEqual(CloudResourceKindFilter.instance.queryKinds, [.instance])
@@ -423,6 +503,8 @@ private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
     let displayName = "Mock Cloud"
     let capabilities: Set<CloudCapability>
     var validationError: CloudProviderError?
+    var regions: [CloudRegion] = []
+    var instances: [CloudProviderInstance] = []
 
     func validateCredential(_ credential: CloudProviderCredential) async throws {
         if let validationError {
@@ -430,9 +512,11 @@ private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
         }
     }
 
-    func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion] { [] }
+    func fetchRegions(credential: CloudProviderCredential) async throws -> [CloudRegion] { regions }
 
-    func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance] { [] }
+    func fetchInstances(credential: CloudProviderCredential, regionId: String) async throws -> [CloudProviderInstance] {
+        instances.filter { $0.regionId == regionId }
+    }
 
     func fetchMetricSeries(credential: CloudProviderCredential, query: CloudMetricQuery) async throws -> CloudMetricSeries {
         CloudMetricSeries(

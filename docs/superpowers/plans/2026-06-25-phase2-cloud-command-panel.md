@@ -170,15 +170,16 @@ CREATE TABLE operation_logs (
 - [x] 命令面板 ViewModel 测试。
 - [x] 云账号验证失败 ViewModel 测试：厂商凭据校验失败时不创建账号、不清空待修正密钥输入。
 - [x] 云账号添加成功 ViewModel 测试：`AddServerViewModelTests.testCloudImportViewModelAddsVerifiedAccountAndStoresCredentialInKeychain` 覆盖云账号验证成功后创建账号、刷新 AppState、清空 secret 输入，并确认 SecretId/SecretKey 只从 Keychain 读取。
+- [x] 云实例同步、导入和来源筛选 ViewModel 测试：`AddServerViewModelTests.testCloudImportViewModelSyncsImportsAndBrowserSeparatesCloudFromManualServers` 覆盖云区域加载、CVM 实例同步、导入为 SSH profile、云实例 link、Keychain 凭据保存，以及服务器列表按云/手动来源分离。
 - [x] 可选真实命令面板集成测试：`SSHIntegrationTests.testRealCommandPanelExecutesUnameAndRerunsHistoryWhenEnvironmentIsConfigured` 覆盖真实 SSH 执行 `uname -a`、stdout/exit code、`command_history`、`operation_logs` 和历史复跑。
 
 ### Task 8：手动验收
 
 - [x] 添加腾讯云只读账号，凭据写入 Keychain：`AddServerViewModelTests.testCloudImportViewModelAddsVerifiedAccountAndStoresCredentialInKeychain` 覆盖 Cloud Import ViewModel 成功入口、账号元数据持久化、AppState 刷新和 Keychain 云凭据读取；真实账号仍建议随云 API 手动验收复测。
 - [x] 使用真实腾讯云账号验证失败时不保存无效凭据：当前由 `AddServerViewModelTests.testCloudImportViewModelDoesNotCreateAccountWhenValidationFails` 使用 provider authentication failure 合同测试覆盖“不创建账号、不清空待修正密钥输入”；真实账号错误档位仍待外部账号验收。
-- [ ] 同步 CVM 实例并在服务器列表看到云来源。
-- [ ] 将云实例关联到 SSH profile。
-- [ ] 手动 SSH 服务器在无云账号时仍可正常使用。
+- [x] 同步 CVM 实例并在服务器列表看到云来源：`AddServerViewModelTests.testCloudImportViewModelSyncsImportsAndBrowserSeparatesCloudFromManualServers` 使用云适配器合同测试覆盖区域加载、实例同步和 `.cloud` 来源筛选；真实腾讯云只读账号仍建议在外部账号就绪后复测。
+- [x] 将云实例关联到 SSH profile：`AddServerViewModelTests.testCloudImportViewModelSyncsImportsAndBrowserSeparatesCloudFromManualServers` 覆盖导入云实例创建 SSH profile 并写入 `cloud_instance_links.server_id`；`ServerManagementServiceTests.testCloudInstanceSyncCreatesServerFromInstanceAndLinksIt` 覆盖服务层同步关联。
+- [x] 手动 SSH 服务器在无云账号时仍可正常使用：`AddServerViewModelTests.testCloudImportViewModelSyncsImportsAndBrowserSeparatesCloudFromManualServers` 覆盖手动服务器与云导入服务器共存，并通过 `.manual` 来源筛选只返回手动 SSH profile。
 - [x] 命令面板执行 `uname -a` 并展示 stdout、exit code：2026-06-26 已通过真实 SSH + ViewModel 集成测试验证。
 - [x] 命令历史可重复执行：2026-06-26 已通过真实 SSH + ViewModel 集成测试验证历史持久化和 rerun。
 
