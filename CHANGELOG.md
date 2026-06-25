@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - Added bilingual Windows native client strategy with WinUI 3, Windows App SDK, and .NET/C# as the later-platform direction.
 - Updated roadmap to keep macOS first and place Windows native validation in Phase 8.
 - Added a macOS MVP Figma design file and bilingual design handoff notes.
+- Revised the macOS design direction with a native v0.2 flow: server list first, dedicated server workspace, and toolbar-based server switching.
 
 - 添加 MIT 开源协议。
 - 添加中英文 README。
@@ -31,3 +32,4 @@ All notable changes to this project will be documented in this file.
 - 添加中英文《Windows 原生客户端技术选型》，明确后续平台方向为 WinUI 3、Windows App SDK 和 .NET/C#。
 - 更新路线图，明确先做 macOS，Windows 原生版放到 Phase 8 技术验证。
 - 添加 macOS MVP Figma 设计稿和中英文设计交接说明。
+- 修订 macOS 设计方向，新增更原生的 v0.2 流程：先展示服务器列表，再进入单服务器工作台，并通过工具栏切换服务器。
