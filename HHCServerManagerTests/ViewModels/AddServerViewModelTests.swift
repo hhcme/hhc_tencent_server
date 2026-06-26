@@ -529,6 +529,60 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedResourceId, "snapshot:\(account.id.uuidString):ap-guangzhou:snap-before-upgrade")
     }
 
+    func testCloudResourceCenterRefreshesProviderStateAfterDiskAction() async throws {
+        let recorder = ResourceCenterCloudActionRecorder()
+        let registry = CloudProviderRegistry(adapters: [
+            MockResourceCenterCloudAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .cloudDisks, .diskAttachmentActions],
+                regions: [CloudRegion(id: "ap-guangzhou", displayName: "Guangzhou", available: true)],
+                recorder: recorder
+            ),
+        ])
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.cloud-resource-action-refresh.\(UUID().uuidString)")
+        let appState = AppState(repository: repository, keychain: keychain, registry: registry)
+        let account = try appState.cloudAccountService.createAccount(
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            credential: CloudProviderCredential(secretId: "sid", secretKey: "skey")
+        )
+        try repository.upsertCloudDisk(CloudDisk(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            diskId: "disk-data",
+            instanceId: nil,
+            name: "data",
+            diskType: "CLOUD_PREMIUM",
+            sizeGB: 100,
+            status: "UNATTACHED",
+            billingType: "POSTPAID_BY_HOUR",
+            expiredTime: nil,
+            rawJSON: nil,
+            lastSyncedAt: nil
+        ))
+        appState.reloadServers()
+
+        let viewModel = CloudResourceCenterViewModel()
+        viewModel.refreshCapabilityMatrix(registry: registry)
+        viewModel.selectedAccountId = account.id
+        viewModel.selectedRegionId = "ap-guangzhou"
+        viewModel.kindFilter = .disk
+        viewModel.refreshLocalResources(appState: appState)
+
+        let diskResource = try XCTUnwrap(viewModel.resources.first { $0.resourceId == "disk-data" })
+        await viewModel.attachDisk(for: diskResource, instanceId: "ins-target", appState: appState)
+
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.statusMessage, "Disk disk-data is attaching to ins-target.")
+        XCTAssertEqual(viewModel.resources.first { $0.resourceId == "disk-data" }?.status, "ATTACHED")
+        XCTAssertEqual(viewModel.resources.first { $0.resourceId == "disk-data" }?.primaryAddress, "ins-target")
+        XCTAssertEqual(try repository.fetchCloudDisks(accountId: account.id).first { $0.diskId == "disk-data" }?.status, "ATTACHED")
+        XCTAssertEqual(try repository.fetchRemoteChangeLogs().first { $0.action == "attach_disk" }?.status, "success")
+    }
+
     private func makeProfile(authType: SSHAuthType) -> ServerProfile {
         makeProfile(name: "Tencent", host: "example.internal", authType: authType)
     }
@@ -574,6 +628,10 @@ final class AddServerViewModelTests: XCTestCase {
     }
 }
 
+private final class ResourceCenterCloudActionRecorder: @unchecked Sendable {
+    var attachedDiskInstanceId: String?
+}
+
 private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
     let providerId: CloudProviderID
     let displayName = "Mock Cloud"
@@ -581,6 +639,7 @@ private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
     var validationError: CloudProviderError?
     var regions: [CloudRegion] = []
     var instances: [CloudProviderInstance] = []
+    var recorder: ResourceCenterCloudActionRecorder? = nil
 
     func validateCredential(_ credential: CloudProviderCredential) async throws {
         if let validationError {
@@ -624,7 +683,27 @@ private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
         accountId: UUID,
         regionId: String,
         capturedAt: Date
-    ) async throws -> [CloudDisk] { [] }
+    ) async throws -> [CloudDisk] {
+        guard let attachedDiskInstanceId = recorder?.attachedDiskInstanceId else { return [] }
+        return [
+            CloudDisk(
+                id: UUID(),
+                accountId: accountId,
+                providerId: providerId,
+                regionId: regionId,
+                diskId: "disk-data",
+                instanceId: attachedDiskInstanceId,
+                name: "data",
+                diskType: "CLOUD_PREMIUM",
+                sizeGB: 100,
+                status: "ATTACHED",
+                billingType: "POSTPAID_BY_HOUR",
+                expiredTime: nil,
+                rawJSON: nil,
+                lastSyncedAt: capturedAt
+            ),
+        ]
+    }
 
     func fetchSnapshots(
         credential: CloudProviderCredential,
@@ -665,7 +744,7 @@ private struct MockResourceCenterCloudAdapter: CloudProviderAdapter {
         diskId: String,
         instanceId: String
     ) async throws {
-        throw CloudProviderError.unsupportedCapability(providerId: providerId, capability: .diskAttachmentActions)
+        recorder?.attachedDiskInstanceId = instanceId
     }
 
     func detachDisk(

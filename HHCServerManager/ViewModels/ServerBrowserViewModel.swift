@@ -449,9 +449,10 @@ final class CloudResourceCenterViewModel: ObservableObject {
                     snapshotName: snapshotName
                 )
             }
+            let refreshWarning = await refreshAfterCloudAction(.cloudSnapshots, account: account, regionId: regionId, appState: appState)
             refreshLocalResources(appState: appState)
             selectedResourceId = "snapshot:\(snapshot.accountId.uuidString):\(snapshot.regionId):\(snapshot.snapshotId)"
-            statusMessage = "Snapshot \(snapshot.snapshotId) is being created."
+            statusMessage = refreshWarning ?? "Snapshot \(snapshot.snapshotId) is being created."
         }
     }
 
@@ -467,8 +468,9 @@ final class CloudResourceCenterViewModel: ObservableObject {
                     currentStatus: resource.status
                 )
             }
+            let refreshWarning = await refreshAfterCloudAction(.cloudSnapshots, account: account, regionId: regionId, appState: appState)
             refreshLocalResources(appState: appState)
-            statusMessage = "Snapshot \(resource.resourceId) deleted."
+            statusMessage = refreshWarning ?? "Snapshot \(resource.resourceId) deleted."
         }
     }
 
@@ -485,9 +487,10 @@ final class CloudResourceCenterViewModel: ObservableObject {
                     currentStatus: resource.status
                 )
             }
+            let refreshWarning = await refreshAfterCloudAction(.cloudDisks, account: account, regionId: regionId, appState: appState)
             refreshLocalResources(appState: appState)
             selectedResourceId = resource.id
-            statusMessage = "Disk \(resource.resourceId) is attaching to \(instanceId)."
+            statusMessage = refreshWarning ?? "Disk \(resource.resourceId) is attaching to \(instanceId)."
         }
     }
 
@@ -504,9 +507,10 @@ final class CloudResourceCenterViewModel: ObservableObject {
                     currentStatus: resource.status
                 )
             }
+            let refreshWarning = await refreshAfterCloudAction(.cloudDisks, account: account, regionId: regionId, appState: appState)
             refreshLocalResources(appState: appState)
             selectedResourceId = resource.id
-            statusMessage = "Disk \(resource.resourceId) is detaching."
+            statusMessage = refreshWarning ?? "Disk \(resource.resourceId) is detaching."
         }
     }
 
@@ -543,9 +547,10 @@ final class CloudResourceCenterViewModel: ObservableObject {
                     )
                 }
             }
+            let refreshWarning = await refreshAfterCloudAction(.instanceDiscovery, account: account, regionId: regionId, appState: appState)
             refreshLocalResources(appState: appState)
             selectedResourceId = resource.id
-            statusMessage = "Instance \(resource.resourceId) is \(action.transitionStatus.lowercased())."
+            statusMessage = refreshWarning ?? "Instance \(resource.resourceId) is \(action.transitionStatus.lowercased())."
         }
     }
 
@@ -608,6 +613,45 @@ final class CloudResourceCenterViewModel: ObservableObject {
                 throw CloudProviderError.permissionDenied(runtimeDisabledCapabilities[providerId]?[capability] ?? error.localizedDescription)
             }
             throw error
+        }
+    }
+
+    private func refreshAfterCloudAction(
+        _ capability: CloudCapability,
+        account: CloudProviderAccount,
+        regionId: String,
+        appState: AppState
+    ) async -> String? {
+        guard supportsRuntimeCapability(capability, providerId: account.providerId) else {
+            return nil
+        }
+        do {
+            switch capability {
+            case .instanceDiscovery:
+                _ = try await appState.cloudInstanceSyncService.syncInstances(
+                    account: account,
+                    regionId: regionId
+                )
+                appState.reloadServers()
+            case .cloudDisks:
+                _ = try await appState.cloudInstanceSyncService.syncDisks(
+                    account: account,
+                    regionId: regionId
+                )
+            case .cloudSnapshots:
+                _ = try await appState.cloudInstanceSyncService.syncSnapshots(
+                    account: account,
+                    regionId: regionId
+                )
+            default:
+                return nil
+            }
+            return nil
+        } catch {
+            if downgradeRuntimeCapabilityIfNeeded(capability, providerId: account.providerId, error: error) {
+                refreshCapabilityMatrix(registry: appState.cloudProviderRegistry)
+            }
+            return "Cloud action was submitted, but refreshing \(capability.displayName) failed: \(error.localizedDescription)"
         }
     }
 

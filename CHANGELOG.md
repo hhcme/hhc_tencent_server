@@ -123,6 +123,7 @@ All notable changes to this project will be documented in this file.
 - Added Tencent Cloud CVM start/stop/reboot actions with status gating, risk confirmation, local transition cache updates, remote change audit logs, and fixture-backed API tests.
 - Added Huawei Cloud ECS start/stop/reboot actions with provider-aware `SHUTOFF`/`ACTIVE` status gating, soft stop/reboot requests, local transition cache updates, remote change audit logs, and fixture-backed API tests.
 - Added runtime cloud capability downgrade in the Cloud Resources center so permission-denied optional sync or dangerous operation failures disable the affected provider capability for the session and surface the reason in the capability matrix and detail actions.
+- Added best-effort provider refresh after successful Cloud Resources dangerous operations so disks, snapshots, and instances can move from local transition state to provider-confirmed state without a full manual sync.
 - Added Dashboard snapshot persistence so successful refreshes are cached in SQLite and restored when reopening a server workspace.
 - Persisted remote file transfer history with progress state restoration in the macOS workspace.
 - Added remote file transfer progress callbacks with persisted running progress updates.
@@ -256,6 +257,7 @@ All notable changes to this project will be documented in this file.
 - 添加华为云安全组单条规则创建/删除动作，包含 provider rule id 保留、VPC v3 签名请求 fixture 和统一风险确认/审计流程。
 - 统一云资源操作状态门禁，云资源中心 UI 现在按腾讯云、阿里云、华为云各自状态启用实例电源、快照删除和云盘挂载/卸载按钮。
 - 云资源中心加入运行时云能力降级：可选同步或危险操作遇到权限不足时，会在当前会话禁用对应 provider capability，并在能力矩阵和资源详情操作区展示原因。
+- 云资源中心危险云操作成功提交后会尽力刷新 provider 状态，让云盘、快照和实例从本地过渡态更新到云侧确认状态，而不必完整手动同步。
 - 扩展 Dashboard 云监控聚合，已关联腾讯云、阿里云、华为云实例时会拉取云侧 CPU、内存、磁盘读写和网络入出指标。
 - 添加 `server_capabilities` 独立缓存，Dashboard 手动或自动刷新成功后会持久化最新系统能力探测结果。
 - 启动 Windows 原生版 Phase 8，加入 WinUI 3 / Windows App SDK / .NET solution 骨架、已测试的核心领域/应用/基础设施层、SQLite 服务器与主机指纹存储、Windows Credential Manager 边界和 SSH.NET adapter 基础。
