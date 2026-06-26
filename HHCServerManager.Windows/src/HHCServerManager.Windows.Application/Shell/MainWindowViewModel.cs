@@ -163,6 +163,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool HasError => ErrorMessage is not null;
 
+    public bool HasRecentCommands => RecentCommands.Count > 0;
+
+    public bool HasNoRecentCommands => !HasRecentCommands;
+
     public bool HasVisibleServers => VisibleServers.Count > 0;
 
     public bool IsServerListEmpty => !HasVisibleServers;
@@ -493,6 +497,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }, cancellationToken);
     }
 
+    public void SelectRecentCommand(string? command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+
+        CommandInput = command.Trim();
+        StatusMessage = $"Ready to rerun: {CommandInput}";
+    }
+
     public void Disconnect()
     {
         if (IsBusy)
@@ -530,6 +545,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             RecentCommands.RemoveAt(RecentCommands.Count - 1);
         }
+        OnPropertyChanged(nameof(HasRecentCommands));
+        OnPropertyChanged(nameof(HasNoRecentCommands));
     }
 
     private void RefreshVisibleServers()

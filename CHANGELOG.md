@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Added a macOS remote transfer "Resume All" action that requeues every failed, cancelled, or interrupted transfer while leaving completed transfers untouched.
 - Added pause/resume controls for the macOS remote file transfer queue so pending transfers are not dispatched while the queue is paused, with ViewModel coverage.
 - Added Windows native connected single-command execution with WinUI command input, ViewModel state, recent in-session commands, and core tests.
+- Added a Windows native recent-command picker so prior in-session commands can be selected for safe rerun preparation without executing immediately.
 - Added remote change audit records for manual deployment and rollback runs, including project target, status, summary, and previous/target commit snapshots.
 - Added Windows native ViewModel cancellation for running host-key scans and SSH smoke tests, with core tests for cancellation and reconnect.
 - Added an OpenSSH `sftp -b` fallback between rsync and scp using `put -a` / `get -a` so remote file transfers can attempt resumable upload/download when rsync is unavailable or fails.
@@ -275,3 +276,4 @@ All notable changes to this project will be documented in this file.
 - 添加 `server_capabilities` 独立缓存，Dashboard 手动或自动刷新成功后会持久化最新系统能力探测结果。
 - 启动 Windows 原生版 Phase 8，加入 WinUI 3 / Windows App SDK / .NET solution 骨架、已测试的核心领域/应用/基础设施层、SQLite 服务器与主机指纹存储、Windows Credential Manager 边界和 SSH.NET adapter 基础。
 - 补充 Windows Phase 8 的 MVVM 和依赖注入基础，加入真实连接状态机、添加服务器 dialog 接线、主机指纹信任/拒绝流程、smoke test 输出绑定和 ViewModel 测试。
+- 添加 Windows 原生最近命令选择入口，可把本次会话历史命令填回输入框以便再次执行，但不会因选择历史项而立即触发远端命令。

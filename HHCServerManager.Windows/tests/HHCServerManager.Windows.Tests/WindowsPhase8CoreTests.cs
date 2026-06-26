@@ -425,6 +425,66 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task MainWindowViewModelSelectsRecentCommandWithoutRunningIt()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("", "custom-output", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.AddPasswordServerAsync("Prod", "example.internal", 22, "root", "secret");
+        await viewModel.ConnectAsync();
+        await viewModel.TrustPendingHostKeyAndConnectAsync();
+
+        viewModel.CommandInput = "whoami";
+        await viewModel.RunCommandAsync();
+        var outputAfterRun = viewModel.CommandOutput;
+        viewModel.CommandInput = "uptime";
+
+        viewModel.SelectRecentCommand("  whoami  ");
+
+        Assert.Equal("whoami", viewModel.CommandInput);
+        Assert.Equal(outputAfterRun, viewModel.CommandOutput);
+        Assert.Equal("Ready to rerun: whoami", viewModel.StatusMessage);
+        Assert.True(viewModel.HasRecentCommands);
+        Assert.False(viewModel.HasNoRecentCommands);
+    }
+
+    [Fact]
+    public async Task MainWindowViewModelRecentCommandsDeduplicateAndKeepTenItems()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("", "custom-output", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.AddPasswordServerAsync("Prod", "example.internal", 22, "root", "secret");
+        await viewModel.ConnectAsync();
+        await viewModel.TrustPendingHostKeyAndConnectAsync();
+
+        for (var index = 0; index < 11; index++)
+        {
+            viewModel.CommandInput = $"cmd-{index}";
+            await viewModel.RunCommandAsync();
+        }
+        viewModel.CommandInput = "cmd-4";
+        await viewModel.RunCommandAsync();
+
+        Assert.Equal(10, viewModel.RecentCommands.Count);
+        Assert.Equal("cmd-4", viewModel.RecentCommands[0]);
+        Assert.Equal(1, viewModel.RecentCommands.Count(command => command == "cmd-4"));
+        Assert.DoesNotContain("cmd-0", viewModel.RecentCommands);
+        Assert.True(viewModel.HasRecentCommands);
+        Assert.False(viewModel.HasNoRecentCommands);
+    }
+
+    [Fact]
     public async Task MainWindowViewModelAddsPrivateKeyServerWithoutPersistingKeyMaterialToSqlite()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"hhc-windows-private-key-{Guid.NewGuid():N}.sqlite");
