@@ -84,6 +84,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanConnect));
                 OnPropertyChanged(nameof(CanRunSmokeTest));
                 OnPropertyChanged(nameof(CanRunCommand));
+                OnPropertyChanged(nameof(CanCancelCommand));
             }
         }
     }
@@ -108,6 +109,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanRunCommand));
                 OnPropertyChanged(nameof(CanConfirmHostKey));
                 OnPropertyChanged(nameof(CanDisconnect));
+                OnPropertyChanged(nameof(CanCancelCommand));
                 OnPropertyChanged(nameof(IsBusy));
             }
         }
@@ -188,6 +190,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public bool CanRunSmokeTest => SelectedServer is not null && ConnectionState == WindowsConnectionState.Connected;
 
     public bool CanRunCommand => CanRunSmokeTest && !string.IsNullOrWhiteSpace(CommandInput);
+
+    public bool CanCancelCommand => ConnectionState == WindowsConnectionState.RunningCommand;
 
     public bool CanConfirmHostKey => PendingHostKeyTrust is not null && ConnectionState == WindowsConnectionState.AwaitingHostKeyTrust;
 

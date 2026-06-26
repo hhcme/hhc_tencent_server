@@ -220,6 +220,8 @@ public sealed partial class MainWindow : Window
 
     private async void RunCommand_Click(object sender, RoutedEventArgs e) => await ViewModel.RunCommandAsync();
 
+    private void CancelCommand_Click(object sender, RoutedEventArgs e) => ViewModel.Disconnect();
+
     private void RecentCommand_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Content: string command })

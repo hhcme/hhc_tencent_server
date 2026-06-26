@@ -791,6 +791,49 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task MainWindowViewModelDisconnectCancelsRunningCommandWithoutRememberingIt()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var hostKey = new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA");
+        var profile = await service.AddServerAsync(
+            "Prod",
+            "example.internal",
+            22,
+            "root",
+            SshAuthType.Password,
+            null,
+            new CredentialInput.Password("secret"));
+        await service.TrustHostKeyAsync(profile, hostKey);
+        var ssh = new BlockingWindowsSshClient(blockExecute: true, hostKey: hostKey);
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.LoadServersAsync();
+        await viewModel.ConnectAsync();
+        var outputBeforeCommand = viewModel.CommandOutput;
+        viewModel.CommandInput = "uname -a";
+
+        var commandTask = viewModel.RunCommandAsync();
+        await ssh.ExecuteStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(WindowsConnectionState.RunningCommand, viewModel.ConnectionState);
+        Assert.True(viewModel.CanCancelCommand);
+        Assert.True(viewModel.CanDisconnect);
+
+        viewModel.Disconnect();
+        await commandTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.True(ssh.ExecuteCancellationObserved);
+        Assert.Equal(WindowsConnectionState.Disconnected, viewModel.ConnectionState);
+        Assert.False(viewModel.CanCancelCommand);
+        Assert.Equal("Operation cancelled.", viewModel.StatusMessage);
+        Assert.Null(viewModel.ErrorMessage);
+        Assert.Empty(viewModel.RecentCommands);
+        Assert.Equal(outputBeforeCommand, viewModel.CommandOutput);
+    }
+
+    [Fact]
     public async Task RealWindowsSshSmokeTestWhenEnvironmentIsConfigured()
     {
         if (!OperatingSystem.IsWindows())

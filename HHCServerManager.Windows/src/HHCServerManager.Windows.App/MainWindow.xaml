@@ -131,6 +131,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox
                                 Header="Command"
@@ -142,6 +143,12 @@
                                 Content="Run"
                                 IsEnabled="{x:Bind ViewModel.CanRunCommand, Mode=OneWay}"
                                 Click="RunCommand_Click" />
+                            <Button
+                                Grid.Column="2"
+                                Margin="8,28,0,0"
+                                Content="Cancel"
+                                IsEnabled="{x:Bind ViewModel.CanCancelCommand, Mode=OneWay}"
+                                Click="CancelCommand_Click" />
                         </Grid>
                         <Grid>
                             <Grid.ColumnDefinitions>
