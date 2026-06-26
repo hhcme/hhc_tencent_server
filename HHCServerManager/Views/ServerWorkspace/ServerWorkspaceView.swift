@@ -743,6 +743,12 @@ struct ServerWorkspaceView: View {
                     }
                     Spacer()
                     Button {
+                        viewModel.copyAuditLogsReportToPasteboard(profile: profile)
+                    } label: {
+                        Label("Copy Markdown", systemImage: "doc.on.doc")
+                    }
+                    .disabled(viewModel.remoteChangeLogs.isEmpty && viewModel.operationLogs.isEmpty)
+                    Button {
                         viewModel.loadAuditLogs(profile: profile, repository: appState.repository)
                     } label: {
                         if viewModel.isLoadingAuditLogs {
@@ -758,6 +764,11 @@ struct ServerWorkspaceView: View {
                 if let error = viewModel.auditLogErrorMessage {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.red)
+                }
+
+                if let message = viewModel.auditLogActionMessage {
+                    Label(message, systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
                 }
 
                 auditRemoteChangesSection

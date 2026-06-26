@@ -34,6 +34,7 @@ Target users include:
 - Cron foundations with writable user crontab entries, read-only `/etc/cron.d` discovery with source/run-as metadata, add/enable/disable/delete flows, and pre-install remote backups.
 - Nginx foundations with dynamic config path discovery, guarded config editing, remote backups, `nginx -t`, automatic rollback on failed tests, confirmed reload, and remote-change audit records.
 - Firewall foundations with backend detection and limited rule actions for firewalld, ufw, nftables, and iptables; nftables only edits existing compatible filter chains and HHC-marked rules.
+- Audit workspace for current-server remote change logs and local operation logs, with Markdown report copy that exports metadata only.
 - Environment file foundations with guarded discovery and editing for common `.env`, `/etc/default`, `/etc/sysconfig`, and systemd drop-in files, including remote backups and audit records.
 - Audit workspace for per-server remote change logs and current-server local operation logs.
 - Optional cloud account integration through provider adapters.

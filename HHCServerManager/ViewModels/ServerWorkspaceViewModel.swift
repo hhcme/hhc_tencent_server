@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 @MainActor
 final class ServerWorkspaceViewModel: ObservableObject {
@@ -96,6 +97,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var operationLogs: [OperationLogEntry] = []
     @Published var isLoadingAuditLogs = false
     @Published var auditLogErrorMessage: String?
+    @Published var auditLogActionMessage: String?
     @Published var registryDraft = VerdaccioInstallDraft() {
         didSet {
             guard registryDraft != oldValue else { return }
@@ -283,6 +285,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         remoteChangeLogs = []
         operationLogs = []
         auditLogErrorMessage = nil
+        auditLogActionMessage = nil
         registryPreflightReport = nil
         verdaccioInstallResult = nil
         verdaccioStatusSnapshot = nil
@@ -355,6 +358,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     func loadAuditLogs(profile: ServerProfile, repository: ServerRepository) {
         isLoadingAuditLogs = true
         auditLogErrorMessage = nil
+        auditLogActionMessage = nil
         do {
             remoteChangeLogs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
             operationLogs = try repository.fetchOperationLogs(targetId: profile.id.uuidString)
@@ -362,6 +366,85 @@ final class ServerWorkspaceViewModel: ObservableObject {
             auditLogErrorMessage = error.localizedDescription
         }
         isLoadingAuditLogs = false
+    }
+
+    func auditLogsReportMarkdown(profile: ServerProfile) -> String {
+        var lines: [String] = [
+            "# Audit Report",
+            "",
+            "- Server: \(Self.markdownInline(profile.name))",
+            "- Endpoint: \(Self.markdownInline(profile.endpoint))",
+            "- Remote changes: \(remoteChangeLogs.count)",
+            "- Local operations: \(operationLogs.count)",
+            "- Generated at: \(AppDatabase.string(from: Date()))",
+            "",
+            "## Remote Change Logs",
+        ]
+
+        if remoteChangeLogs.isEmpty {
+            lines.append("")
+            lines.append("No remote change logs are loaded for this server.")
+        } else {
+            lines.append("")
+            lines.append("| Time | Target Type | Target ID | Action | Status | Provider | Message |")
+            lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+            for entry in remoteChangeLogs {
+                lines.append([
+                    AppDatabase.string(from: entry.createdAt),
+                    entry.targetType,
+                    entry.targetId ?? "",
+                    entry.action,
+                    entry.status,
+                    entry.providerId?.displayName ?? "",
+                    entry.message ?? "",
+                ].map(Self.markdownTableCell).joined(separator: " | ").withTableBounds)
+            }
+        }
+
+        lines.append("")
+        lines.append("## Local Operation Logs")
+        if operationLogs.isEmpty {
+            lines.append("")
+            lines.append("No local operation logs are loaded for this server.")
+        } else {
+            lines.append("")
+            lines.append("| Time | Scope | Action | Target ID | Status | Message |")
+            lines.append("| --- | --- | --- | --- | --- | --- |")
+            for entry in operationLogs {
+                lines.append([
+                    AppDatabase.string(from: entry.createdAt),
+                    entry.scope,
+                    entry.action,
+                    entry.targetId ?? "",
+                    entry.status,
+                    entry.message ?? "",
+                ].map(Self.markdownTableCell).joined(separator: " | ").withTableBounds)
+            }
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    func copyAuditLogsReportToPasteboard(profile: ServerProfile) {
+        let report = auditLogsReportMarkdown(profile: profile)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(report, forType: .string)
+        auditLogActionMessage = "Copied \(remoteChangeLogs.count) remote changes and \(operationLogs.count) local operations as Markdown."
+    }
+
+    private static func markdownInline(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func markdownTableCell(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "|", with: "\\|")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func loadCachedDashboardSnapshot(profile: ServerProfile, repository: ServerRepository) {
@@ -4088,5 +4171,11 @@ private enum QueuedRemoteFileTransfer {
         case let .download(_, _, _, _, _, _, repository):
             repository
         }
+    }
+}
+
+private extension String {
+    var withTableBounds: String {
+        "| \(self) |"
     }
 }

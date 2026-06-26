@@ -17,7 +17,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - Credentials stored in macOS Keychain.
 - Host key verification as a first-class security requirement.
 - Server browser, dedicated server workspace, real smoke test, simplified command panel, and command metadata history are underway.
-- Dashboard auto-refresh, SSH metrics, linked cloud metrics, security group inspection and confirmed single-rule changes, remote file browsing, lightweight text editing with Save As, permission changes, queued batch upload/download with pending-queue ordering controls, systemd Services, Cron management, guarded Nginx config edit/test/reload, limited Firewall rule changes, guarded Environment file editing, GitLab-style deployments, Verdaccio registry management, and an Audit workspace for current-server operation/change logs are underway.
+- Dashboard auto-refresh, SSH metrics, linked cloud metrics, security group inspection and confirmed single-rule changes, remote file browsing, lightweight text editing with Save As, permission changes, queued batch upload/download with pending-queue ordering controls, systemd Services, Cron management, guarded Nginx config edit/test/reload, limited Firewall rule changes, guarded Environment file editing, GitLab-style deployments, Verdaccio registry management, and an Audit workspace with current-server operation/change logs plus Markdown report copy are underway.
 - Verdaccio has guarded real-server lifecycle coverage for isolated install, user creation, npm publish/install smoke, restart, config backup, and backup/restore; production deployment and proxy exposure still require environment-specific validation.
 - Cloud account metadata and cloud credential storage foundation are in place.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper are in place.
@@ -31,7 +31,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - SSH 密码、私钥等敏感信息存入 macOS Keychain。
 - 把主机指纹验证作为基础安全能力。
 - 服务器列表、单服务器工作台、真实 smoke test、简化命令面板和命令元数据历史已进入实现。
-- Dashboard 自动刷新、SSH 指标、已关联云实例指标、安全组查看和经确认的单条规则变更、远程文件浏览、带另存为的轻量文本编辑、权限修改、带 rsync 字节/速度/ETA 进度和 `--append-verify` 续传、OpenSSH `sftp -b` 的 `put -a` / `get -a` fallback、scp 最终回退且支持待传排序的排队批量上传/下载、systemd Services、Cron 管理、受保护的 Nginx 配置编辑/测试/reload、有限防火墙规则变更、受保护的环境变量文件编辑、GitLab 风格部署和 Verdaccio 仓库管理已进入实现。
+- Dashboard 自动刷新、SSH 指标、已关联云实例指标、安全组查看和经确认的单条规则变更、远程文件浏览、带另存为的轻量文本编辑、权限修改、带 rsync 字节/速度/ETA 进度和 `--append-verify` 续传、OpenSSH `sftp -b` 的 `put -a` / `get -a` fallback、scp 最终回退且支持待传排序的排队批量上传/下载、systemd Services、Cron 管理、受保护的 Nginx 配置编辑/测试/reload、有限防火墙规则变更、受保护的环境变量文件编辑、GitLab 风格部署、Verdaccio 仓库管理，以及支持 Markdown 报告复制的 Audit 工作台已进入实现。
 - Verdaccio 已有受保护的真实服务器生命周期覆盖：隔离安装、用户创建、npm publish/install smoke、重启、配置备份和备份/恢复；生产环境部署和 proxy 暴露仍需按目标环境单独验收。
 - 云账号元数据和云凭据存储基础已经落地。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装已经落地。

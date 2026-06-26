@@ -950,6 +950,52 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.operationLogs.map(\.targetId), [profile.id.uuidString])
     }
 
+    func testAuditLogsMarkdownReportEscapesRowsAndOmitsSnapshots() throws {
+        let profile = makeProfile()
+        let viewModel = ServerWorkspaceViewModel()
+        viewModel.remoteChangeLogs = [
+            RemoteChangeLogEntry(
+                id: UUID(),
+                serverId: profile.id,
+                providerId: .tencentCloud,
+                targetType: "nginx|config",
+                targetId: "/etc/nginx/conf.d/app|prod.conf",
+                action: "save",
+                beforeSnapshot: "SECRET_TOKEN=before-secret",
+                afterSnapshot: "SECRET_TOKEN=after-secret",
+                status: "success",
+                message: "saved|ok\nbackup created",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_100)
+            )
+        ]
+        viewModel.operationLogs = [
+            OperationLogEntry(
+                id: UUID(),
+                scope: "ssh",
+                action: "clear_command_history",
+                targetId: profile.id.uuidString,
+                status: "success",
+                message: "deleted_entries=2|metadata only",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_200)
+            )
+        ]
+
+        let report = viewModel.auditLogsReportMarkdown(profile: profile)
+
+        XCTAssertTrue(report.contains("# Audit Report"))
+        XCTAssertTrue(report.contains("- Server: Test"))
+        XCTAssertTrue(report.contains("- Endpoint: root@example.internal:22"))
+        XCTAssertTrue(report.contains("- Remote changes: 1"))
+        XCTAssertTrue(report.contains("- Local operations: 1"))
+        XCTAssertTrue(report.contains("## Remote Change Logs"))
+        XCTAssertTrue(report.contains("| \(AppDatabase.string(from: Date(timeIntervalSince1970: 1_700_000_100))) | nginx\\|config | /etc/nginx/conf.d/app\\|prod.conf | save | success | Tencent Cloud | saved\\|ok backup created |"))
+        XCTAssertTrue(report.contains("## Local Operation Logs"))
+        XCTAssertTrue(report.contains("| \(AppDatabase.string(from: Date(timeIntervalSince1970: 1_700_000_200))) | ssh | clear_command_history | \(profile.id.uuidString) | success | deleted_entries=2\\|metadata only |"))
+        XCTAssertFalse(report.contains("before-secret"))
+        XCTAssertFalse(report.contains("after-secret"))
+        XCTAssertFalse(report.contains("SECRET_TOKEN"))
+    }
+
     func testRefreshDashboardLoadsCapabilitiesAndMetrics() async throws {
         let profile = makeProfile()
         let client = DashboardMockSSHClient()
