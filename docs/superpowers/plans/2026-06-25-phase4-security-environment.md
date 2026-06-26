@@ -135,7 +135,7 @@ CREATE TABLE environment_profiles (
 - [x] 风险确认模型测试：已覆盖 systemd、Cron、Nginx、Environment、远程文件权限修改的风险级别、命令预览、恢复说明和确认文案。
 - [x] Nginx 配置测试/回滚逻辑测试：已覆盖配置保存、保存前备份、`nginx -t`、测试失败回滚、测试通过后 reload 和审计日志写入；已加入 `HHC_TEST_NGINX_REAL=1` 受保护真实集成入口，用于在 nginx 运行且存在安全 include 目录时验证临时 server block 写入、reload、HTTP smoke 和清理。
 - [x] Firewall adapter 能力探测测试：已覆盖 firewalld、ufw、nftables、iptables 解析、firewalld 未运行状态、nftables 兼容 chain 选择、nftables add/delete 命令和无兼容 chain 拒绝；已加入 `HHC_TEST_FIREWALL_REAL=1` 受保护真实集成入口，用于在 root SSH、支持后端且可安全编辑时验证 loopback 高位端口临时规则 add/delete、状态刷新、审计和清理。
-- [x] Environment 文件读写测试：已覆盖受限文件发现、UTF-8 读取、保存前备份、ViewModel 状态流和审计日志写入；真实服务器已通过临时 `$HOME/hhc-phase4-env-*` 目录验证 `.env` 发现、保存、备份和审计。
+- [x] Environment 文件读写测试：已覆盖受限文件发现、UTF-8 读取、保存前备份、ViewModel 状态流和审计日志写入；真实服务器已通过临时 `$HOME/hhc-phase4-env-*` 目录验证 `.env` 发现、保存、备份、审计和清理。
 - [x] 安全组测试：已覆盖 TencentCloudAdapter VPC 安全组/规则读取和单条写操作 API contract、CloudSecurityGroupService 账号/凭据/关联链路、ViewModel 加载/选择/写入刷新和审计状态流。
 - [x] RemoteChangeLogStore 测试：已覆盖保存、倒序查询、按 server 过滤和 server 删除后的 SET NULL。
 
@@ -144,12 +144,12 @@ CREATE TABLE environment_profiles (
 - [x] 无云账号时安全组页不可用但 SSH 功能正常：ViewModel 测试覆盖未关联云实例时仅显示安全组不可用提示，并保持已连接 SSH 状态和命令结果不变。
 - [ ] 腾讯云安全组可读取。当前 mock/contract 测试已通过，真实腾讯云账号手动验收待执行。
 - [x] 新增安全组规则前显示预览和确认基础：当前安全组详情页可生成拟新增规则预览并展示风险，确认后执行腾讯云单条规则写入。
-- [x] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，并通过受控临时 oneshot unit 验证真实 restart 写操作、远端 marker 和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过。
+- [x] systemd 服务可以查看和重启。当前真实服务器只读查看已验收，并通过受控临时 oneshot unit 验证真实 restart 写操作、远端 marker、`remote_change_logs` 审计和清理；2026-06-26 已重新用当前代码运行 `SSHIntegrationTests.testRealSystemdAndCronWritesAuditAndCleanupWhenExplicitlyEnabled` 并通过。
 - [x] Nginx 配置测试失败时不 reload：当前 reload 流程会先执行 `nginx -t`，保存流程测试失败会自动恢复备份；真实服务器已完成只读配置路径和 `nginx -t` 验证，且已加入受保护的临时配置写入/reload 集成入口。当前测试服务器 nginx 服务未运行，真实配置写入/reload 仍待合适环境谨慎验收。
 - [x] 防火墙后端探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作已有 mock/contract 测试覆盖，其中 nftables 仅写入已有兼容 chain 且只删除 HHC 标记规则；已加入受保护真实写入入口，真实服务器写入仍需在明确允许修改 firewall 的环境中启用验收。
-- [x] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，并通过受控临时 cron entry 验证 add/disable/enable/delete、原 crontab 恢复和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过；`/etc/cron.d` 系统任务只读发现已接入 contract 测试和受保护真实测试断言，真实系统条目是否存在取决于目标服务器。
-- [x] Environment 文件保存可备份并审计。当前真实服务器已通过受控临时 `.env` 验证保存、`.hhc-backup-*` 备份、远端内容变更和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过。
-- [x] 所有写操作可在操作日志中查到。当前 remote file、systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`；Audit 工作台已能按当前服务器查看远程变更日志，并显示当前服务器相关本地操作日志；remote file 重命名、文本保存、文本另存为、移动到回收目录和 chmod 已有 ViewModel 审计测试，文本保存审计只记录元数据不记录正文；systemd/Cron/Environment 真实服务器写操作审计已于 2026-06-26 用当前代码重新验收，Nginx/Firewall 真实服务器写操作和真实云账号验收仍需继续补齐。
+- [x] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，并通过受控临时 cron entry 验证 add/disable/enable/delete、原 crontab 恢复、`remote_change_logs` 审计和清理；2026-06-26 已重新用当前代码运行 `SSHIntegrationTests.testRealSystemdAndCronWritesAuditAndCleanupWhenExplicitlyEnabled` 并通过；`/etc/cron.d` 系统任务只读发现已接入 contract 测试和受保护真实测试断言，真实系统条目是否存在取决于目标服务器。
+- [x] Environment 文件保存可备份并审计。当前真实服务器已通过受控临时 `.env` 验证保存、`.hhc-backup-*` 备份、远端内容变更、`remote_change_logs` 审计和清理；2026-06-26 已重新用当前代码运行 `SSHIntegrationTests.testRealEnvironmentFileSaveAuditsAndCleanupWhenExplicitlyEnabled` 并通过。
+- [x] 所有写操作可在操作日志中查到。当前 remote file、systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`；Audit 工作台已能按当前服务器查看远程变更日志，并显示当前服务器相关本地操作日志；remote file 重命名、文本保存、文本另存为、移动到回收目录和 chmod 已有 ViewModel 审计测试，文本保存审计只记录元数据不记录正文；systemd/Cron/Environment 真实服务器写操作审计已于 2026-06-26 用当前代码重新验收，并确认临时 unit、marker 和 env 目录无残留；Nginx/Firewall 真实服务器写操作和真实云账号验收仍需继续补齐。
 
 ## 8. 完成标志
 

@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Added a macOS Audit workspace section for viewing per-server remote change logs and server-targeted operation logs.
 - Added macOS remote transfer finished-history cleanup so succeeded, failed, cancelled, and interrupted transfer records can be cleared while pending/running jobs remain active, with metadata-only operation audit logging.
 - Revalidated guarded real SSH smoke, OpenSSH SFTP round-trip, SFTP partial resume, and temporary Git deployment integration tests on the current macOS code path.
+- Revalidated guarded Phase 4 systemd/Cron and Environment real SSH integration tests, including audit assertions, cleanup, and residue checks.
 - Added remote change audit logs for macOS remote file rename, text save/save-as, move-to-trash, and chmod actions, including metadata-only before/after snapshots and ViewModel coverage.
 - Added unified risk confirmation for manual macOS deployment runs before executing git reset/build/restart/health-check commands.
 - Added a macOS remote transfer "Resume All" action that requeues every failed, cancelled, or interrupted transfer while leaving completed transfers untouched.
