@@ -55,6 +55,7 @@ All notable changes to this project will be documented in this file.
 - Added cloud instance sync/import service foundations for upsert, SSH profile creation, existing profile linking, unlinking, and server-list source filtering.
 - Added a macOS cloud import sheet for Tencent Cloud account verification, region loading, CVM syncing, instance selection, and SSH profile import.
 - Improved the command panel with separate stdout/stderr sections, failure summaries, and rerun buttons for persisted command history.
+- Added a per-server command history clear action for the macOS command panel, removing saved command metadata while leaving operation logs intact.
 - Added cancellable command execution that terminates the underlying OpenSSH process when a running command is cancelled.
 - Started Phase 3 Dashboard foundations with SSH-based OS/capability detection, load/memory/disk/CPU metric parsing, Dashboard refresh state, and tests.
 - Expanded Dashboard SSH metrics with network traffic totals and process summary parsing.
@@ -180,6 +181,7 @@ All notable changes to this project will be documented in this file.
 - 添加云实例同步/导入服务基础，支持 upsert、创建 SSH profile、关联已有 profile、解除关联和服务器列表来源筛选。
 - 添加 macOS 云导入 sheet，支持腾讯云账号验证、地域加载、CVM 同步、实例选择和 SSH profile 导入。
 - 改进命令面板，支持 stdout/stderr 分区展示、失败摘要和持久化历史命令重跑。
+- 为 macOS 命令面板添加按服务器清空命令历史入口，只删除保存的命令元数据，不删除操作日志。
 - 添加可取消命令执行，取消运行中的命令时会终止底层 OpenSSH 子进程。
 - 启动 Phase 3 Dashboard 基础，加入基于 SSH 的 OS/能力探测、负载/内存/磁盘/CPU 指标解析、Dashboard 刷新状态和测试。
 - 扩展 Dashboard SSH 指标，加入网络收发总量和进程摘要解析。

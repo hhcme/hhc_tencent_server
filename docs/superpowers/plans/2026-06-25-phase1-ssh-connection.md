@@ -526,7 +526,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 ### Task 9: 测试
 
 - [x] 模型测试：核心模型的编解码、风险模型和状态模型已通过 repository/service/view model 测试间接覆盖。
-- [x] Repository 测试：`ServerRepositoryTests` 覆盖 server、trusted host key、command history、dashboard snapshot、transfer jobs 和级联删除。
+- [x] Repository 测试：`ServerRepositoryTests` 覆盖 server、trusted host key、command history 读写/清空、dashboard snapshot、transfer jobs 和级联删除。
 - [x] Keychain 测试：`KeychainServiceTests` 覆盖 password、private key、cloud credential 和 webhook secret 的保存、覆盖、读取、删除。
 - [x] ServerManagementService 补偿逻辑测试：`ServerManagementServiceTests` 覆盖服务器创建/更新/删除、凭据清理和云账号凭据生命周期。
 - [x] AppState 入口和工作台切换测试：`ServerManagementServiceTests.testAppStateStartsWithEmptyServerListAndNoWorkspaceSelection` 覆盖首次启动空服务器列表和无选中工作台；`testAppStateOpensClosesAndSwitchesWorkspaceSelection` 覆盖添加服务器后列表可见、Open 进入工作台、工作台切换服务器和关闭工作台；`testAppStateReloadClearsWorkspaceSelectionWhenSelectedServerWasRemoved` 覆盖当前服务器被外部删除后 reload 清空工作台选择。

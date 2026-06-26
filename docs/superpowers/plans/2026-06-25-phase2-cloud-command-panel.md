@@ -158,6 +158,7 @@ CREATE TABLE operation_logs (
 - [x] stdout/stderr 分开展示。
 - [x] 保存命令历史，不保存包含疑似密钥的命令输出。
 - [x] 支持重复执行历史命令。
+- [x] 支持按当前服务器清空命令历史元数据，不删除操作日志。
 - [x] 命令执行失败时展示 exit code 和 stderr。
 
 ### Task 7：测试
@@ -166,7 +167,7 @@ CREATE TABLE operation_logs (
 - [x] 云凭据 Keychain 测试。
 - [x] Tencent Cloud response parser 测试。
 - [x] 实例同步 upsert 测试。
-- [x] 命令历史测试。
+- [x] 命令历史测试，覆盖持久化、历史复跑和按服务器清空。
 - [x] 命令面板 ViewModel 测试。
 - [x] 云账号验证失败 ViewModel 测试：厂商凭据校验失败时不创建账号、不清空待修正密钥输入。
 - [x] 云账号添加成功 ViewModel 测试：`AddServerViewModelTests.testCloudImportViewModelAddsVerifiedAccountAndStoresCredentialInKeychain` 覆盖云账号验证成功后创建账号、刷新 AppState、清空 secret 输入，并确认 SecretId/SecretKey 只从 Keychain 读取。

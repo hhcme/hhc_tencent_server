@@ -326,6 +326,15 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    func clearCommandHistory(profile: ServerProfile, repository: ServerRepository) {
+        do {
+            try repository.deleteCommandHistory(serverId: profile.id)
+            persistedCommandHistory = []
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func loadCachedDashboardSnapshot(profile: ServerProfile, repository: ServerRepository) {
         do {
             dashboardSnapshot = try repository.fetchLatestDashboardSnapshot(serverId: profile.id)

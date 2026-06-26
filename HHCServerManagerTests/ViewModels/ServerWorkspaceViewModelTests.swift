@@ -846,6 +846,39 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.persistedCommandHistory.map(\.command), ["uptime"])
     }
 
+    func testClearCommandHistoryRemovesPersistedEntriesForCurrentServer() throws {
+        let profile = makeProfile()
+        var otherProfile = makeProfile()
+        otherProfile.name = "Other"
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        try repository.upsert(otherProfile)
+        try repository.saveCommandHistory(CommandHistoryEntry(
+            id: UUID(),
+            serverId: profile.id,
+            command: "whoami",
+            exitCode: 0,
+            duration: 0.2,
+            createdAt: Date()
+        ))
+        try repository.saveCommandHistory(CommandHistoryEntry(
+            id: UUID(),
+            serverId: otherProfile.id,
+            command: "uptime",
+            exitCode: 0,
+            duration: 0.3,
+            createdAt: Date()
+        ))
+        let viewModel = ServerWorkspaceViewModel()
+        viewModel.loadCommandHistory(profile: profile, repository: repository)
+
+        viewModel.clearCommandHistory(profile: profile, repository: repository)
+
+        XCTAssertTrue(viewModel.persistedCommandHistory.isEmpty)
+        XCTAssertTrue(try repository.fetchCommandHistory(serverId: profile.id).isEmpty)
+        XCTAssertEqual(try repository.fetchCommandHistory(serverId: otherProfile.id).map(\.command), ["uptime"])
+    }
+
     func testRefreshDashboardLoadsCapabilitiesAndMetrics() async throws {
         let profile = makeProfile()
         let client = DashboardMockSSHClient()

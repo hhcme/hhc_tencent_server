@@ -100,6 +100,36 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertTrue(try repository.fetchCommandHistory(serverId: server.id).isEmpty)
     }
 
+    func testDeleteCommandHistoryOnlyClearsRequestedServer() throws {
+        let repository = try makeRepository()
+        let firstServer = makeServer()
+        let secondServer = makeServer()
+        try repository.upsert(firstServer)
+        try repository.upsert(secondServer)
+
+        try repository.saveCommandHistory(CommandHistoryEntry(
+            id: UUID(),
+            serverId: firstServer.id,
+            command: "whoami",
+            exitCode: 0,
+            duration: 0.1,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+        try repository.saveCommandHistory(CommandHistoryEntry(
+            id: UUID(),
+            serverId: secondServer.id,
+            command: "uptime",
+            exitCode: 0,
+            duration: 0.2,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_001)
+        ))
+
+        try repository.deleteCommandHistory(serverId: firstServer.id)
+
+        XCTAssertTrue(try repository.fetchCommandHistory(serverId: firstServer.id).isEmpty)
+        XCTAssertEqual(try repository.fetchCommandHistory(serverId: secondServer.id).map(\.command), ["uptime"])
+    }
+
     func testDashboardSnapshotsPersistLatestAndCascadeWithServer() throws {
         let repository = try makeRepository()
         let server = makeServer()

@@ -6,6 +6,7 @@ struct ServerWorkspaceView: View {
     @StateObject private var viewModel = ServerWorkspaceViewModel()
     @State private var selectedSection = "overview"
     @State private var commandText = ""
+    @State private var pendingClearCommandHistory = false
     @State private var filePathText = "~"
     @State private var remoteFileRenameEntry: RemoteFileEntry?
     @State private var remoteFileRenameText = ""
@@ -100,6 +101,14 @@ struct ServerWorkspaceView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+        .alert("Clear Command History?", isPresented: $pendingClearCommandHistory) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear History", role: .destructive) {
+                viewModel.clearCommandHistory(profile: profile, repository: appState.repository)
+            }
+        } message: {
+            Text("This removes saved command metadata for this server. Command output is not stored.")
+        }
         .alert("Move to Trash?", isPresented: remoteFileTrashBinding) {
             Button("Cancel", role: .cancel) {
                 remoteFileTrashEntry = nil
@@ -187,30 +196,8 @@ struct ServerWorkspaceView: View {
         } message: {
             Text(RemoteOperationRiskFactory.saveEnvironmentFile(path: viewModel.environmentFileContent?.file.path ?? "environment file").confirmationMessage)
         }
-        .alert(item: $pendingFirewallRule) { request in
-            Alert(
-                title: Text("\(request.draft.mutation.displayName) Firewall Rule?"),
-                message: Text(request.risk.confirmationMessage),
-                primaryButton: request.draft.mutation == .delete ? .destructive(Text(request.draft.mutation.displayName)) {
-                    applyFirewallRule(request.draft)
-                } : .default(Text(request.draft.mutation.displayName)) {
-                    applyFirewallRule(request.draft)
-                },
-                secondaryButton: .cancel()
-            )
-        }
-        .alert(item: $pendingCloudSecurityGroupRule) { request in
-            Alert(
-                title: Text("\(request.preview.action.displayName) Security Group Rule?"),
-                message: Text(request.risk.confirmationMessage),
-                primaryButton: request.preview.action == .remove ? .destructive(Text(request.preview.action.displayName)) {
-                    applyCloudSecurityGroupRule(request.preview)
-                } : .default(Text(request.preview.action.displayName)) {
-                    applyCloudSecurityGroupRule(request.preview)
-                },
-                secondaryButton: .cancel()
-            )
-        }
+        .alert(item: $pendingFirewallRule, content: firewallRuleAlert)
+        .alert(item: $pendingCloudSecurityGroupRule, content: cloudSecurityGroupRuleAlert)
         .alert(item: $pendingDeploymentRun) { request in
             Alert(
                 title: Text("Run Deployment?"),
@@ -3252,8 +3239,18 @@ struct ServerWorkspaceView: View {
 
     private var persistedHistorySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Command History")
-                .font(.headline)
+            HStack {
+                Text("Command History")
+                    .font(.headline)
+                Spacer()
+                Button(role: .destructive) {
+                    pendingClearCommandHistory = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Clear saved command history")
+            }
 
             ForEach(viewModel.persistedCommandHistory) { entry in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -3774,6 +3771,34 @@ struct ServerWorkspaceView: View {
                 repository: appState.repository
             )
         }
+    }
+
+    private func firewallRuleAlert(_ request: FirewallRuleRequest) -> Alert {
+        let title = "\(request.draft.mutation.displayName) Firewall Rule?"
+        let actionTitle = request.draft.mutation.displayName
+        let primaryButton: Alert.Button = request.draft.mutation == .delete
+            ? .destructive(Text(actionTitle)) { applyFirewallRule(request.draft) }
+            : .default(Text(actionTitle)) { applyFirewallRule(request.draft) }
+        return Alert(
+            title: Text(title),
+            message: Text(request.risk.confirmationMessage),
+            primaryButton: primaryButton,
+            secondaryButton: .cancel()
+        )
+    }
+
+    private func cloudSecurityGroupRuleAlert(_ request: CloudSecurityGroupRuleRequest) -> Alert {
+        let title = "\(request.preview.action.displayName) Security Group Rule?"
+        let actionTitle = request.preview.action.displayName
+        let primaryButton: Alert.Button = request.preview.action == .remove
+            ? .destructive(Text(actionTitle)) { applyCloudSecurityGroupRule(request.preview) }
+            : .default(Text(actionTitle)) { applyCloudSecurityGroupRule(request.preview) }
+        return Alert(
+            title: Text(title),
+            message: Text(request.risk.confirmationMessage),
+            primaryButton: primaryButton,
+            secondaryButton: .cancel()
+        )
     }
 
     private func registryRiskAlert(_ request: RegistryRiskRequest) -> Alert {

@@ -121,6 +121,15 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func deleteCommandHistory(serverId: UUID) throws {
+        try database.execute("""
+            DELETE FROM command_history
+            WHERE server_id = ?
+        """, bindings: [
+            .text(serverId.uuidString),
+        ])
+    }
+
     func saveServerCapabilities(_ capabilities: ServerCapabilities, serverId: UUID) throws {
         try database.execute("""
             INSERT INTO server_capabilities (
