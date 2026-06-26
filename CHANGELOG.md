@@ -17,7 +17,8 @@ All notable changes to this project will be documented in this file.
 - Added Windows native connected single-command execution with WinUI command input, ViewModel state, recent in-session commands, and core tests.
 - Added remote change audit records for manual deployment and rollback runs, including project target, status, summary, and previous/target commit snapshots.
 - Added Windows native ViewModel cancellation for running host-key scans and SSH smoke tests, with core tests for cancellation and reconnect.
-- Added an OpenSSH `sftp reget/reput` fallback between rsync and scp so remote file transfers can attempt resumable upload/download when rsync is unavailable or fails.
+- Added an OpenSSH `sftp -b` fallback between rsync and scp using `put -a` / `get -a` so remote file transfers can attempt resumable upload/download when rsync is unavailable or fails.
+- Hardened OpenSSH SFTP fallback resume detection so `put -a` / `get -a` are used only when the partial file is positive-sized and smaller than the source file.
 - Added MIT license.
 - Added bilingual README files.
 - Added contributing, security, and code of conduct documents.
@@ -188,6 +189,7 @@ All notable changes to this project will be documented in this file.
 - 添加基于 OpenSSH/scp 的单文件上传/下载 bootstrap，包含文件选择/保存面板、传输状态、测试、沙盒权限更新和真实服务器 smoke 验证。
 - 添加可见的远程传输任务记录，支持 pending/running/succeeded/failed/cancelled 状态、串行单文件队列、当前传输取消和待传队列清空测试。
 - 添加远程文件批量传输流程，支持多文件上传选择、选中文件下载到本地目录、复用串行队列和 ViewModel 测试覆盖。
+- 强化 OpenSSH SFTP fallback 续传判断，只有 partial 文件大于 0 且小于源文件大小时才使用 `put -a` / `get -a`，避免完整或异常 partial 被继续追加。
 - 添加远程文本另存为和基于 chmod 的权限修改，包含校验、列表刷新、UI sheet 和测试。
 - 添加 Dashboard 自动刷新开关，支持立即刷新、周期刷新、关闭/离开时取消，并补充 ViewModel 覆盖。
 - 添加腾讯云云监控 `GetMonitorData` 支持，可为已关联 CVM 展示 Cloud CPU 指标，并补充 Cloud API 来源标记和 Dashboard 聚合测试。

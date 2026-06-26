@@ -539,21 +539,60 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
     ) async throws -> Bool {
         switch direction {
         case .upload:
-            let authContext = try makeAuthContext(profile: profile, knownHostsURL: knownHostsURL, portFlag: "-p")
-            defer {
-                authContext.cleanup()
-            }
-            var arguments = authContext.arguments
-            arguments.append("\(profile.username)@\(profile.host)")
-            arguments.append("test -f -- \(Self.shellQuote(remotePath))")
-            let result = try await runProcess("/usr/bin/ssh", arguments: arguments, environment: authContext.environment)
-            return result.exitCode == 0
-        case .download:
-            guard let size = (try? fileManager.attributesOfItem(atPath: localPath)[.size]) as? Int64 else {
+            guard let localSize = (try? fileManager.attributesOfItem(atPath: localPath)[.size]) as? Int64 else {
                 return false
             }
-            return size > 0
+            guard let remoteSize = try await remoteFileByteCount(
+                remotePath,
+                profile: profile,
+                knownHostsURL: knownHostsURL
+            ) else {
+                return false
+            }
+            return Self.shouldResumeSFTPTransfer(partialByteCount: remoteSize, totalByteCount: localSize)
+        case .download:
+            guard let localSize = (try? fileManager.attributesOfItem(atPath: localPath)[.size]) as? Int64 else {
+                return false
+            }
+            guard let remoteSize = try await remoteFileByteCount(
+                remotePath,
+                profile: profile,
+                knownHostsURL: knownHostsURL
+            ) else {
+                return false
+            }
+            return Self.shouldResumeSFTPTransfer(partialByteCount: localSize, totalByteCount: remoteSize)
         }
+    }
+
+    private func remoteFileByteCount(
+        _ remotePath: String,
+        profile: ServerProfile,
+        knownHostsURL: URL
+    ) async throws -> Int64? {
+        let authContext = try makeAuthContext(profile: profile, knownHostsURL: knownHostsURL, portFlag: "-p")
+        defer {
+            authContext.cleanup()
+        }
+        var arguments = authContext.arguments
+        arguments.append("\(profile.username)@\(profile.host)")
+        arguments.append("if [ -f -- \(Self.shellQuote(remotePath)) ]; then wc -c < \(Self.shellQuote(remotePath)); else exit 1; fi")
+        let result = try await runProcess("/usr/bin/ssh", arguments: arguments, environment: authContext.environment)
+        guard result.exitCode == 0 else {
+            return nil
+        }
+        return Self.parseRemoteByteCount(result.stdout)
+    }
+
+    static func shouldResumeSFTPTransfer(partialByteCount: Int64, totalByteCount: Int64) -> Bool {
+        partialByteCount > 0 && partialByteCount < totalByteCount
+    }
+
+    static func parseRemoteByteCount(_ output: String) -> Int64? {
+        output
+            .split(whereSeparator: \.isWhitespace)
+            .first
+            .flatMap { Int64(String($0)) }
     }
 
     static func rsyncProgressUpdates(from output: String) -> [RemoteFileTransferProgress] {

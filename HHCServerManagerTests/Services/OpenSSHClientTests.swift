@@ -103,6 +103,20 @@ final class OpenSSHClientTests: XCTestCase {
         XCTAssertEqual(download, "get -a \"/srv/app.tar.gz\" \"/Users/hhc/Downloads/app.tar.gz\"\n")
     }
 
+    func testSFTPResumeRequiresPositivePartialSmallerThanTotal() {
+        XCTAssertTrue(OpenSSHClient.shouldResumeSFTPTransfer(partialByteCount: 512, totalByteCount: 1_024))
+        XCTAssertFalse(OpenSSHClient.shouldResumeSFTPTransfer(partialByteCount: 0, totalByteCount: 1_024))
+        XCTAssertFalse(OpenSSHClient.shouldResumeSFTPTransfer(partialByteCount: 1_024, totalByteCount: 1_024))
+        XCTAssertFalse(OpenSSHClient.shouldResumeSFTPTransfer(partialByteCount: 2_048, totalByteCount: 1_024))
+    }
+
+    func testParseRemoteByteCountReadsWcOutput() {
+        XCTAssertEqual(OpenSSHClient.parseRemoteByteCount("  4096\n"), 4_096)
+        XCTAssertEqual(OpenSSHClient.parseRemoteByteCount("8192 /srv/app.tar.gz\n"), 8_192)
+        XCTAssertNil(OpenSSHClient.parseRemoteByteCount(""))
+        XCTAssertNil(OpenSSHClient.parseRemoteByteCount("not-a-size\n"))
+    }
+
     func testRsyncTransferArgumentsUseAppendVerifyResumeMode() {
         let arguments = OpenSSHClient.rsyncTransferArguments(
             source: "/Users/hhc/Downloads/app.tar.gz",
