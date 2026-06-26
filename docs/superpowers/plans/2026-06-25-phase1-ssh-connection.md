@@ -316,7 +316,7 @@ Phase 1 必须支持密码认证。私钥认证至少支持一种经过真实测
 3. 不匹配则进入 `hostKeyChanged` 错误状态。
 4. 不允许静默覆盖；必须展示旧指纹和新指纹。
 
-Phase 1 可以先不实现 known_hosts 导入，但数据模型要能支持后续扩展。
+当前已实现 OpenSSH `known_hosts` 普通明文 host 行导入核心：支持默认 22 端口 host、非默认端口 `[host]:port`、逗号分隔 host token，跳过 hashed/marker/comment/非法 key 行，并以导入后的 SHA256 指纹写入 `trusted_host_keys`；UI 文件选择入口后续可接入。
 
 ## 10. AppState 与 ViewModel
 
@@ -456,6 +456,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 - [x] 实现 trust 查询、保存、匹配、冲突错误：`HostKeyTrustEvaluation` 覆盖 trusted/unknown/changed。
 - [x] 实现用户 trust/reject 流程：ViewModel 通过 `pendingHostKey`、`trustPendingHostKey`、`rejectPendingHostKey` 表达决策；未单独定义 `HostKeyTrustDecision` 枚举。
 - [x] 为 OpenSSH 后端提供等待用户决策的接口：未知 host key 抛出 `SSHClientError.unknownHostKey`，ViewModel 暂停当前动作，用户 trust 后重试原动作。
+- [x] 实现 `known_hosts` 导入核心：`HostKeyTrustStore` 可解析普通 OpenSSH `known_hosts` 行，匹配当前 profile 并保存 trust；跳过 hashed/marker/非法行。
 - [x] 写单元测试覆盖首次信任、匹配、变更。
 
 验收：
@@ -530,7 +531,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 - [x] ServerManagementService 补偿逻辑测试：`ServerManagementServiceTests` 覆盖服务器创建/更新/删除、凭据清理和云账号凭据生命周期。
 - [x] AppState 入口和工作台切换测试：`ServerManagementServiceTests.testAppStateStartsWithEmptyServerListAndNoWorkspaceSelection` 覆盖首次启动空服务器列表和无选中工作台；`testAppStateOpensClosesAndSwitchesWorkspaceSelection` 覆盖添加服务器后列表可见、Open 进入工作台、工作台切换服务器和关闭工作台；`testAppStateReloadClearsWorkspaceSelectionWhenSelectedServerWasRemoved` 覆盖当前服务器被外部删除后 reload 清空工作台选择。
 - [x] AppState 持久化重载测试：`ServerManagementServiceTests.testAppStateReloadsPersistedServerProfilesAfterDatabaseReopen` 使用临时 SQLite 文件创建服务器，重新打开数据库并创建新的 `AppState` 后验证服务器配置仍能恢复，凭据仍只从 Keychain 读取。
-- [x] HostKeyTrustStore 测试：`HostKeyTrustStoreTests` 覆盖首次未知指纹、已信任匹配和指纹变化阻断。
+- [x] HostKeyTrustStore 测试：`HostKeyTrustStoreTests` 覆盖首次未知指纹、已信任匹配、指纹变化阻断、默认端口 `known_hosts` 导入、非默认端口导入，以及 hashed/marker/非法行跳过。
 - [x] SSH 状态机测试：`ServerWorkspaceViewModelTests` 覆盖连接成功、连接失败、未知 host key 等待/拒绝、重复连接防抖和断开连接状态。
 - [x] 可选真实 SSH 集成测试：`SSHIntegrationTests.testRealPrivateKeySmokeTestWhenEnvironmentIsConfigured` 已使用真实腾讯云服务器验证 host key trust 和 `printf hhc-ssh-ok` smoke test；2026-06-26 已重新用当前代码验证通过。部署类真实集成测试需要额外设置 `HHC_TEST_DEPLOYMENT_REAL=1`，避免普通 CI 误改服务器。
 
