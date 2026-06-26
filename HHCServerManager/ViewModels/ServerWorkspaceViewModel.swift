@@ -141,6 +141,30 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isUpgradingVerdaccio = false
     @Published var registryErrorMessage: String?
     @Published var registryActionMessage: String?
+    @Published var gitLabDraft = GitLabInstallDraft() {
+        didSet {
+            guard gitLabDraft != oldValue else { return }
+            gitLabPreflightReport = nil
+            gitLabInstallResult = nil
+            gitLabActionMessage = nil
+        }
+    }
+    @Published var gitLabServiceInstance: GitLabServiceInstance?
+    @Published var gitLabPreflightReport: GitLabPreflightReport?
+    @Published var gitLabInstallResult: GitLabInstallResult?
+    @Published var gitLabStatusSnapshot: GitLabStatusSnapshot?
+    @Published var gitLabServiceActionResult: GitLabServiceActionResult?
+    @Published var giteaDraft = GiteaInstallDraft()
+    @Published var giteaInstallResult: GiteaInstallResult?
+    @Published var isRunningGitLabPreflight = false
+    @Published var isInstallingGitLab = false
+    @Published var isInstallingGitea = false
+    @Published var isLoadingGitLabStatus = false
+    @Published var isControllingGitLabService = false
+    @Published var gitLabErrorMessage: String?
+    @Published var gitLabActionMessage: String?
+    @Published var giteaErrorMessage: String?
+    @Published var giteaActionMessage: String?
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -235,6 +259,11 @@ final class ServerWorkspaceViewModel: ObservableObject {
         isRunningVerdaccioNpmSmokeTest = false
         isControllingVerdaccioService = false
         isUpgradingVerdaccio = false
+        isRunningGitLabPreflight = false
+        isInstallingGitLab = false
+        isInstallingGitea = false
+        isLoadingGitLabStatus = false
+        isControllingGitLabService = false
 
         dashboardSnapshot = nil
         dashboardErrorMessage = nil
@@ -302,6 +331,18 @@ final class ServerWorkspaceViewModel: ObservableObject {
         pubHostedRepositoryPlan = nil
         registryErrorMessage = nil
         registryActionMessage = nil
+        gitLabDraft = GitLabInstallDraft()
+        gitLabServiceInstance = nil
+        gitLabPreflightReport = nil
+        gitLabInstallResult = nil
+        gitLabStatusSnapshot = nil
+        gitLabServiceActionResult = nil
+        giteaDraft = GiteaInstallDraft()
+        giteaInstallResult = nil
+        gitLabErrorMessage = nil
+        gitLabActionMessage = nil
+        giteaErrorMessage = nil
+        giteaActionMessage = nil
         commandResult = nil
         commandHistory = []
         persistedCommandHistory = []
@@ -2320,7 +2361,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
             deploymentRuns = try repository.fetchDeploymentRuns(projectId: project.id)
             deploymentLogs = []
             selectedDeploymentRun = deploymentRuns.first
-            deploymentActionMessage = "Deployment project saved."
+            deploymentActionMessage = L10n.string("Deployment project saved.")
             isSavingDeploymentProject = false
         } catch {
             deploymentErrorMessage = error.localizedDescription
@@ -2735,6 +2776,344 @@ final class ServerWorkspaceViewModel: ObservableObject {
             "upstreamRegistryURL=\(policy.upstreamRegistryURL.trimmingCharacters(in: .whitespacesAndNewlines))",
             "accessMode=\(policy.accessMode.rawValue)",
         ].joined(separator: "\n")
+    }
+
+    private static func gitLabSnapshot(_ snapshot: GitLabStatusSnapshot?, draft: GitLabInstallDraft) -> String {
+        [
+            "externalURL=\(snapshot?.externalURL ?? draft.externalURL.trimmingCharacters(in: .whitespacesAndNewlines))",
+            "edition=\(draft.edition.rawValue)",
+            "package=\(draft.edition.packageName)",
+            "version=\(snapshot?.version ?? "unknown")",
+            "status=\(snapshot?.status ?? "unknown")",
+            "webReachable=\(snapshot?.webReachable == true ? "yes" : "no")",
+        ].joined(separator: "\n")
+    }
+
+    func loadGitLabServiceInstance(profile: ServerProfile, repository: ServerRepository) {
+        do {
+            let instance = try repository.fetchGitLabServiceInstance(serverId: profile.id)
+            gitLabServiceInstance = instance
+            if let instance {
+                gitLabDraft = GitLabInstallDraft(
+                    externalURL: instance.externalURL,
+                    edition: instance.edition,
+                    installMethod: .linuxPackage,
+                    openFirewallPorts: true,
+                    notes: ""
+                )
+            } else if gitLabDraft.externalURL == "http://" {
+                gitLabDraft.externalURL = "http://\(profile.host)"
+            }
+            if giteaDraft.externalURL == "http://" {
+                giteaDraft.externalURL = "http://\(profile.host):\(giteaDraft.listenPort)"
+            }
+            gitLabErrorMessage = nil
+        } catch {
+            gitLabErrorMessage = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func validateGitLabDraftForEditing() -> Bool {
+        do {
+            try GitLabInstaller.validate(gitLabDraft)
+            gitLabErrorMessage = nil
+            return true
+        } catch {
+            gitLabActionMessage = nil
+            gitLabErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func runGitLabPreflight(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        gitLabInstaller: GitLabInstaller
+    ) {
+        guard !isRunningGitLabPreflight else { return }
+        guard validateGitLabDraftForEditing() else { return }
+        isRunningGitLabPreflight = true
+        gitLabActionMessage = nil
+
+        Task {
+            do {
+                let report = try await gitLabInstaller.runPreflight(
+                    draft: gitLabDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.gitLabPreflightReport = report
+                    self.gitLabActionMessage = report.isReady ? L10n.string("GitLab preflight passed.") : L10n.string("GitLab preflight found blocking checks.")
+                    self.isRunningGitLabPreflight = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitLabErrorMessage = error.localizedDescription
+                    self.isRunningGitLabPreflight = false
+                }
+            }
+        }
+    }
+
+    func installGitLab(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        gitLabInstaller: GitLabInstaller,
+        gitLabManager: GitLabManager,
+        repository: ServerRepository
+    ) {
+        guard !isInstallingGitLab else { return }
+        guard validateGitLabDraftForEditing() else { return }
+        isInstallingGitLab = true
+        gitLabErrorMessage = nil
+        gitLabActionMessage = nil
+        let beforeSnapshot = Self.gitLabSnapshot(gitLabStatusSnapshot, draft: gitLabDraft)
+
+        Task {
+            do {
+                let result = try await gitLabInstaller.install(
+                    draft: gitLabDraft,
+                    profile: profile,
+                    sshClient: sshClient,
+                    repository: repository,
+                    allowFailedPreflight: gitLabPreflightReport?.isReady == false
+                )
+                let snapshot = try? await gitLabManager.loadStatus(
+                    draft: gitLabDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                if let snapshot {
+                    try? gitLabManager.upsertInstance(
+                        profile: profile,
+                        draft: gitLabDraft,
+                        snapshot: snapshot,
+                        repository: repository
+                    )
+                }
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "gitlab_service",
+                    targetId: result.instance.externalURL,
+                    action: "install",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: Self.gitLabSnapshot(snapshot, draft: gitLabDraft),
+                    status: "success",
+                    message: L10n.format("Installed GitLab CE. Health check: %@.", result.healthCheckOutput)
+                )
+                await MainActor.run {
+                    self.gitLabInstallResult = result
+                    self.gitLabServiceInstance = result.instance
+                    if let snapshot {
+                        self.gitLabStatusSnapshot = snapshot
+                    }
+                    self.gitLabActionMessage = L10n.format("Installed GitLab CE. Open %@ in a browser to finish setup.", result.instance.webURL ?? result.instance.externalURL)
+                    self.isInstallingGitLab = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "gitlab_service",
+                    targetId: gitLabDraft.externalURL,
+                    action: "install",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.gitLabErrorMessage = error.localizedDescription
+                    self.isInstallingGitLab = false
+                }
+            }
+        }
+    }
+
+    func loadGitLabStatus(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        gitLabManager: GitLabManager,
+        repository: ServerRepository? = nil
+    ) {
+        guard !isLoadingGitLabStatus else { return }
+        guard validateGitLabDraftForEditing() else { return }
+        isLoadingGitLabStatus = true
+        gitLabErrorMessage = nil
+
+        Task {
+            do {
+                let snapshot = try await gitLabManager.loadStatus(
+                    draft: gitLabDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                if let repository {
+                    try? gitLabManager.upsertInstance(
+                        profile: profile,
+                        draft: gitLabDraft,
+                        snapshot: snapshot,
+                        repository: repository
+                    )
+                    let instance = try? repository.fetchGitLabServiceInstance(serverId: profile.id)
+                    await MainActor.run {
+                        self.gitLabServiceInstance = instance
+                    }
+                }
+                await MainActor.run {
+                    self.gitLabStatusSnapshot = snapshot
+                    self.gitLabActionMessage = snapshot.webReachable ? L10n.string("GitLab is reachable.") : L10n.string("GitLab status loaded.")
+                    self.isLoadingGitLabStatus = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitLabErrorMessage = error.localizedDescription
+                    self.isLoadingGitLabStatus = false
+                }
+            }
+        }
+    }
+
+    func performGitLabServiceAction(
+        _ action: GitLabServiceAction,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        gitLabManager: GitLabManager,
+        repository: ServerRepository
+    ) {
+        guard !isControllingGitLabService else { return }
+        guard validateGitLabDraftForEditing() else { return }
+        isControllingGitLabService = true
+        gitLabErrorMessage = nil
+        gitLabActionMessage = nil
+        let beforeSnapshot = Self.gitLabSnapshot(gitLabStatusSnapshot, draft: gitLabDraft)
+
+        Task {
+            do {
+                let result = try await gitLabManager.performServiceAction(
+                    action,
+                    draft: gitLabDraft,
+                    profile: profile,
+                    sshClient: sshClient,
+                    repository: repository
+                )
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "gitlab_service",
+                    targetId: gitLabDraft.externalURL,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: Self.gitLabSnapshot(result.snapshot, draft: gitLabDraft),
+                    status: "success",
+                    message: L10n.format("%@ GitLab completed.", action.displayName)
+                )
+                await MainActor.run {
+                    self.gitLabServiceActionResult = result
+                    self.gitLabStatusSnapshot = result.snapshot
+                    self.gitLabActionMessage = L10n.format("%@ GitLab completed.", action.displayName)
+                    self.isControllingGitLabService = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "gitlab_service",
+                    targetId: gitLabDraft.externalURL,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.gitLabErrorMessage = error.localizedDescription
+                    self.isControllingGitLabService = false
+                }
+            }
+        }
+    }
+
+    func openGitLabInBrowser() {
+        let urlText = gitLabStatusSnapshot?.externalURL ?? gitLabServiceInstance?.webURL ?? gitLabDraft.externalURL
+        guard let url = URL(string: urlText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            gitLabErrorMessage = L10n.string("GitLab URL is invalid.")
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    func installGitea(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        repository: ServerRepository
+    ) {
+        guard !isInstallingGitea else { return }
+        do {
+            try GiteaInstaller.validate(giteaDraft)
+        } catch {
+            giteaActionMessage = nil
+            giteaErrorMessage = error.localizedDescription
+            return
+        }
+        isInstallingGitea = true
+        giteaErrorMessage = nil
+        giteaActionMessage = nil
+        let beforeSnapshot = giteaInstallResult.map { "url=\($0.externalURL)\nversion=\($0.version ?? "")\nstatus=\($0.status)" }
+
+        Task {
+            do {
+                let result = try await GiteaInstaller().install(
+                    draft: giteaDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "code_hosting",
+                    targetId: result.externalURL,
+                    action: "install_gitea",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: "url=\(result.externalURL)\nversion=\(result.version ?? "")\nstatus=\(result.status)",
+                    status: "success",
+                    message: L10n.format("Installed Gitea. Status: %@.", result.status)
+                )
+                await MainActor.run {
+                    self.giteaInstallResult = result
+                    self.giteaActionMessage = L10n.format("Installed Gitea. Open %@ in a browser to finish setup.", result.externalURL)
+                    self.isInstallingGitea = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "code_hosting",
+                    targetId: giteaDraft.externalURL,
+                    action: "install_gitea",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.giteaErrorMessage = error.localizedDescription
+                    self.isInstallingGitea = false
+                }
+            }
+        }
+    }
+
+    func openGiteaInBrowser() {
+        let urlText = giteaInstallResult?.externalURL ?? giteaDraft.externalURL
+        guard let url = URL(string: urlText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            giteaErrorMessage = L10n.string("Gitea URL is invalid.")
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     @discardableResult

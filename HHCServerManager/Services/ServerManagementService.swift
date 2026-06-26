@@ -1675,6 +1675,600 @@ final class DeploymentWebhookHTTPServer: @unchecked Sendable {
     }
 }
 
+enum GitLabServiceError: LocalizedError, Equatable {
+    case invalidExternalURL
+    case unsupportedInstallMethod
+    case preflightFailed
+    case statusUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidExternalURL:
+            L10n.string("GitLab external URL must be an http or https URL with a host and without embedded credentials.")
+        case .unsupportedInstallMethod:
+            L10n.string("Only GitLab Linux package installation is supported in this version.")
+        case .preflightFailed:
+            L10n.string("GitLab preflight has blocking checks. Fix them before installing.")
+        case .statusUnavailable:
+            L10n.string("GitLab status is unavailable.")
+        }
+    }
+}
+
+final class GitLabInstaller: @unchecked Sendable {
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func runPreflight(
+        draft: GitLabInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> GitLabPreflightReport {
+        try Self.validate(draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(45) {
+            try await sshClient.execute(Self.preflightCommand(), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: L10n.string("GitLab preflight failed.")))
+        }
+        return Self.parsePreflight(output: result.stdout, draft: draft, generatedAt: now())
+    }
+
+    func install(
+        draft: GitLabInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        repository: ServerRepository? = nil,
+        allowFailedPreflight: Bool = false
+    ) async throws -> GitLabInstallResult {
+        try Self.validate(draft)
+        let preflight = try await runPreflight(draft: draft, profile: profile, sshClient: sshClient)
+        guard preflight.isReady || allowFailedPreflight else { throw GitLabServiceError.preflightFailed }
+
+        let installResult = try await CloudProviderRequestRunner.withTimeout(900) {
+            try await sshClient.execute(try Self.installCommand(for: draft), profile: profile)
+        }
+        guard installResult.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: installResult, fallback: "GitLab installation failed."))
+        }
+
+        let manager = GitLabManager(now: now)
+        let snapshot = try await manager.loadStatus(draft: draft, profile: profile, sshClient: sshClient)
+        let currentDate = now()
+        let existing = try repository?.fetchGitLabServiceInstance(serverId: profile.id)
+        let instance = GitLabServiceInstance(
+            id: existing?.id ?? UUID(),
+            serverId: profile.id,
+            edition: draft.edition,
+            externalURL: draft.externalURL.trimmed,
+            packageName: draft.edition.packageName,
+            installedVersion: snapshot.version,
+            status: snapshot.status,
+            webURL: snapshot.externalURL ?? draft.externalURL.trimmed,
+            createdAt: existing?.createdAt ?? currentDate,
+            updatedAt: currentDate
+        )
+        try repository?.upsertGitLabServiceInstance(instance)
+
+        return GitLabInstallResult(
+            instance: instance,
+            healthCheckOutput: snapshot.webReachable ? "reachable" : "not reachable yet",
+            statusOutput: snapshot.status
+        )
+    }
+
+    static func validate(_ draft: GitLabInstallDraft) throws {
+        guard draft.installMethod == .linuxPackage else { throw GitLabServiceError.unsupportedInstallMethod }
+        guard let components = URLComponents(string: draft.externalURL.trimmed),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+              components.host?.nilIfEmpty != nil,
+              components.user == nil,
+              components.password == nil
+        else {
+            throw GitLabServiceError.invalidExternalURL
+        }
+    }
+
+    static func installCommand(for draft: GitLabInstallDraft) throws -> String {
+        try validate(draft)
+        let externalURL = draft.externalURL.trimmed
+        let packageName = draft.edition.packageName
+        let firewallCommand = draft.openFirewallPorts ? firewallOpenCommand() : "true"
+        return """
+        set -e; \
+        external_url=\(shellQuote(externalURL)); package_name=\(shellQuote(packageName)); \
+        if [ "$(id -u)" -eq 0 ]; then sudo_cmd=''; elif sudo -n true >/dev/null 2>&1; then sudo_cmd='sudo -n'; else echo 'Root or passwordless sudo is required.' >&2; exit 2; fi; \
+        if command -v apt-get >/dev/null 2>&1; then \
+          $sudo_cmd apt-get update; \
+          $sudo_cmd DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates tzdata openssh-server; \
+          curl -fsSL https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh | $sudo_cmd bash; \
+          $sudo_cmd env EXTERNAL_URL="$external_url" apt-get install -y "$package_name"; \
+        elif command -v dnf >/dev/null 2>&1; then \
+          $sudo_cmd dnf install -y curl ca-certificates policycoreutils openssh-server; \
+          curl -fsSL https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.rpm.sh | $sudo_cmd bash; \
+          $sudo_cmd env EXTERNAL_URL="$external_url" dnf install -y "$package_name"; \
+        elif command -v yum >/dev/null 2>&1; then \
+          $sudo_cmd yum install -y curl ca-certificates policycoreutils openssh-server; \
+          curl -fsSL https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.rpm.sh | $sudo_cmd bash; \
+          $sudo_cmd env EXTERNAL_URL="$external_url" yum install -y "$package_name"; \
+        else \
+          echo 'apt-get, dnf, or yum is required for GitLab Linux package installation.' >&2; exit 3; \
+        fi; \
+        \(firewallCommand); \
+        $sudo_cmd gitlab-ctl status
+        """
+    }
+
+    static func preflightCommand() -> String {
+        """
+        set +e; \
+        os_id='unknown'; os_version=''; os_pretty='unknown'; \
+        if [ -r /etc/os-release ]; then . /etc/os-release; os_id=${ID:-unknown}; os_version=${VERSION_ID:-}; os_pretty=${PRETTY_NAME:-$os_id}; fi; \
+        pm=''; command -v apt-get >/dev/null 2>&1 && pm='apt-get'; command -v dnf >/dev/null 2>&1 && pm=${pm:-dnf}; command -v yum >/dev/null 2>&1 && pm=${pm:-yum}; \
+        is_root=no; [ "$(id -u)" -eq 0 ] && is_root=yes; sudo_nopass=no; sudo -n true >/dev/null 2>&1 && sudo_nopass=yes; \
+        mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null); mem_kb=${mem_kb:-0}; \
+        cpu_count=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0); \
+        disk_kb=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4}'); disk_kb=${disk_kb:-0}; \
+        curl_available=no; command -v curl >/dev/null 2>&1 && curl_available=yes; \
+        ca_available=no; { dpkg -s ca-certificates >/dev/null 2>&1 || rpm -q ca-certificates >/dev/null 2>&1; } && ca_available=yes; \
+        gitlab_version=''; command -v gitlab-rake >/dev/null 2>&1 && gitlab_version=$(gitlab-rake gitlab:env:info 2>/dev/null | awk -F: '/GitLab version/ {gsub(/^[ \\t]+/, "", $2); print $2; exit}'); \
+        [ -z "$gitlab_version" ] && command -v gitlab-ctl >/dev/null 2>&1 && gitlab_version=$(gitlab-ctl status 2>/dev/null | head -n 1); \
+        port80=free; port443=free; port22=free; \
+        ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq '(:|\\.)80$' && port80=used; \
+        ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq '(:|\\.)443$' && port443=used; \
+        ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq '(:|\\.)22$' && port22=used; \
+        printf '__HHC_GITLAB_OS_ID__%s\\n' "$os_id"; \
+        printf '__HHC_GITLAB_OS_VERSION__%s\\n' "$os_version"; \
+        printf '__HHC_GITLAB_OS_PRETTY__%s\\n' "$os_pretty"; \
+        printf '__HHC_GITLAB_PACKAGE_MANAGER__%s\\n' "$pm"; \
+        printf '__HHC_GITLAB_IS_ROOT__%s\\n' "$is_root"; \
+        printf '__HHC_GITLAB_SUDO_NOPASS__%s\\n' "$sudo_nopass"; \
+        printf '__HHC_GITLAB_MEM_KB__%s\\n' "$mem_kb"; \
+        printf '__HHC_GITLAB_CPU_COUNT__%s\\n' "$cpu_count"; \
+        printf '__HHC_GITLAB_DISK_KB__%s\\n' "$disk_kb"; \
+        printf '__HHC_GITLAB_CURL__%s\\n' "$curl_available"; \
+        printf '__HHC_GITLAB_CA_CERTS__%s\\n' "$ca_available"; \
+        printf '__HHC_GITLAB_VERSION__%s\\n' "$gitlab_version"; \
+        printf '__HHC_GITLAB_PORT_80__%s\\n' "$port80"; \
+        printf '__HHC_GITLAB_PORT_443__%s\\n' "$port443"; \
+        printf '__HHC_GITLAB_PORT_22__%s\\n' "$port22"
+        """
+    }
+
+    static func parsePreflight(output: String, draft: GitLabInstallDraft, generatedAt: Date = Date()) -> GitLabPreflightReport {
+        let values = markerValues(output, prefix: "__HHC_GITLAB_")
+        let osID = values["OS_ID"]?.lowercased()
+        let osPretty = values["OS_PRETTY"]?.nilIfEmpty
+        let packageManager = values["PACKAGE_MANAGER"]?.nilIfEmpty
+        let isRoot = values["IS_ROOT"] == "yes"
+        let sudoNoPass = values["SUDO_NOPASS"] == "yes"
+        let memKB = Int(values["MEM_KB"] ?? "0") ?? 0
+        let cpuCount = Int(values["CPU_COUNT"] ?? "0") ?? 0
+        let diskKB = Int(values["DISK_KB"] ?? "0") ?? 0
+        let existingVersion = values["VERSION"]?.nilIfEmpty
+        let supportedOS = ["ubuntu", "debian", "almalinux", "centos", "rocky", "rhel", "amazon", "ol", "oracle", "opensuse", "opensuse-leap"].contains(osID ?? "")
+        let memoryStatus: GitLabPreflightCheckStatus
+        if memKB >= 15_500_000 {
+            memoryStatus = .passed
+        } else if memKB >= 7_800_000 {
+            memoryStatus = .warning
+        } else {
+            memoryStatus = .failed
+        }
+        let diskStatus: GitLabPreflightCheckStatus
+        if diskKB >= 80_000_000 {
+            diskStatus = .passed
+        } else if diskKB >= 40_000_000 {
+            diskStatus = .warning
+        } else {
+            diskStatus = .failed
+        }
+
+        var checks: [GitLabPreflightCheck] = []
+        func add(_ id: String, _ title: String, _ status: GitLabPreflightCheckStatus, _ detail: String, _ remediation: String? = nil) {
+            checks.append(GitLabPreflightCheck(id: id, title: title, status: status, detail: detail, remediation: remediation))
+        }
+
+        if (try? validate(draft)) == nil {
+            add("external-url", L10n.string("External URL"), .failed, L10n.string("The configured external URL is not valid."), L10n.string("Use an http or https URL such as http://203.0.113.10."))
+        } else {
+            add("external-url", L10n.string("External URL"), .passed, draft.externalURL.trimmed)
+        }
+        add("os", L10n.string("Operating System"), supportedOS ? .passed : .failed, osPretty ?? osID ?? L10n.string("unknown"), supportedOS ? nil : L10n.string("Use a GitLab Linux package supported distribution such as Ubuntu, Debian, AlmaLinux, Amazon Linux, Oracle Linux, RHEL, or openSUSE Leap."))
+        add("package-manager", L10n.string("Package Manager"), packageManager == nil ? .failed : .passed, packageManager ?? L10n.string("not found"), L10n.string("Install apt-get, dnf, or yum support before continuing."))
+        add("privileges", L10n.string("Privileges"), (isRoot || sudoNoPass) ? .passed : .failed, isRoot ? L10n.string("running as root") : (sudoNoPass ? L10n.string("passwordless sudo available") : L10n.string("no passwordless sudo")), L10n.string("Connect as root or configure passwordless sudo for the SSH user."))
+        add("memory", L10n.string("Memory"), memoryStatus, L10n.format("%d MiB detected", memKB / 1024), L10n.string("Use at least 8 GiB RAM for a memory-constrained GitLab instance; 16 GiB is the baseline recommendation."))
+        add("disk", L10n.string("Disk"), diskStatus, L10n.format("%d GiB free on /", diskKB / 1024 / 1024), L10n.string("Use at least 40 GB free disk for GitLab application storage; leave more for repositories, database, logs, and backups."))
+        add("cpu", L10n.string("CPU"), cpuCount >= 8 ? .passed : .warning, L10n.format("%d CPU cores detected", cpuCount), L10n.string("Use 8 vCPU as the baseline recommendation for a single-node GitLab instance."))
+        add("curl", "curl", values["CURL"] == "yes" ? .passed : .warning, values["CURL"] == "yes" ? L10n.string("available") : L10n.string("not found"), L10n.string("The installer will attempt to install curl."))
+        add("ca-certs", L10n.string("CA certificates"), values["CA_CERTS"] == "yes" ? .passed : .warning, values["CA_CERTS"] == "yes" ? L10n.string("available") : L10n.string("not found"), L10n.string("The installer will attempt to install ca-certificates."))
+        for port in ["22", "80", "443"] {
+            let key = "PORT_\(port)"
+            add("port-\(port)", L10n.format("Port %@", port), values[key] == "used" ? .warning : .passed, values[key] == "used" ? L10n.string("already listening") : L10n.string("free"), L10n.string("Confirm this port usage is expected before installing GitLab."))
+        }
+        add("existing", L10n.string("Existing GitLab"), existingVersion == nil ? .passed : .warning, existingVersion ?? L10n.string("not detected"), L10n.string("Existing GitLab will be reconfigured or upgraded by package manager install commands."))
+
+        return GitLabPreflightReport(
+            checks: checks,
+            detectedOS: osPretty,
+            existingVersion: existingVersion,
+            generatedAt: generatedAt
+        )
+    }
+
+    private static func firewallOpenCommand() -> String {
+        """
+        if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active; then \
+          $sudo_cmd ufw allow 22/tcp || true; $sudo_cmd ufw allow 80/tcp || true; $sudo_cmd ufw allow 443/tcp || true; \
+        fi; \
+        if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then \
+          $sudo_cmd firewall-cmd --permanent --add-service=ssh || true; $sudo_cmd firewall-cmd --permanent --add-service=http || true; $sudo_cmd firewall-cmd --permanent --add-service=https || true; $sudo_cmd firewall-cmd --reload || true; \
+        fi
+        """
+    }
+
+    private static func markerValues(_ output: String, prefix: String) -> [String: String] {
+        var values: [String: String] = [:]
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) where line.hasPrefix(prefix) {
+            let remainder = String(line.dropFirst(prefix.count))
+            guard let markerEnd = remainder.firstIndex(of: "_") else { continue }
+            let key = String(remainder[..<markerEnd])
+            let valueKey: String
+            let value: String
+            if let doubleEnd = remainder.range(of: "__") {
+                valueKey = String(remainder[..<doubleEnd.lowerBound])
+                value = String(remainder[doubleEnd.upperBound...])
+            } else {
+                valueKey = key
+                value = String(remainder[remainder.index(after: markerEnd)...])
+            }
+            values[valueKey] = value
+        }
+        return values
+    }
+
+    private static func redactedOutput(from result: CommandResult, fallback: String) -> String {
+        DeploymentLogRedactor.redact(
+            [result.stderr.trimmed, result.stdout.trimmed]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+                .nilIfEmpty ?? fallback
+        )
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
+final class GitLabManager: @unchecked Sendable {
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func loadStatus(
+        draft: GitLabInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> GitLabStatusSnapshot {
+        try GitLabInstaller.validate(draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(60) {
+            try await sshClient.execute(Self.statusCommand(externalURL: draft.externalURL.trimmed), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not load GitLab status."))
+        }
+        return Self.parseStatus(output: result.stdout, capturedAt: now())
+    }
+
+    func performServiceAction(
+        _ action: GitLabServiceAction,
+        draft: GitLabInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        repository: ServerRepository? = nil
+    ) async throws -> GitLabServiceActionResult {
+        try GitLabInstaller.validate(draft)
+        let result = try await CloudProviderRequestRunner.withTimeout(action == .reconfigure ? 600 : 180) {
+            try await sshClient.execute(Self.serviceActionCommand(action), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not \(action.rawValue) GitLab."))
+        }
+        let snapshot = try await loadStatus(draft: draft, profile: profile, sshClient: sshClient)
+        if let repository {
+            try upsertInstance(profile: profile, draft: draft, snapshot: snapshot, repository: repository)
+        }
+        return GitLabServiceActionResult(
+            action: action,
+            output: DeploymentLogRedactor.redact(result.stdout.trimmed.nilIfEmpty ?? "ok"),
+            snapshot: snapshot
+        )
+    }
+
+    func upsertInstance(
+        profile: ServerProfile,
+        draft: GitLabInstallDraft,
+        snapshot: GitLabStatusSnapshot,
+        repository: ServerRepository
+    ) throws {
+        let existing = try repository.fetchGitLabServiceInstance(serverId: profile.id)
+        let currentDate = now()
+        try repository.upsertGitLabServiceInstance(GitLabServiceInstance(
+            id: existing?.id ?? UUID(),
+            serverId: profile.id,
+            edition: draft.edition,
+            externalURL: draft.externalURL.trimmed,
+            packageName: draft.edition.packageName,
+            installedVersion: snapshot.version,
+            status: snapshot.status,
+            webURL: snapshot.externalURL ?? draft.externalURL.trimmed,
+            createdAt: existing?.createdAt ?? currentDate,
+            updatedAt: currentDate
+        ))
+    }
+
+    static func statusCommand(externalURL: String) -> String {
+        """
+        set +e; \
+        installed=no; command -v gitlab-ctl >/dev/null 2>&1 && installed=yes; \
+        version=''; command -v gitlab-rake >/dev/null 2>&1 && version=$(gitlab-rake gitlab:env:info 2>/dev/null | awk -F: '/GitLab version/ {gsub(/^[ \\t]+/, "", $2); print $2; exit}'); \
+        status_text=$(gitlab-ctl status 2>/dev/null || true); \
+        external_url=$(awk -F"'" '/^[[:space:]]*external_url/ {print $2; exit}' /etc/gitlab/gitlab.rb 2>/dev/null); \
+        [ -z "$external_url" ] && external_url=\(shellQuote(externalURL)); \
+        reachable=no; curl -fsS --max-time 5 "$external_url/-/readiness" >/dev/null 2>&1 && reachable=yes; \
+        logs=$(gitlab-ctl tail --lines 80 2>/dev/null | tail -n 80 | base64 | tr -d '\\n'); \
+        printf '__HHC_GITLAB_STATUS_INSTALLED__%s\\n' "$installed"; \
+        printf '__HHC_GITLAB_STATUS_VERSION__%s\\n' "$version"; \
+        printf '__HHC_GITLAB_STATUS_EXTERNAL_URL__%s\\n' "$external_url"; \
+        printf '__HHC_GITLAB_STATUS_REACHABLE__%s\\n' "$reachable"; \
+        printf '__HHC_GITLAB_STATUS_TEXT__'; printf '%s' "$status_text" | base64 | tr -d '\\n'; printf '\\n'; \
+        printf '__HHC_GITLAB_STATUS_LOGS__%s\\n' "$logs"
+        """
+    }
+
+    static func serviceActionCommand(_ action: GitLabServiceAction) -> String {
+        let command: String
+        switch action {
+        case .start:
+            command = "gitlab-ctl start"
+        case .stop:
+            command = "gitlab-ctl stop"
+        case .restart:
+            command = "gitlab-ctl restart"
+        case .reconfigure:
+            command = "gitlab-ctl reconfigure"
+        }
+        return """
+        set -e; \
+        if [ "$(id -u)" -eq 0 ]; then sudo_cmd=''; elif sudo -n true >/dev/null 2>&1; then sudo_cmd='sudo -n'; else echo 'Root or passwordless sudo is required.' >&2; exit 2; fi; \
+        $sudo_cmd \(command)
+        """
+    }
+
+    static func backupPreviewCommand() -> String {
+        "gitlab-backup create"
+    }
+
+    static func parseStatus(output: String, capturedAt: Date = Date()) -> GitLabStatusSnapshot {
+        let values = markerValues(output)
+        let statusText = decodeBase64(values["TEXT"])?.nilIfEmpty ?? "unknown"
+        let logs = DeploymentLogRedactor.redact(decodeBase64(values["LOGS"])?.nilIfEmpty ?? "")
+        let installed = values["INSTALLED"] == "yes"
+        let reachable = values["REACHABLE"] == "yes"
+        let condensedStatus: String
+        if !installed {
+            condensedStatus = "not installed"
+        } else if statusText.lowercased().contains("down:") {
+            condensedStatus = "degraded"
+        } else if statusText.lowercased().contains("run:") {
+            condensedStatus = "running"
+        } else {
+            condensedStatus = "installed"
+        }
+
+        return GitLabStatusSnapshot(
+            installed: installed,
+            version: values["VERSION"]?.nilIfEmpty,
+            status: condensedStatus,
+            externalURL: values["EXTERNAL_URL"]?.nilIfEmpty,
+            webReachable: reachable,
+            rootPasswordHint: "/etc/gitlab/initial_root_password",
+            recentLogs: logs,
+            capturedAt: capturedAt
+        )
+    }
+
+    private static func markerValues(_ output: String) -> [String: String] {
+        var values: [String: String] = [:]
+        let prefix = "__HHC_GITLAB_STATUS_"
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) where line.hasPrefix(prefix) {
+            let remainder = String(line.dropFirst(prefix.count))
+            guard let separator = remainder.range(of: "__") else { continue }
+            let key = String(remainder[..<separator.lowerBound])
+            let value = String(remainder[separator.upperBound...])
+            values[key] = value
+        }
+        return values
+    }
+
+    private static func decodeBase64(_ value: String?) -> String? {
+        guard let value,
+              let data = Data(base64Encoded: value),
+              let decoded = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+        return decoded
+    }
+
+    private static func redactedOutput(from result: CommandResult, fallback: String) -> String {
+        DeploymentLogRedactor.redact(
+            [result.stderr.trimmed, result.stdout.trimmed]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+                .nilIfEmpty ?? fallback
+        )
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
+enum GiteaInstallError: LocalizedError, Equatable {
+    case invalidExternalURL
+    case invalidPort
+    case invalidServiceName
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidExternalURL:
+            L10n.string("Gitea external URL must be an http or https URL with a host and without embedded credentials.")
+        case .invalidPort:
+            L10n.string("Gitea listen port must be between 1 and 65535.")
+        case .invalidServiceName:
+            L10n.string("Gitea service name must contain only letters, numbers, underscores, dots, and hyphens.")
+        }
+    }
+}
+
+final class GiteaInstaller: @unchecked Sendable {
+    func install(
+        draft: GiteaInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> GiteaInstallResult {
+        let result = try await CloudProviderRequestRunner.withTimeout(300) {
+            try await sshClient.execute(try Self.installCommand(for: draft), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: L10n.string("Gitea installation failed.")))
+        }
+        return Self.parseInstallResult(output: result.stdout, draft: draft)
+    }
+
+    static func validate(_ draft: GiteaInstallDraft) throws {
+        guard let components = URLComponents(string: draft.externalURL.trimmed),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+              components.host?.nilIfEmpty != nil,
+              components.user == nil,
+              components.password == nil
+        else {
+            throw GiteaInstallError.invalidExternalURL
+        }
+        guard (1...65535).contains(draft.listenPort) else { throw GiteaInstallError.invalidPort }
+        let serviceName = draft.serviceName.trimmed
+        guard serviceName.range(of: #"^[A-Za-z0-9_.-]+$"#, options: .regularExpression) != nil else {
+            throw GiteaInstallError.invalidServiceName
+        }
+    }
+
+    static func installCommand(for draft: GiteaInstallDraft) throws -> String {
+        try validate(draft)
+        let externalURL = draft.externalURL.trimmed
+        let installPath = draft.installPath.trimmed
+        let dataPath = draft.dataPath.trimmed
+        let serviceName = draft.serviceName.trimmed
+        let listenPort = String(draft.listenPort)
+        return """
+        set -e; \
+        external_url=\(shellQuote(externalURL)); install_path=\(shellQuote(installPath)); data_path=\(shellQuote(dataPath)); service_name=\(shellQuote(serviceName)); listen_port=\(shellQuote(listenPort)); \
+        if [ "$(id -u)" -eq 0 ]; then sudo_cmd=''; elif sudo -n true >/dev/null 2>&1; then sudo_cmd='sudo -n'; else echo 'Root or passwordless sudo is required.' >&2; exit 2; fi; \
+        arch=$(uname -m); case "$arch" in x86_64|amd64) gitea_arch=amd64 ;; aarch64|arm64) gitea_arch=arm64 ;; *) echo "Unsupported architecture: $arch" >&2; exit 3 ;; esac; \
+        command -v curl >/dev/null 2>&1 || { echo 'curl is required.' >&2; exit 4; }; \
+        version=$(curl -fsSL https://api.github.com/repos/go-gitea/gitea/releases/latest | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\\([^"]*\\)".*/\\1/p' | head -n 1); \
+        [ -n "$version" ] || { echo 'Unable to resolve latest Gitea version.' >&2; exit 5; }; \
+        tmp_file=$(mktemp); \
+        curl -fL "https://dl.gitea.com/gitea/${version}/gitea-${version}-linux-${gitea_arch}" -o "$tmp_file"; \
+        $sudo_cmd install -m 0755 "$tmp_file" "$install_path"; rm -f "$tmp_file"; \
+        if ! id git >/dev/null 2>&1; then $sudo_cmd useradd --system --create-home --home-dir "$data_path" --shell /bin/bash git; fi; \
+        $sudo_cmd mkdir -p "$data_path"/{custom,data,log} /etc/gitea; \
+        $sudo_cmd chown -R git:git "$data_path"; $sudo_cmd chmod -R 750 "$data_path"; \
+        $sudo_cmd tee /etc/gitea/app.ini >/dev/null <<EOF
+        APP_NAME = Gitea
+        RUN_USER = git
+        WORK_PATH = $data_path
+
+        [server]
+        APP_DATA_PATH = $data_path/data
+        DOMAIN = $(printf '%s' "$external_url" | sed -E 's#^https?://([^/:]+).*#\\1#')
+        HTTP_PORT = $listen_port
+        ROOT_URL = $external_url
+        DISABLE_SSH = false
+        SSH_PORT = 22
+
+        [database]
+        DB_TYPE = sqlite3
+        PATH = $data_path/data/gitea.db
+
+        [service]
+        DISABLE_REGISTRATION = true
+        EOF
+        $sudo_cmd chown root:git /etc/gitea/app.ini; $sudo_cmd chmod 640 /etc/gitea/app.ini; \
+        $sudo_cmd tee "/etc/systemd/system/${service_name}.service" >/dev/null <<EOF
+        [Unit]
+        Description=Gitea
+        After=network.target
+
+        [Service]
+        Type=simple
+        User=git
+        Group=git
+        WorkingDirectory=$data_path
+        ExecStart=$install_path web --config /etc/gitea/app.ini
+        Restart=always
+        RestartSec=2s
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+        $sudo_cmd systemctl daemon-reload; $sudo_cmd systemctl enable --now "${service_name}.service"; \
+        status=$($sudo_cmd systemctl is-active "${service_name}.service" 2>/dev/null || true); \
+        printf '__HHC_GITEA_VERSION__%s\\n' "$version"; printf '__HHC_GITEA_STATUS__%s\\n' "$status"; printf '__HHC_GITEA_URL__%s\\n' "$external_url"
+        """
+    }
+
+    static func parseInstallResult(output: String, draft: GiteaInstallDraft) -> GiteaInstallResult {
+        let values = markerValues(output, prefix: "__HHC_GITEA_")
+        return GiteaInstallResult(
+            externalURL: values["URL"]?.nilIfEmpty ?? draft.externalURL.trimmed,
+            version: values["VERSION"]?.nilIfEmpty,
+            status: values["STATUS"]?.nilIfEmpty ?? "unknown"
+        )
+    }
+
+    private static func markerValues(_ output: String, prefix: String) -> [String: String] {
+        var values: [String: String] = [:]
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) where line.hasPrefix(prefix) {
+            let remainder = String(line.dropFirst(prefix.count))
+            guard let separator = remainder.range(of: "__") else { continue }
+            let key = String(remainder[..<separator.lowerBound])
+            let value = String(remainder[separator.upperBound...])
+            values[key] = value
+        }
+        return values
+    }
+
+    private static func redactedOutput(from result: CommandResult, fallback: String) -> String {
+        DeploymentLogRedactor.redact(
+            [result.stderr.trimmed, result.stdout.trimmed]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+                .nilIfEmpty ?? fallback
+        )
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 enum RegistryKind: String, Equatable, Sendable {
     case verdaccio
 }

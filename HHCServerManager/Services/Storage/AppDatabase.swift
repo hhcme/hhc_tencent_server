@@ -443,6 +443,24 @@ final class AppDatabase: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_registry_backups_registry_created_at
             ON registry_backups(registry_id, created_at DESC)
         """)
+        try execute("""
+            CREATE TABLE IF NOT EXISTS gitlab_service_instances (
+                id TEXT PRIMARY KEY NOT NULL,
+                server_id TEXT NOT NULL REFERENCES server_profiles(id) ON DELETE CASCADE,
+                edition TEXT NOT NULL,
+                external_url TEXT NOT NULL,
+                package_name TEXT NOT NULL,
+                installed_version TEXT,
+                status TEXT,
+                web_url TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        try execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_gitlab_service_instances_server
+            ON gitlab_service_instances(server_id)
+        """)
     }
 
     private func addColumnIfMissing(table: String, column: String, definition: String) throws {

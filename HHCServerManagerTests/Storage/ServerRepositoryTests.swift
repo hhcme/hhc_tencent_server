@@ -631,6 +631,46 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertTrue(try repository.fetchRegistryBackups(registryId: registry.id).isEmpty)
     }
 
+    func testGitLabServiceInstancePersistsUpdatesAndCascades() throws {
+        let repository = try makeRepository()
+        let server = makeServer()
+        try repository.upsert(server)
+
+        let instance = GitLabServiceInstance(
+            id: UUID(),
+            serverId: server.id,
+            edition: .ce,
+            externalURL: "http://gitlab.example.internal",
+            packageName: "gitlab-ce",
+            installedVersion: "18.0.1",
+            status: "running",
+            webURL: "http://gitlab.example.internal",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try repository.upsertGitLabServiceInstance(instance)
+
+        var fetched = try repository.fetchGitLabServiceInstance(serverId: server.id)
+        XCTAssertEqual(fetched?.externalURL, "http://gitlab.example.internal")
+        XCTAssertEqual(fetched?.installedVersion, "18.0.1")
+        XCTAssertEqual(fetched?.status, "running")
+
+        var updated = instance
+        updated.id = UUID()
+        updated.installedVersion = "18.0.2"
+        updated.status = "degraded"
+        updated.updatedAt = Date(timeIntervalSince1970: 1_700_000_010)
+        try repository.upsertGitLabServiceInstance(updated)
+
+        fetched = try repository.fetchGitLabServiceInstance(serverId: server.id)
+        XCTAssertEqual(fetched?.id, instance.id)
+        XCTAssertEqual(fetched?.installedVersion, "18.0.2")
+        XCTAssertEqual(fetched?.status, "degraded")
+
+        try repository.deleteServer(id: server.id)
+        XCTAssertNil(try repository.fetchGitLabServiceInstance(serverId: server.id))
+    }
+
     private func makeRepository() throws -> ServerRepository {
         ServerRepository(database: try AppDatabase.inMemory())
     }

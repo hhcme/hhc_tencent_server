@@ -22,6 +22,8 @@ final class AppState: ObservableObject {
     let registryPreflightChecker: RegistryPreflightChecker
     let verdaccioInstaller: VerdaccioInstaller
     let verdaccioManager: VerdaccioManager
+    let gitLabInstaller: GitLabInstaller
+    let gitLabManager: GitLabManager
     let sshClient: OpenSSHClient
 
     @Published var servers: [ServerProfile] = []
@@ -57,6 +59,8 @@ final class AppState: ObservableObject {
         registryPreflightChecker = RegistryPreflightChecker()
         verdaccioInstaller = VerdaccioInstaller()
         verdaccioManager = VerdaccioManager()
+        gitLabInstaller = GitLabInstaller()
+        gitLabManager = GitLabManager()
         deploymentWebhookService = DeploymentWebhookService(
             repository: repository,
             keychain: keychain,
@@ -104,6 +108,8 @@ final class AppState: ObservableObject {
             registryPreflightChecker = RegistryPreflightChecker()
             verdaccioInstaller = VerdaccioInstaller()
             verdaccioManager = VerdaccioManager()
+            gitLabInstaller = GitLabInstaller()
+            gitLabManager = GitLabManager()
             deploymentWebhookService = DeploymentWebhookService(
                 repository: repository,
                 keychain: keychain,
@@ -149,6 +155,8 @@ final class AppState: ObservableObject {
             registryPreflightChecker = RegistryPreflightChecker()
             verdaccioInstaller = VerdaccioInstaller()
             verdaccioManager = VerdaccioManager()
+            gitLabInstaller = GitLabInstaller()
+            gitLabManager = GitLabManager()
             deploymentWebhookService = DeploymentWebhookService(
                 repository: repository,
                 keychain: keychain,

@@ -685,6 +685,36 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(audit.afterSnapshot?.contains("commit=def4567") == true)
     }
 
+    func testInstallGitLabPersistsInstanceStatusAndAudit() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = GitLabWorkspaceMockSSHClient()
+        let installer = GitLabInstaller(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let manager = GitLabManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.gitLabDraft = GitLabInstallDraft(externalURL: "http://gitlab.example.internal")
+        viewModel.installGitLab(
+            profile: profile,
+            sshClient: client,
+            gitLabInstaller: installer,
+            gitLabManager: manager,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isInstallingGitLab == false && viewModel.gitLabInstallResult != nil }
+
+        XCTAssertEqual(viewModel.gitLabStatusSnapshot?.status, "running")
+        XCTAssertEqual(viewModel.gitLabStatusSnapshot?.version, "18.0.1")
+        XCTAssertEqual(viewModel.gitLabServiceInstance?.externalURL, "http://gitlab.example.internal")
+        XCTAssertTrue(client.commands.contains { $0.contains("gitlab-ce") })
+        let stored = try repository.fetchGitLabServiceInstance(serverId: profile.id)
+        XCTAssertEqual(stored?.installedVersion, "18.0.1")
+        let audit = try XCTUnwrap(try repository.fetchRemoteChangeLogs(serverId: profile.id).first)
+        XCTAssertEqual(audit.targetType, "gitlab_service")
+        XCTAssertEqual(audit.action, "install")
+        XCTAssertEqual(audit.status, "success")
+    }
+
     func testRunDeploymentShowsHealthCheckFailureInWorkspace() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
@@ -3298,6 +3328,61 @@ private final class DeploymentWorkspaceMockSSHClient: SSHClient, @unchecked Send
             return "health_check"
         }
         return "command"
+    }
+}
+
+private final class GitLabWorkspaceMockSSHClient: SSHClient, @unchecked Sendable {
+    private(set) var commands: [String] = []
+
+    func runSmokeTest(profile: ServerProfile) async throws -> CommandResult {
+        try await execute("printf hhc-ssh-ok", profile: profile)
+    }
+
+    func execute(_ command: String, profile: ServerProfile) async throws -> CommandResult {
+        commands.append(command)
+        if command.contains("__HHC_GITLAB_OS_ID__") {
+            return CommandResult(command: command, stdout: Self.preflightOutput, stderr: "", exitCode: 0, duration: 0.1)
+        }
+        if command.contains("gitlab-ctl status") && command.contains("apt-get install") {
+            return CommandResult(command: command, stdout: "run: puma\n", stderr: "", exitCode: 0, duration: 0.1)
+        }
+        if command.contains("__HHC_GITLAB_STATUS_INSTALLED__") {
+            return CommandResult(command: command, stdout: Self.statusOutput, stderr: "", exitCode: 0, duration: 0.1)
+        }
+        return CommandResult(command: command, stdout: "", stderr: "", exitCode: 0, duration: 0.1)
+    }
+
+    func trustHostKey(_ hostKeyInfo: HostKeyInfo, for profile: ServerProfile) throws {}
+
+    private static let preflightOutput = """
+    __HHC_GITLAB_OS_ID__ubuntu
+    __HHC_GITLAB_OS_VERSION__24.04
+    __HHC_GITLAB_OS_PRETTY__Ubuntu 24.04 LTS
+    __HHC_GITLAB_PACKAGE_MANAGER__apt-get
+    __HHC_GITLAB_IS_ROOT__yes
+    __HHC_GITLAB_SUDO_NOPASS__yes
+    __HHC_GITLAB_MEM_KB__16777216
+    __HHC_GITLAB_CPU_COUNT__8
+    __HHC_GITLAB_DISK_KB__80000000
+    __HHC_GITLAB_CURL__yes
+    __HHC_GITLAB_CA_CERTS__yes
+    __HHC_GITLAB_VERSION__
+    __HHC_GITLAB_PORT_80__free
+    __HHC_GITLAB_PORT_443__free
+    __HHC_GITLAB_PORT_22__used
+    """
+
+    private static var statusOutput: String {
+        let status = Data("run: puma: (pid 12) 10s\n".utf8).base64EncodedString()
+        let logs = Data("GitLab started\n".utf8).base64EncodedString()
+        return """
+        __HHC_GITLAB_STATUS_INSTALLED__yes
+        __HHC_GITLAB_STATUS_VERSION__18.0.1
+        __HHC_GITLAB_STATUS_EXTERNAL_URL__http://gitlab.example.internal
+        __HHC_GITLAB_STATUS_REACHABLE__yes
+        __HHC_GITLAB_STATUS_TEXT__\(status)
+        __HHC_GITLAB_STATUS_LOGS__\(logs)
+        """
     }
 }
 

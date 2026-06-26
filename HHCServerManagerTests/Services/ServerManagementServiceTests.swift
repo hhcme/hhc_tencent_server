@@ -1072,6 +1072,150 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(response?.contains("Content-Length: 2") == true)
     }
 
+    func testGitLabInstallerBuildsLinuxPackageInstallCommand() throws {
+        let draft = GitLabInstallDraft(externalURL: "http://gitlab.example.internal")
+
+        let command = try GitLabInstaller.installCommand(for: draft)
+
+        XCTAssertTrue(command.contains("package_name='gitlab-ce'"))
+        XCTAssertTrue(command.contains("env EXTERNAL_URL=\"$external_url\" apt-get install -y \"$package_name\""))
+        XCTAssertTrue(command.contains("script.deb.sh"))
+        XCTAssertTrue(command.contains("script.rpm.sh"))
+        XCTAssertTrue(command.contains("gitlab-ctl status"))
+    }
+
+    func testGitLabInstallerRejectsUnsafeExternalURL() {
+        let draft = GitLabInstallDraft(externalURL: "https://user:pass@gitlab.example.internal")
+
+        XCTAssertThrowsError(try GitLabInstaller.installCommand(for: draft)) { error in
+            XCTAssertEqual(error as? GitLabServiceError, .invalidExternalURL)
+        }
+    }
+
+    func testGitLabPreflightParserBuildsBlockingAndWarningChecks() {
+        let output = """
+        __HHC_GITLAB_OS_ID__ubuntu
+        __HHC_GITLAB_OS_VERSION__24.04
+        __HHC_GITLAB_OS_PRETTY__Ubuntu 24.04 LTS
+        __HHC_GITLAB_PACKAGE_MANAGER__apt-get
+        __HHC_GITLAB_IS_ROOT__no
+        __HHC_GITLAB_SUDO_NOPASS__yes
+        __HHC_GITLAB_MEM_KB__16777216
+        __HHC_GITLAB_CPU_COUNT__2
+        __HHC_GITLAB_DISK_KB__80000000
+        __HHC_GITLAB_CURL__no
+        __HHC_GITLAB_CA_CERTS__yes
+        __HHC_GITLAB_VERSION__
+        __HHC_GITLAB_PORT_80__used
+        __HHC_GITLAB_PORT_443__free
+        __HHC_GITLAB_PORT_22__used
+        """
+
+        let report = GitLabInstaller.parsePreflight(
+            output: output,
+            draft: GitLabInstallDraft(externalURL: "http://gitlab.example.internal"),
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        XCTAssertTrue(report.isReady)
+        XCTAssertEqual(report.detectedOS, "Ubuntu 24.04 LTS")
+        XCTAssertTrue(report.checks.contains { $0.id == "port-80" && $0.status == .warning })
+        XCTAssertTrue(report.checks.contains { $0.id == "curl" && $0.status == .warning })
+    }
+
+    func testGitLabPreflightParserFailsWhenSudoAndMemoryAreMissing() {
+        let output = """
+        __HHC_GITLAB_OS_ID__ubuntu
+        __HHC_GITLAB_OS_PRETTY__Ubuntu 24.04 LTS
+        __HHC_GITLAB_PACKAGE_MANAGER__apt-get
+        __HHC_GITLAB_IS_ROOT__no
+        __HHC_GITLAB_SUDO_NOPASS__no
+        __HHC_GITLAB_MEM_KB__1024
+        __HHC_GITLAB_CPU_COUNT__1
+        __HHC_GITLAB_DISK_KB__1024
+        __HHC_GITLAB_CURL__yes
+        __HHC_GITLAB_CA_CERTS__yes
+        __HHC_GITLAB_PORT_80__free
+        __HHC_GITLAB_PORT_443__free
+        __HHC_GITLAB_PORT_22__used
+        """
+
+        let report = GitLabInstaller.parsePreflight(
+            output: output,
+            draft: GitLabInstallDraft(externalURL: "http://gitlab.example.internal")
+        )
+
+        XCTAssertFalse(report.isReady)
+        XCTAssertTrue(report.checks.contains { $0.id == "privileges" && $0.status == .failed })
+        XCTAssertTrue(report.checks.contains { $0.id == "memory" && $0.status == .failed })
+        XCTAssertTrue(report.checks.contains { $0.id == "disk" && $0.status == .failed })
+    }
+
+    func testGitLabStatusParserReadsStatusAndRedactsLogs() {
+        let logs = Data("token=super-secret\nGitLab started\n".utf8).base64EncodedString()
+        let status = Data("run: gitaly: (pid 10) 12s\n".utf8).base64EncodedString()
+        let output = """
+        __HHC_GITLAB_STATUS_INSTALLED__yes
+        __HHC_GITLAB_STATUS_VERSION__18.0.1
+        __HHC_GITLAB_STATUS_EXTERNAL_URL__http://gitlab.example.internal
+        __HHC_GITLAB_STATUS_REACHABLE__yes
+        __HHC_GITLAB_STATUS_TEXT__\(status)
+        __HHC_GITLAB_STATUS_LOGS__\(logs)
+        """
+
+        let snapshot = GitLabManager.parseStatus(output: output, capturedAt: Date(timeIntervalSince1970: 1_700_000_000))
+
+        XCTAssertTrue(snapshot.installed)
+        XCTAssertEqual(snapshot.version, "18.0.1")
+        XCTAssertEqual(snapshot.status, "running")
+        XCTAssertEqual(snapshot.externalURL, "http://gitlab.example.internal")
+        XCTAssertTrue(snapshot.webReachable)
+        XCTAssertTrue(snapshot.recentLogs.contains("token=<redacted>"))
+        XCTAssertFalse(snapshot.recentLogs.contains("super-secret"))
+    }
+
+    func testGiteaInstallerBuildsLightweightInstallCommand() throws {
+        let draft = GiteaInstallDraft(
+            externalURL: "http://git.example.internal:3000",
+            installPath: "/usr/local/bin/gitea",
+            dataPath: "/var/lib/gitea",
+            serviceName: "gitea",
+            listenPort: 3000
+        )
+
+        let command = try GiteaInstaller.installCommand(for: draft)
+
+        XCTAssertTrue(command.contains("api.github.com/repos/go-gitea/gitea/releases/latest"))
+        XCTAssertTrue(command.contains("dl.gitea.com/gitea"))
+        XCTAssertTrue(command.contains("/etc/gitea/app.ini"))
+        XCTAssertTrue(command.contains("HTTP_PORT = $listen_port"))
+        XCTAssertTrue(command.contains("DB_TYPE = sqlite3"))
+        XCTAssertTrue(command.contains("systemctl enable --now \"${service_name}.service\""))
+    }
+
+    func testGiteaInstallerRejectsUnsafeExternalURL() {
+        let draft = GiteaInstallDraft(externalURL: "https://user:pass@gitea.example.internal")
+
+        XCTAssertThrowsError(try GiteaInstaller.installCommand(for: draft)) { error in
+            XCTAssertEqual(error as? GiteaInstallError, .invalidExternalURL)
+        }
+    }
+
+    func testGiteaInstallerParsesInstallResultMarkers() {
+        let draft = GiteaInstallDraft(externalURL: "http://fallback.example.internal:3000")
+        let output = """
+        __HHC_GITEA_VERSION__1.24.2
+        __HHC_GITEA_STATUS__active
+        __HHC_GITEA_URL__http://git.example.internal:3000
+        """
+
+        let result = GiteaInstaller.parseInstallResult(output: output, draft: draft)
+
+        XCTAssertEqual(result.version, "1.24.2")
+        XCTAssertEqual(result.status, "active")
+        XCTAssertEqual(result.externalURL, "http://git.example.internal:3000")
+    }
+
     func testVerdaccioConfigurationBuilderGeneratesPinnedConfigAndService() throws {
         let draft = VerdaccioInstallDraft(
             name: "Team Registry",

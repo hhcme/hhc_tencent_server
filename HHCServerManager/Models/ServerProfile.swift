@@ -680,6 +680,178 @@ struct RegistryBackupRecord: Identifiable, Codable, Equatable, Hashable, Sendabl
     var message: String?
 }
 
+enum GitLabServiceEdition: String, Codable, CaseIterable, Identifiable, Sendable {
+    case ce
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .ce:
+            L10n.string("Community Edition")
+        }
+    }
+
+    var packageName: String {
+        switch self {
+        case .ce:
+            "gitlab-ce"
+        }
+    }
+}
+
+enum GitLabInstallMethod: String, Codable, CaseIterable, Identifiable, Sendable {
+    case linuxPackage
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .linuxPackage:
+            L10n.string("Linux package")
+        }
+    }
+}
+
+struct GitLabServiceInstance: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var serverId: UUID
+    var edition: GitLabServiceEdition
+    var externalURL: String
+    var packageName: String
+    var installedVersion: String?
+    var status: String?
+    var webURL: String?
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+struct GitLabInstallDraft: Codable, Equatable, Hashable, Sendable {
+    var externalURL: String
+    var edition: GitLabServiceEdition
+    var installMethod: GitLabInstallMethod
+    var openFirewallPorts: Bool
+    var notes: String
+
+    init(
+        externalURL: String = "http://",
+        edition: GitLabServiceEdition = .ce,
+        installMethod: GitLabInstallMethod = .linuxPackage,
+        openFirewallPorts: Bool = true,
+        notes: String = ""
+    ) {
+        self.externalURL = externalURL
+        self.edition = edition
+        self.installMethod = installMethod
+        self.openFirewallPorts = openFirewallPorts
+        self.notes = notes
+    }
+}
+
+enum GitLabPreflightCheckStatus: String, Codable, CaseIterable, Identifiable, Sendable {
+    case passed
+    case warning
+    case failed
+
+    var id: String { rawValue }
+}
+
+struct GitLabPreflightCheck: Identifiable, Codable, Equatable, Hashable, Sendable {
+    var id: String
+    var title: String
+    var status: GitLabPreflightCheckStatus
+    var detail: String
+    var remediation: String?
+}
+
+struct GitLabPreflightReport: Codable, Equatable, Hashable, Sendable {
+    var checks: [GitLabPreflightCheck]
+    var detectedOS: String?
+    var existingVersion: String?
+    var generatedAt: Date
+
+    var isReady: Bool {
+        !checks.contains { $0.status == .failed }
+    }
+
+    var warnings: [GitLabPreflightCheck] {
+        checks.filter { $0.status == .warning }
+    }
+}
+
+struct GitLabInstallResult: Codable, Equatable, Hashable, Sendable {
+    var instance: GitLabServiceInstance
+    var healthCheckOutput: String
+    var statusOutput: String
+}
+
+struct GitLabStatusSnapshot: Codable, Equatable, Hashable, Sendable {
+    var installed: Bool
+    var version: String?
+    var status: String
+    var externalURL: String?
+    var webReachable: Bool
+    var rootPasswordHint: String
+    var recentLogs: String
+    var capturedAt: Date
+}
+
+enum GitLabServiceAction: String, CaseIterable, Identifiable, Codable, Sendable {
+    case start
+    case stop
+    case restart
+    case reconfigure
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .start:
+            L10n.string("Start")
+        case .stop:
+            L10n.string("Stop")
+        case .restart:
+            L10n.string("Restart")
+        case .reconfigure:
+            L10n.string("Reconfigure")
+        }
+    }
+}
+
+struct GitLabServiceActionResult: Codable, Equatable, Hashable, Sendable {
+    var action: GitLabServiceAction
+    var output: String
+    var snapshot: GitLabStatusSnapshot
+}
+
+struct GiteaInstallDraft: Codable, Equatable, Hashable, Sendable {
+    var externalURL: String
+    var installPath: String
+    var dataPath: String
+    var serviceName: String
+    var listenPort: Int
+
+    init(
+        externalURL: String = "http://",
+        installPath: String = "/usr/local/bin/gitea",
+        dataPath: String = "/var/lib/gitea",
+        serviceName: String = "gitea",
+        listenPort: Int = 3000
+    ) {
+        self.externalURL = externalURL
+        self.installPath = installPath
+        self.dataPath = dataPath
+        self.serviceName = serviceName
+        self.listenPort = listenPort
+    }
+}
+
+struct GiteaInstallResult: Codable, Equatable, Hashable, Sendable {
+    var externalURL: String
+    var version: String?
+    var status: String
+}
+
 struct PubHostedRepositoryDraft: Codable, Equatable, Hashable, Sendable {
     var hostedURL: String
     var packageName: String
@@ -929,18 +1101,18 @@ enum RemoteOperationRiskFactory {
     }
 
     static func deploymentRollback(project: DeploymentProject, run: DeploymentRun) -> RemoteOperationRisk {
-        let targetCommit = run.previousCommit ?? "previous commit"
+        let targetCommit = run.previousCommit ?? L10n.string("previous commit")
         return RemoteOperationRisk(
             id: "deployment-rollback-\(project.id)-\(run.id)",
             level: .high,
-            title: "Rollback Deployment",
+            title: L10n.string("Rollback Deployment"),
             target: "\(project.name) -> \(targetCommit)",
             commandPreview: "git checkout \(targetCommit) && git reset --hard \(targetCommit)",
             impact: [
-                "The deployment working tree will be reset to the selected previous commit.",
-                "Configured build, restart, and health check commands will run again.",
+                L10n.string("The deployment working tree will be reset to the selected previous commit."),
+                L10n.string("Configured build, restart, and health check commands will run again."),
             ],
-            recovery: "Run a new deployment from the target branch if the rollback needs to be undone.",
+            recovery: L10n.string("Run a new deployment from the target branch if the rollback needs to be undone."),
             auditTargetType: "deployment",
             auditAction: "rollback"
         )
@@ -950,14 +1122,14 @@ enum RemoteOperationRiskFactory {
         RemoteOperationRisk(
             id: "deployment-run-\(project.id)-\(project.updatedAt.timeIntervalSince1970)",
             level: .high,
-            title: "Run Deployment",
+            title: L10n.string("Run Deployment"),
             target: "\(project.name) -> \(project.deployPath)",
             commandPreview: plan.commandPreview,
             impact: [
-                "The deployment working tree may be cloned, fetched, checked out, and reset.",
-                "Configured build, restart, and health check commands will run on the remote server.",
+                L10n.string("The deployment working tree may be cloned, fetched, checked out, and reset."),
+                L10n.string("Configured build, restart, and health check commands will run on the remote server."),
             ],
-            recovery: "Use rollback from a completed run if the deployment needs to be reverted.",
+            recovery: L10n.string("Use rollback from a completed run if the deployment needs to be reverted."),
             auditTargetType: "deployment",
             auditAction: "deploy"
         )
@@ -994,6 +1166,39 @@ enum RemoteOperationRiskFactory {
             recovery: "Restore the backed up systemd unit and restart Verdaccio if the upgrade needs to be reverted.",
             auditTargetType: "registry",
             auditAction: "upgrade"
+        )
+    }
+
+    static func installGitLab(draft: GitLabInstallDraft) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "gitlab-install-\(draft.edition.rawValue)-\(draft.externalURL.trimmingCharacters(in: .whitespacesAndNewlines))",
+            level: .critical,
+            title: L10n.string("Install GitLab"),
+            target: draft.externalURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            commandPreview: (try? GitLabInstaller.installCommand(for: draft)) ?? L10n.string("Validate GitLab settings before previewing install commands."),
+            impact: [
+                L10n.string("The GitLab Linux package repository will be configured on the remote server."),
+                L10n.format("The %@ package will be installed and configured for the selected external URL.", draft.edition.packageName),
+                L10n.string("Ports 22, 80, and 443 may be used by GitLab or its bundled services."),
+            ],
+            recovery: L10n.string("Review /etc/gitlab/gitlab.rb, gitlab-ctl status, and package manager logs before retrying or uninstalling GitLab manually."),
+            auditTargetType: "gitlab_service",
+            auditAction: "install"
+        )
+    }
+
+    static func gitLabServiceAction(_ action: GitLabServiceAction, draft: GitLabInstallDraft) -> RemoteOperationRisk {
+        let level: RemoteOperationRiskLevel = action == .stop ? .high : .medium
+        return RemoteOperationRisk(
+            id: "gitlab-service-\(action.rawValue)-\(draft.externalURL.trimmingCharacters(in: .whitespacesAndNewlines))",
+            level: level,
+            title: L10n.format("%@ GitLab", action.displayName),
+            target: draft.externalURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            commandPreview: GitLabManager.serviceActionCommand(action),
+            impact: [L10n.string("The GitLab service state or generated configuration will change on the remote server.")],
+            recovery: L10n.string("Use gitlab-ctl status and recent logs to inspect the result, then run another service action if needed."),
+            auditTargetType: "gitlab_service",
+            auditAction: action.rawValue
         )
     }
 

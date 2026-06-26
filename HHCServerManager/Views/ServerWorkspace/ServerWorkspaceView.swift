@@ -30,6 +30,9 @@ struct ServerWorkspaceView: View {
     @State private var pendingVerdaccioRestore = false
     @State private var pendingVerdaccioProxyReload = false
     @State private var pendingRegistryRisk: RegistryRiskRequest?
+    @State private var pendingGitLabInstall = false
+    @State private var pendingGiteaInstall = false
+    @State private var pendingGitLabServiceAction: GitLabServiceAction?
     @State private var securityGroupDraftDirection: CloudSecurityGroupRuleDirection = .ingress
     @State private var securityGroupDraftProtocol = "TCP"
     @State private var securityGroupDraftPort = "22"
@@ -63,8 +66,10 @@ struct ServerWorkspaceView: View {
                     .tag("firewall")
                 Label(L10n.string("Security Groups"), systemImage: "lock.shield")
                     .tag("securityGroups")
-                Label(L10n.string("Deployments"), systemImage: "arrow.down.doc")
+                Label(L10n.string("Project Deployments"), systemImage: "arrow.down.doc")
                     .tag("deployments")
+                Label(L10n.string("Development Services"), systemImage: "hammer")
+                    .tag("gitlab")
                 Label(L10n.string("Registries"), systemImage: "shippingbox")
                     .tag("registries")
                 Label(L10n.string("Audit"), systemImage: "list.bullet.rectangle")
@@ -284,6 +289,43 @@ struct ServerWorkspaceView: View {
             Text(verdaccioProxyReloadConfirmationMessage)
         }
         .alert(item: $pendingRegistryRisk, content: registryRiskAlert)
+        .alert(gitLabInstallAlertTitle, isPresented: $pendingGitLabInstall) {
+            Button(L10n.string("Cancel"), role: .cancel) {}
+            Button(L10n.string("Install"), role: .destructive) {
+                viewModel.installGitLab(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    gitLabInstaller: appState.gitLabInstaller,
+                    gitLabManager: appState.gitLabManager,
+                    repository: appState.repository
+                )
+            }
+        } message: {
+            Text(gitLabInstallConfirmationMessage)
+        }
+        .alert(L10n.string("Install Gitea?"), isPresented: $pendingGiteaInstall) {
+            Button(L10n.string("Cancel"), role: .cancel) {}
+            Button(L10n.string("Install"), role: .destructive) {
+                viewModel.installGitea(
+                    profile: profile,
+                    sshClient: appState.sshClient,
+                    repository: appState.repository
+                )
+            }
+        } message: {
+            Text(giteaInstallConfirmationMessage)
+        }
+        .alert(item: $pendingGitLabServiceAction) { action in
+            let risk = RemoteOperationRiskFactory.gitLabServiceAction(action, draft: viewModel.gitLabDraft)
+            return Alert(
+                title: Text(L10n.format("%@ GitLab?", action.displayName)),
+                message: Text(risk.confirmationMessage),
+                primaryButton: action == .stop || action == .restart || action == .reconfigure
+                    ? .destructive(Text(action.displayName)) { performGitLabServiceAction(action) }
+                    : .default(Text(action.displayName)) { performGitLabServiceAction(action) },
+                secondaryButton: .cancel()
+            )
+        }
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
                 entry: entry,
@@ -359,6 +401,7 @@ struct ServerWorkspaceView: View {
             viewModel.loadCommandHistory(profile: profile, repository: appState.repository)
             viewModel.loadCachedDashboardSnapshot(profile: profile, repository: appState.repository)
             viewModel.loadRemoteFileTransferHistory(profile: profile, repository: appState.repository)
+            viewModel.loadGitLabServiceInstance(profile: profile, repository: appState.repository)
         }
         .onDisappear {
             viewModel.stopDashboardAutoRefresh()
@@ -385,6 +428,8 @@ struct ServerWorkspaceView: View {
             securityGroupsPanel
         case "deployments":
             deploymentsPanel
+        case "gitlab":
+            gitLabServicePanel
         case "registries":
             registriesPanel
         case "audit":
@@ -663,7 +708,7 @@ struct ServerWorkspaceView: View {
         HSplitView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Deployments")
+                    Text(L10n.string("Project Deployments"))
                         .font(.title2.weight(.semibold))
                     Spacer()
                     Button {
@@ -671,14 +716,14 @@ struct ServerWorkspaceView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
-                    .help("New deployment project")
+                    .help(L10n.string("New deployment project"))
                 }
 
                 if viewModel.deploymentProjects.isEmpty {
                     ContentUnavailableView(
-                        "No Deployment Projects",
+                        L10n.string("No Deployment Projects"),
                         systemImage: "arrow.down.doc",
-                        description: Text("Create a project to deploy a GitLab repository over SSH.")
+                        description: Text(L10n.string("Create a project to deploy a Git repository over SSH. This is for app releases, not GitLab server installation."))
                     )
                     .frame(maxWidth: .infinity, minHeight: 180)
                 } else {
@@ -894,6 +939,495 @@ struct ServerWorkspaceView: View {
             .orange
         default:
             .secondary
+        }
+    }
+
+    private var gitLabServicePanel: some View {
+        ViewThatFits(in: .vertical) {
+            gitLabCompactPanel
+            gitLabScrollableFallbackPanel
+        }
+        .onAppear {
+            viewModel.loadGitLabServiceInstance(profile: profile, repository: appState.repository)
+        }
+    }
+
+    private var gitLabCompactPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            gitLabHeaderBar
+            gitLabFeedbackBanner
+
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 14) {
+                    developmentServiceRecommendationsSection
+                    gitLabInstallSettingsSection
+                    gitLabPreflightSection
+                }
+                .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    gitLabStatusSection
+                    gitLabServiceActionsSection
+                    gitLabBackupPreviewSection
+                }
+                .frame(minWidth: 340, idealWidth: 420, maxWidth: 500, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var gitLabHeaderBar: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.string("Development Services"))
+                    .font(.title2.weight(.semibold))
+                Text(viewModel.gitLabDraft.externalURL)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Text(L10n.string("Choose code hosting, automation, and package services based on this server. Recommendations explain risk; deployment remains your decision."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer()
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.runGitLabPreflight(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        gitLabInstaller: appState.gitLabInstaller
+                    )
+                } label: {
+                    if viewModel.isRunningGitLabPreflight {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label(L10n.string("Preflight"), systemImage: "checklist")
+                    }
+                }
+                .disabled(isGitLabBusy || !isGitLabDraftValid)
+
+                Button {
+                    pendingGitLabInstall = true
+                } label: {
+                    if viewModel.isInstallingGitLab {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label(viewModel.gitLabPreflightReport?.isReady == false ? L10n.string("Force Install") : L10n.string("Install"), systemImage: "arrow.down.circle")
+                    }
+                }
+                .disabled(isGitLabBusy || !isGitLabDraftValid || !hasGitLabPreflightReport)
+
+                Button {
+                    viewModel.loadGitLabStatus(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        gitLabManager: appState.gitLabManager,
+                        repository: appState.repository
+                    )
+                } label: {
+                    if viewModel.isLoadingGitLabStatus {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label(L10n.string("Refresh"), systemImage: "arrow.clockwise")
+                    }
+                }
+                .disabled(isGitLabBusy || !isGitLabDraftValid)
+
+                Button {
+                    viewModel.openGitLabInBrowser()
+                } label: {
+                    Label(L10n.string("Open"), systemImage: "safari")
+                }
+                .disabled(!isGitLabDraftValid)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var gitLabFeedbackBanner: some View {
+        if let message = viewModel.gitLabActionMessage {
+            Label(message, systemImage: "checkmark.circle")
+                .foregroundStyle(.green)
+                .font(.caption)
+        }
+        if let error = viewModel.gitLabErrorMessage {
+            Label(error, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .font(.caption)
+        }
+    }
+
+    private var gitLabScrollableFallbackPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                gitLabHeaderBar
+                gitLabFeedbackBanner
+                developmentServiceRecommendationsSection
+                gitLabInstallSettingsSection
+                gitLabPreflightSection
+                gitLabStatusSection
+                gitLabServiceActionsSection
+                gitLabBackupPreviewSection
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var developmentServiceRecommendationsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.string("Recommended Stack"))
+                .font(.headline)
+            LazyVGrid(columns: [
+                GridItem(.flexible(minimum: 170), spacing: 8),
+                GridItem(.flexible(minimum: 170), spacing: 8),
+            ], alignment: .leading, spacing: 8) {
+                developmentServiceRecommendationCard(
+                    title: "Gitea",
+                    subtitle: L10n.string("Lightweight private Git hosting"),
+                    status: .recommended,
+                    detail: L10n.string("Best fit for 2G/4G self-use servers.")
+                )
+                developmentServiceRecommendationCard(
+                    title: "Gitea Actions",
+                    subtitle: L10n.string("Automation runner"),
+                    status: gitLabRecommendationStatus == .recommended ? .allowed : .recommended,
+                    detail: L10n.string("Use light jobs locally; run heavy builds on another runner.")
+                )
+                developmentServiceRecommendationCard(
+                    title: "Verdaccio",
+                    subtitle: L10n.string("Private npm registry"),
+                    status: .recommended,
+                    detail: L10n.string("Already supported in Registries; suitable for small servers.")
+                )
+                developmentServiceRecommendationCard(
+                    title: "GitLab CE",
+                    subtitle: L10n.string("Full DevOps platform"),
+                    status: gitLabRecommendationStatus,
+                    detail: gitLabRecommendationDetail
+                )
+            }
+            HStack(spacing: 8) {
+                Button {
+                    pendingGiteaInstall = true
+                } label: {
+                    if viewModel.isInstallingGitea {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label(L10n.string("Install Gitea"), systemImage: "arrow.down.circle")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isInstallingGitea)
+
+                Button {
+                    viewModel.openGiteaInBrowser()
+                } label: {
+                    Label(L10n.string("Open Gitea"), systemImage: "safari")
+                }
+                .disabled((viewModel.giteaInstallResult?.externalURL ?? viewModel.giteaDraft.externalURL).trimmingCharacters(in: .whitespacesAndNewlines) == "http://")
+            }
+
+            if let message = viewModel.giteaActionMessage {
+                Label(message, systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+            if let error = viewModel.giteaErrorMessage {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let result = viewModel.giteaInstallResult {
+                Text(L10n.format("Gitea status: %@%@", result.status, result.version.map { " · \($0)" } ?? ""))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private func developmentServiceRecommendationCard(
+        title: String,
+        subtitle: String,
+        status: DevelopmentServiceRecommendationStatus,
+        detail: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(status.displayName)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(status.color.opacity(0.16), in: Capsule())
+                    .foregroundStyle(status.color)
+            }
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 86, alignment: .topLeading)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var gitLabInstallSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(L10n.string("Install Settings"))
+                    .font(.headline)
+                Spacer()
+                Button {
+                    viewModel.validateGitLabDraftForEditing()
+                } label: {
+                    Label(L10n.string("Validate"), systemImage: isGitLabDraftValid ? "checkmark.circle" : "exclamationmark.triangle")
+                }
+                .disabled(isGitLabBusy)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text(L10n.string("External URL"))
+                        .foregroundStyle(.secondary)
+                    TextField("http://203.0.113.10", text: $viewModel.gitLabDraft.externalURL)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 420)
+                }
+                GridRow {
+                    Text(L10n.string("Edition"))
+                        .foregroundStyle(.secondary)
+                    Picker(L10n.string("Edition"), selection: $viewModel.gitLabDraft.edition) {
+                        ForEach(GitLabServiceEdition.allCases) { edition in
+                            Text(edition.displayName).tag(edition)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 240, alignment: .leading)
+                }
+                GridRow {
+                    Text(L10n.string("Install Method"))
+                        .foregroundStyle(.secondary)
+                    Text(viewModel.gitLabDraft.installMethod.displayName)
+                        .foregroundStyle(.secondary)
+                }
+                GridRow {
+                    Text(L10n.string("Firewall"))
+                        .foregroundStyle(.secondary)
+                    Toggle(L10n.string("Open 22/80/443 when ufw or firewalld is active"), isOn: $viewModel.gitLabDraft.openFirewallPorts)
+                        .toggleStyle(.checkbox)
+                }
+                GridRow {
+                    Text(L10n.string("Notes"))
+                        .foregroundStyle(.secondary)
+                    TextField(L10n.string("Optional local note"), text: $viewModel.gitLabDraft.notes)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 420)
+                }
+            }
+
+            Label(gitLabDraftValidationMessage, systemImage: isGitLabDraftValid ? "checkmark.circle" : "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(isGitLabDraftValid ? Color.secondary : Color.orange)
+        }
+    }
+
+    private var gitLabPreflightSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(L10n.string("Preflight"))
+                    .font(.headline)
+                Spacer()
+                if let report = viewModel.gitLabPreflightReport {
+                    Text(report.isReady ? L10n.string("Ready") : L10n.string("Blocked"))
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background((report.isReady ? Color.green : Color.orange).opacity(0.16), in: Capsule())
+                        .foregroundStyle(report.isReady ? .green : .orange)
+                }
+            }
+
+            if let report = viewModel.gitLabPreflightReport {
+                LazyVGrid(columns: gitLabPreflightGridColumns, alignment: .leading, spacing: 8) {
+                    ForEach(report.checks.sorted(by: gitLabPreflightCheckSort)) { check in
+                        gitLabPreflightCheckCard(check)
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    L10n.string("No Preflight Yet"),
+                    systemImage: "checklist",
+                    description: Text(L10n.string("Run preflight to check the operating system, sudo permission, ports, memory, disk, and existing GitLab installation before installing."))
+                )
+                .frame(maxWidth: .infinity, minHeight: 140)
+            }
+        }
+    }
+
+    private var gitLabPreflightGridColumns: [GridItem] {
+        [
+            GridItem(.flexible(minimum: 220), spacing: 8, alignment: .top),
+            GridItem(.flexible(minimum: 220), spacing: 8, alignment: .top),
+        ]
+    }
+
+    private func gitLabPreflightCheckCard(_ check: GitLabPreflightCheck) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: gitLabPreflightIcon(check.status))
+                .foregroundStyle(gitLabPreflightColor(check.status))
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(check.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text(check.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if let remediation = check.remediation, check.status != .passed {
+                    Text(remediation)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+        .background(gitLabPreflightColor(check.status).opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var gitLabStatusSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.string("Status"))
+                .font(.headline)
+
+            if let snapshot = viewModel.gitLabStatusSnapshot {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                    GridRow {
+                        Text(L10n.string("Installed")).foregroundStyle(.secondary)
+                        Text(snapshot.installed ? L10n.string("Yes") : L10n.string("No"))
+                    }
+                    GridRow {
+                        Text(L10n.string("Status")).foregroundStyle(.secondary)
+                        Text(snapshot.status)
+                    }
+                    GridRow {
+                        Text(L10n.string("Version")).foregroundStyle(.secondary)
+                        Text(snapshot.version ?? L10n.string("unknown"))
+                    }
+                    GridRow {
+                        Text(L10n.string("External URL")).foregroundStyle(.secondary)
+                        Text(snapshot.externalURL ?? viewModel.gitLabDraft.externalURL)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    GridRow {
+                        Text(L10n.string("Web")).foregroundStyle(.secondary)
+                        Text(snapshot.webReachable ? L10n.string("Reachable") : L10n.string("Not reachable yet"))
+                    }
+                    GridRow {
+                        Text(L10n.string("Initial root password")).foregroundStyle(.secondary)
+                        Text(snapshot.rootPasswordHint)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    GridRow {
+                        Text(L10n.string("Captured")).foregroundStyle(.secondary)
+                        Text(snapshot.capturedAt.formatted(date: .abbreviated, time: .standard))
+                    }
+                }
+
+                if !snapshot.recentLogs.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.string("Recent Logs"))
+                            .font(.subheadline.weight(.semibold))
+                        Text(snapshot.recentLogs)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            } else if let instance = viewModel.gitLabServiceInstance {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                    GridRow {
+                        Text(L10n.string("External URL")).foregroundStyle(.secondary)
+                        Text(instance.externalURL)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    GridRow {
+                        Text(L10n.string("Version")).foregroundStyle(.secondary)
+                        Text(instance.installedVersion ?? L10n.string("unknown"))
+                    }
+                    GridRow {
+                        Text(L10n.string("Status")).foregroundStyle(.secondary)
+                        Text(instance.status ?? L10n.string("unknown"))
+                    }
+                }
+            } else {
+                ContentUnavailableView(
+                    L10n.string("No GitLab Status"),
+                    systemImage: "square.stack.3d.up",
+                    description: Text(L10n.string("Install GitLab after preflight, or refresh to read an existing GitLab service on this server."))
+                )
+                .frame(maxWidth: .infinity, minHeight: 140)
+            }
+        }
+    }
+
+    private var gitLabServiceActionsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.string("Service Actions"))
+                .font(.headline)
+
+            HStack(spacing: 8) {
+                ForEach(GitLabServiceAction.allCases) { action in
+                    Button {
+                        pendingGitLabServiceAction = action
+                    } label: {
+                        if viewModel.isControllingGitLabService {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label(action.displayName, systemImage: gitLabServiceActionIcon(action))
+                        }
+                    }
+                    .disabled(isGitLabBusy || !isGitLabDraftValid)
+                }
+            }
+        }
+    }
+
+    private var gitLabBackupPreviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.string("Backup"))
+                .font(.headline)
+            Text(GitLabManager.backupPreviewCommand())
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            Label(L10n.string("v1 only previews the GitLab backup command. Restore is intentionally manual."), systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -1646,7 +2180,7 @@ struct ServerWorkspaceView: View {
     private var deploymentProjectForm: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Project")
+                Text(L10n.string("Deployment Project"))
                     .font(.title2.weight(.semibold))
                 Spacer()
                 Button {
@@ -1660,7 +2194,7 @@ struct ServerWorkspaceView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Label("Save", systemImage: "tray.and.arrow.down")
+                        Label(L10n.string("Save"), systemImage: "tray.and.arrow.down")
                     }
                 }
                 .disabled(viewModel.isSavingDeploymentProject)
@@ -1672,69 +2206,69 @@ struct ServerWorkspaceView: View {
                         serverManagementService: appState.serverManagementService
                     )
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label(L10n.string("Delete"), systemImage: "trash")
                 }
                 .disabled(viewModel.selectedDeploymentProject == nil || viewModel.isRunningDeployment)
             }
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
                 GridRow {
-                    Text("Name").foregroundStyle(.secondary)
+                    Text(L10n.string("Name")).foregroundStyle(.secondary)
                     TextField("Website", text: $viewModel.deploymentName)
                         .textFieldStyle(.roundedBorder)
                 }
                 GridRow {
-                    Text("Repository").foregroundStyle(.secondary)
+                    Text(L10n.string("Repository")).foregroundStyle(.secondary)
                     TextField("git@gitlab.com:team/project.git", text: $viewModel.deploymentRepositoryURL)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
                 }
                 GridRow {
-                    Text("Branch").foregroundStyle(.secondary)
+                    Text(L10n.string("Branch")).foregroundStyle(.secondary)
                     TextField("main", text: $viewModel.deploymentBranch)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
                 }
                 GridRow {
-                    Text("Path").foregroundStyle(.secondary)
+                    Text(L10n.string("Path")).foregroundStyle(.secondary)
                     TextField("/srv/app", text: $viewModel.deploymentPath)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
                 }
                 GridRow {
-                    Text("Build").foregroundStyle(.secondary)
+                    Text(L10n.string("Build")).foregroundStyle(.secondary)
                     TextField("npm ci && npm run build", text: $viewModel.deploymentBuildCommand)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
                 }
                 GridRow {
-                    Text("Restart").foregroundStyle(.secondary)
+                    Text(L10n.string("Restart")).foregroundStyle(.secondary)
                     TextField("systemctl restart app.service", text: $viewModel.deploymentRestartCommand)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
                 }
                 GridRow {
-                    Text("Health Check").foregroundStyle(.secondary)
+                    Text(L10n.string("Health Check")).foregroundStyle(.secondary)
                     TextField("curl -fsS http://127.0.0.1:3000/health", text: $viewModel.deploymentHealthCheckCommand)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
                 }
                 GridRow {
-                    Text("Webhook").foregroundStyle(.secondary)
-                    Toggle("Enable GitLab push webhook", isOn: $viewModel.deploymentWebhookEnabled)
+                    Text(L10n.string("Webhook")).foregroundStyle(.secondary)
+                    Toggle(L10n.string("Enable GitLab push webhook"), isOn: $viewModel.deploymentWebhookEnabled)
                         .toggleStyle(.checkbox)
                 }
                 if viewModel.deploymentWebhookEnabled {
                     GridRow {
-                        Text("Secret").foregroundStyle(.secondary)
+                        Text(L10n.string("Secret")).foregroundStyle(.secondary)
                         SecureField(
-                            viewModel.selectedDeploymentProject?.webhookSecretRef == nil ? "Required token" : "Leave blank to keep existing token",
+                            viewModel.selectedDeploymentProject?.webhookSecretRef == nil ? L10n.string("Required token") : L10n.string("Leave blank to keep existing token"),
                             text: $viewModel.deploymentWebhookSecret
                         )
                         .textFieldStyle(.roundedBorder)
                     }
                     GridRow {
-                        Text("Listener").foregroundStyle(.secondary)
+                        Text(L10n.string("Listener")).foregroundStyle(.secondary)
                         deploymentWebhookListenerControls
                     }
                 }
@@ -1748,7 +2282,7 @@ struct ServerWorkspaceView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Label("Run Deployment", systemImage: "play.fill")
+                        Label(L10n.string("Run Deployment"), systemImage: "play.fill")
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -1757,15 +2291,15 @@ struct ServerWorkspaceView: View {
                 Button {
                     prepareDeploymentRollback()
                 } label: {
-                    Label("Rollback", systemImage: "arrow.uturn.backward")
+                    Label(L10n.string("Rollback"), systemImage: "arrow.uturn.backward")
                 }
                 .disabled(viewModel.isRunningDeployment || viewModel.selectedDeploymentRun?.previousCommit == nil)
-                .help("Roll back to the previous commit captured by the selected run")
+                .help(L10n.string("Roll back to the previous commit captured by the selected run"))
 
                 Button {
                     viewModel.cancelDeployment()
                 } label: {
-                    Label("Cancel", systemImage: "stop.fill")
+                    Label(L10n.string("Cancel"), systemImage: "stop.fill")
                 }
                 .disabled(!viewModel.isRunningDeployment)
             }
@@ -1781,17 +2315,17 @@ struct ServerWorkspaceView: View {
     private var deploymentCommandPreview: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Command Preview")
+                Text(L10n.string("Command Preview"))
                     .font(.headline)
                 Spacer()
                 if let root = viewModel.deploymentCommandPlan?.allowedRoot {
-                    Text("Allowed root: \(root)")
+                    Text(L10n.format("Allowed root: %@", root))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            Text(viewModel.deploymentCommandPlan?.commandPreview ?? "Save a valid deployment configuration to preview commands.")
+            Text(viewModel.deploymentCommandPlan?.commandPreview ?? L10n.string("Save a valid deployment configuration to preview commands."))
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
                 .padding(12)
@@ -1813,13 +2347,13 @@ struct ServerWorkspaceView: View {
                     Button {
                         viewModel.stopDeploymentWebhookListener(appState.deploymentWebhookHTTPServer)
                     } label: {
-                        Label("Stop", systemImage: "stop.fill")
+                        Label(L10n.string("Stop"), systemImage: "stop.fill")
                     }
                 } else {
                     Button {
                         viewModel.startDeploymentWebhookListener(appState.deploymentWebhookHTTPServer)
                     } label: {
-                        Label("Start", systemImage: "dot.radiowaves.left.and.right")
+                        Label(L10n.string("Start"), systemImage: "dot.radiowaves.left.and.right")
                     }
                 }
             }
@@ -1831,7 +2365,7 @@ struct ServerWorkspaceView: View {
                     .textSelection(.enabled)
             }
 
-            Label("Automatic deployment only works while this Mac app is running and the listener is started.", systemImage: "info.circle")
+            Label(L10n.string("Automatic deployment only works while this Mac app is running and the listener is started."), systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1839,18 +2373,18 @@ struct ServerWorkspaceView: View {
 
     private var deploymentRunHistory: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Runs")
+            Text(L10n.string("Runs"))
                 .font(.headline)
 
             if viewModel.deploymentRuns.isEmpty {
                 ContentUnavailableView(
-                    "No Runs Yet",
+                    L10n.string("No Runs Yet"),
                     systemImage: "clock",
-                    description: Text("Run a deployment to capture status, commits, and logs.")
+                    description: Text(L10n.string("Run a deployment to capture status, commits, and logs."))
                 )
                 .frame(maxWidth: .infinity, minHeight: 160)
             } else {
-                Picker("Run", selection: deploymentRunSelectionBinding) {
+                Picker(L10n.string("Run"), selection: deploymentRunSelectionBinding) {
                     ForEach(viewModel.deploymentRuns) { run in
                         Text(deploymentRunTitle(run)).tag(Optional(run.id))
                     }
@@ -1864,40 +2398,40 @@ struct ServerWorkspaceView: View {
                         Button {
                             viewModel.copySelectedDeploymentRunReportToPasteboard(profile: profile)
                         } label: {
-                            Label("Copy Run Report", systemImage: "doc.on.doc")
+                            Label(L10n.string("Copy Run Report"), systemImage: "doc.on.doc")
                         }
                     }
 
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                         GridRow {
-                            Text("Status").foregroundStyle(.secondary)
+                            Text(L10n.string("Status")).foregroundStyle(.secondary)
                             deploymentStatusBadge(run.status)
                         }
                         GridRow {
-                            Text("Started").foregroundStyle(.secondary)
+                            Text(L10n.string("Started")).foregroundStyle(.secondary)
                             Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
                         }
                         if let finishedAt = run.finishedAt {
                             GridRow {
-                                Text("Finished").foregroundStyle(.secondary)
+                                Text(L10n.string("Finished")).foregroundStyle(.secondary)
                                 Text(finishedAt.formatted(date: .abbreviated, time: .shortened))
                             }
                         }
                         if let previousCommit = run.previousCommit {
                             GridRow {
-                                Text("Previous").foregroundStyle(.secondary)
+                                Text(L10n.string("Previous")).foregroundStyle(.secondary)
                                 Text(previousCommit).font(.system(.body, design: .monospaced))
                             }
                         }
                         if let targetCommit = run.targetCommit {
                             GridRow {
-                                Text("Target").foregroundStyle(.secondary)
+                                Text(L10n.string("Target")).foregroundStyle(.secondary)
                                 Text(targetCommit).font(.system(.body, design: .monospaced))
                             }
                         }
                         if let summary = run.summary {
                             GridRow {
-                                Text("Summary").foregroundStyle(.secondary)
+                                Text(L10n.string("Summary")).foregroundStyle(.secondary)
                                 Text(summary)
                             }
                         }
@@ -1912,17 +2446,17 @@ struct ServerWorkspaceView: View {
     private var deploymentLogView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Logs")
+                Text(L10n.string("Logs"))
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 if viewModel.isRunningDeployment {
-                    Label("Live", systemImage: "dot.radiowaves.left.and.right")
+                    Label(L10n.string("Live"), systemImage: "dot.radiowaves.left.and.right")
                         .font(.caption)
                         .foregroundStyle(.blue)
                 }
             }
             if viewModel.deploymentLogs.isEmpty {
-                Text("No logs captured for this run.")
+                Text(L10n.string("No logs captured for this run."))
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(viewModel.deploymentLogs) { entry in
@@ -3840,6 +4374,144 @@ struct ServerWorkspaceView: View {
             viewModel.isUpgradingVerdaccio
     }
 
+    private var isGitLabBusy: Bool {
+        viewModel.isRunningGitLabPreflight ||
+            viewModel.isInstallingGitLab ||
+            viewModel.isLoadingGitLabStatus ||
+            viewModel.isControllingGitLabService
+    }
+
+    private var isGitLabPreflightReady: Bool {
+        viewModel.gitLabPreflightReport?.isReady == true
+    }
+
+    private var hasGitLabPreflightReport: Bool {
+        viewModel.gitLabPreflightReport != nil
+    }
+
+    private var gitLabInstallAlertTitle: String {
+        if viewModel.gitLabPreflightReport?.isReady == false {
+            return L10n.string("Force Install GitLab?")
+        }
+        return L10n.string("Install GitLab?")
+    }
+
+    private var gitLabInstallConfirmationMessage: String {
+        let base = RemoteOperationRiskFactory.installGitLab(draft: viewModel.gitLabDraft).confirmationMessage
+        guard viewModel.gitLabPreflightReport?.isReady == false else { return base }
+        let blockers = viewModel.gitLabPreflightReport?.checks
+            .filter { $0.status == .failed }
+            .map(\.title)
+            .joined(separator: ", ") ?? ""
+        return [
+            L10n.format("Preflight still has blocking checks: %@.", blockers),
+            L10n.string("You can force installation, but installation may fail or the service may be unusable."),
+            "",
+            base,
+        ].joined(separator: "\n")
+    }
+
+    private var giteaInstallConfirmationMessage: String {
+        [
+            L10n.string("This will install Gitea as a systemd service on the selected server."),
+            L10n.format("External URL: %@", viewModel.giteaDraft.externalURL),
+            L10n.format("Service: %@.service", viewModel.giteaDraft.serviceName),
+            L10n.format("Listen port: %d", viewModel.giteaDraft.listenPort),
+            L10n.format("Binary: %@", viewModel.giteaDraft.installPath),
+            L10n.format("Data path: %@", viewModel.giteaDraft.dataPath),
+            L10n.string("Gitea uses SQLite by default in this lightweight setup. Finish admin setup in the browser after installation."),
+        ].joined(separator: "\n")
+    }
+
+    private var gitLabRecommendationStatus: DevelopmentServiceRecommendationStatus {
+        guard let report = viewModel.gitLabPreflightReport else { return .needsPreflight }
+        let failedIDs = Set(report.checks.filter { $0.status == .failed }.map(\.id))
+        if !failedIDs.isEmpty {
+            return .forceOnly
+        }
+        return report.warnings.isEmpty ? .recommended : .allowed
+    }
+
+    private var gitLabRecommendationDetail: String {
+        guard let report = viewModel.gitLabPreflightReport else {
+            return L10n.string("Run preflight to evaluate GitLab CE on this server.")
+        }
+        let failedTitles = report.checks.filter { $0.status == .failed }.map(\.title)
+        if !failedTitles.isEmpty {
+            return L10n.format("Not recommended: %@.", failedTitles.joined(separator: ", "))
+        }
+        if !report.warnings.isEmpty {
+            return L10n.string("Allowed with warnings; review ports and resource headroom.")
+        }
+        return L10n.string("Server meets the current GitLab CE preflight checks.")
+    }
+
+    private var isGitLabDraftValid: Bool {
+        (try? GitLabInstaller.validate(viewModel.gitLabDraft)) != nil
+    }
+
+    private var gitLabDraftValidationMessage: String {
+        do {
+            try GitLabInstaller.validate(viewModel.gitLabDraft)
+            return L10n.string("GitLab CE Linux package settings are ready for preflight.")
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func gitLabPreflightIcon(_ status: GitLabPreflightCheckStatus) -> String {
+        switch status {
+        case .passed:
+            "checkmark.circle.fill"
+        case .warning:
+            "exclamationmark.triangle.fill"
+        case .failed:
+            "xmark.octagon.fill"
+        }
+    }
+
+    private func gitLabPreflightColor(_ status: GitLabPreflightCheckStatus) -> Color {
+        switch status {
+        case .passed:
+            .green
+        case .warning:
+            .orange
+        case .failed:
+            .red
+        }
+    }
+
+    private func gitLabPreflightCheckSort(_ lhs: GitLabPreflightCheck, _ rhs: GitLabPreflightCheck) -> Bool {
+        if gitLabPreflightSortRank(lhs.status) == gitLabPreflightSortRank(rhs.status) {
+            return lhs.title < rhs.title
+        }
+        return gitLabPreflightSortRank(lhs.status) < gitLabPreflightSortRank(rhs.status)
+    }
+
+    private func gitLabPreflightSortRank(_ status: GitLabPreflightCheckStatus) -> Int {
+        switch status {
+        case .failed:
+            0
+        case .warning:
+            1
+        case .passed:
+            2
+        }
+    }
+
+    private func gitLabServiceActionIcon(_ action: GitLabServiceAction) -> String {
+        switch action {
+        case .start:
+            "play"
+        case .stop:
+            "stop"
+        case .restart:
+            "arrow.clockwise"
+        case .reconfigure:
+            "wrench.and.screwdriver"
+        }
+    }
+
     private var isRegistryPreflightReady: Bool {
         viewModel.registryPreflightReport?.isReady == true
     }
@@ -3949,6 +4621,16 @@ struct ServerWorkspaceView: View {
             profile: profile,
             sshClient: appState.sshClient,
             verdaccioManager: appState.verdaccioManager,
+            repository: appState.repository
+        )
+    }
+
+    private func performGitLabServiceAction(_ action: GitLabServiceAction) {
+        viewModel.performGitLabServiceAction(
+            action,
+            profile: profile,
+            sshClient: appState.sshClient,
+            gitLabManager: appState.gitLabManager,
             repository: appState.repository
         )
     }
@@ -4131,6 +4813,39 @@ private struct RegistryRiskRequest: Identifiable {
             action: .verdaccioUpgrade,
             risk: RemoteOperationRiskFactory.verdaccioUpgrade(draft: draft)
         )
+    }
+}
+
+private enum DevelopmentServiceRecommendationStatus {
+    case recommended
+    case allowed
+    case needsPreflight
+    case forceOnly
+
+    var displayName: String {
+        switch self {
+        case .recommended:
+            L10n.string("Recommended")
+        case .allowed:
+            L10n.string("Allowed")
+        case .needsPreflight:
+            L10n.string("Needs Preflight")
+        case .forceOnly:
+            L10n.string("Force Only")
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .recommended:
+            .green
+        case .allowed:
+            .blue
+        case .needsPreflight:
+            .secondary
+        case .forceOnly:
+            .orange
+        }
     }
 }
 

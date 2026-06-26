@@ -938,6 +938,50 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func fetchGitLabServiceInstance(serverId: UUID) throws -> GitLabServiceInstance? {
+        try database.query("""
+            SELECT id, server_id, edition, external_url, package_name,
+                   installed_version, status, web_url, created_at, updated_at
+            FROM gitlab_service_instances
+            WHERE server_id = ?
+            LIMIT 1
+        """, bindings: [.text(serverId.uuidString)]) { statement in
+            try Self.mapGitLabServiceInstance(statement)
+        }.first
+    }
+
+    func upsertGitLabServiceInstance(_ instance: GitLabServiceInstance) throws {
+        try database.execute("""
+            INSERT INTO gitlab_service_instances (
+                id, server_id, edition, external_url, package_name,
+                installed_version, status, web_url, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(server_id) DO UPDATE SET
+                edition = excluded.edition,
+                external_url = excluded.external_url,
+                package_name = excluded.package_name,
+                installed_version = excluded.installed_version,
+                status = excluded.status,
+                web_url = excluded.web_url,
+                updated_at = excluded.updated_at
+        """, bindings: [
+            .text(instance.id.uuidString),
+            .text(instance.serverId.uuidString),
+            .text(instance.edition.rawValue),
+            .text(instance.externalURL),
+            .text(instance.packageName),
+            instance.installedVersion.map(SQLiteValue.text) ?? .null,
+            instance.status.map(SQLiteValue.text) ?? .null,
+            instance.webURL.map(SQLiteValue.text) ?? .null,
+            .text(AppDatabase.string(from: instance.createdAt)),
+            .text(AppDatabase.string(from: instance.updatedAt)),
+        ])
+    }
+
+    func deleteGitLabServiceInstance(serverId: UUID) throws {
+        try database.execute("DELETE FROM gitlab_service_instances WHERE server_id = ?", bindings: [.text(serverId.uuidString)])
+    }
+
     private static func mapServer(_ statement: OpaquePointer) throws -> ServerProfile {
         let id = UUID(uuidString: string(statement, 0)) ?? UUID()
         let authType = SSHAuthType(rawValue: string(statement, 5)) ?? .privateKey
@@ -1234,6 +1278,21 @@ final class ServerRepository: @unchecked Sendable {
             createdAt: date(statement, 5),
             restoredAt: optionalDate(statement, 6),
             message: optionalString(statement, 7)
+        )
+    }
+
+    private static func mapGitLabServiceInstance(_ statement: OpaquePointer) throws -> GitLabServiceInstance {
+        GitLabServiceInstance(
+            id: UUID(uuidString: string(statement, 0)) ?? UUID(),
+            serverId: UUID(uuidString: string(statement, 1)) ?? UUID(),
+            edition: GitLabServiceEdition(rawValue: string(statement, 2)) ?? .ce,
+            externalURL: string(statement, 3),
+            packageName: string(statement, 4),
+            installedVersion: optionalString(statement, 5),
+            status: optionalString(statement, 6),
+            webURL: optionalString(statement, 7),
+            createdAt: date(statement, 8),
+            updatedAt: date(statement, 9)
         )
     }
 
