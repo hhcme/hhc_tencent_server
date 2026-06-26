@@ -107,6 +107,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var verdaccioBackupResult: VerdaccioRegistryBackupResult?
     @Published var verdaccioRestoreResult: VerdaccioRegistryRestoreResult?
     @Published var verdaccioUserMutationResult: VerdaccioUserMutationResult?
+    @Published var verdaccioConfigPolicyDraft = VerdaccioConfigPolicy()
+    @Published var verdaccioConfigSaveResult: VerdaccioConfigSaveResult?
     @Published var verdaccioProxyDraft = VerdaccioNginxProxyDraft(serverName: "_")
     @Published var verdaccioProxyUpsertResult: NginxConfigUpsertResult?
     @Published var verdaccioNpmSmokeTestResult: VerdaccioNpmSmokeTestResult?
@@ -125,6 +127,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isCreatingVerdaccioBackup = false
     @Published var isRestoringVerdaccioBackup = false
     @Published var isMutatingVerdaccioUser = false
+    @Published var isSavingVerdaccioConfigPolicy = false
     @Published var isWritingVerdaccioProxy = false
     @Published var isReloadingVerdaccioProxy = false
     @Published var isRunningVerdaccioNpmSmokeTest = false
@@ -220,6 +223,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         isCreatingVerdaccioBackup = false
         isRestoringVerdaccioBackup = false
         isMutatingVerdaccioUser = false
+        isSavingVerdaccioConfigPolicy = false
         isWritingVerdaccioProxy = false
         isReloadingVerdaccioProxy = false
         isRunningVerdaccioNpmSmokeTest = false
@@ -279,6 +283,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         verdaccioBackupResult = nil
         verdaccioRestoreResult = nil
         verdaccioUserMutationResult = nil
+        verdaccioConfigPolicyDraft = VerdaccioConfigPolicy()
+        verdaccioConfigSaveResult = nil
         verdaccioProxyUpsertResult = nil
         verdaccioNpmSmokeTestResult = nil
         verdaccioServiceActionResult = nil
@@ -2345,6 +2351,13 @@ final class ServerWorkspaceViewModel: ObservableObject {
         ].joined(separator: "\n")
     }
 
+    private static func verdaccioConfigPolicySnapshot(_ policy: VerdaccioConfigPolicy) -> String {
+        [
+            "upstreamRegistryURL=\(policy.upstreamRegistryURL.trimmingCharacters(in: .whitespacesAndNewlines))",
+            "accessMode=\(policy.accessMode.rawValue)",
+        ].joined(separator: "\n")
+    }
+
     @discardableResult
     func validateRegistryDraftForEditing() -> Bool {
         do {
@@ -2502,6 +2515,70 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isLoadingVerdaccioPackages = false
+                }
+            }
+        }
+    }
+
+    func saveVerdaccioConfigPolicy(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager,
+        repository: ServerRepository
+    ) {
+        guard !isSavingVerdaccioConfigPolicy else { return }
+        guard validateRegistryDraftForEditing() else { return }
+        do {
+            try VerdaccioConfigurationBuilder.validate(verdaccioConfigPolicyDraft)
+        } catch {
+            registryActionMessage = nil
+            registryErrorMessage = error.localizedDescription
+            return
+        }
+        isSavingVerdaccioConfigPolicy = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+
+        Task {
+            do {
+                let policy = verdaccioConfigPolicyDraft
+                let result = try await verdaccioManager.saveGeneratedConfig(
+                    draft: registryDraft,
+                    policy: policy,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: result.path,
+                    action: "verdaccio-config-policy",
+                    beforeSnapshot: "backup=\(result.backupPath)",
+                    afterSnapshot: Self.verdaccioConfigPolicySnapshot(policy),
+                    status: "success",
+                    message: "Saved Verdaccio access policy and restarted \(registryDraft.serviceName).service."
+                )
+                await MainActor.run {
+                    self.verdaccioConfigSaveResult = result
+                    self.registryActionMessage = "Saved Verdaccio access policy and restarted \(self.registryDraft.serviceName).service."
+                    self.isSavingVerdaccioConfigPolicy = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: "\(registryDraft.installPath.trimmingCharacters(in: .whitespacesAndNewlines))/config.yaml",
+                    action: "verdaccio-config-policy",
+                    beforeSnapshot: nil,
+                    afterSnapshot: Self.verdaccioConfigPolicySnapshot(verdaccioConfigPolicyDraft),
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isSavingVerdaccioConfigPolicy = false
                 }
             }
         }

@@ -70,10 +70,10 @@ CREATE TABLE registry_backups (
 
 ## 6. UI 范围
 
-- 工作台新增“包仓库”页：已接入 macOS Registries section，支持 Verdaccio preflight、安装、状态、用户管理、包列表、备份/恢复入口和 Nginx proxy 写入/reload 入口。
+- 工作台新增“包仓库”页：已接入 macOS Registries section，支持 Verdaccio preflight、安装、状态、上游 registry / access policy 编辑保存、用户管理、包列表、备份/恢复入口和 Nginx proxy 写入/reload 入口。
 - 安装向导：类型、路径、端口、访问范围、服务名；macOS Registries 工作台已接入 Verdaccio 安装参数编辑区，可修改名称、固定版本、安装路径、数据路径、监听地址/端口和 systemd service 名称，并在 preflight / install 前阻止非法草稿触发远端动作。
 - Verdaccio 状态卡：版本、运行状态、端口、storage 占用、最近日志。
-- 用户和权限配置入口：已接入 htpasswd 用户创建、改密、确认删除和 npm publish/install smoke test；包权限策略仍由配置生成层控制，后续再开放高级 UI。
+- 用户和权限配置入口：已接入 htpasswd 用户创建、改密、确认删除和 npm publish/install smoke test；包权限策略已开放 macOS Access Policy UI，可在公开读/登录发布和登录读写之间切换，并通过受控配置生成、保存前备份和重启流程写入 `config.yaml`。
 - 包列表和搜索：当前已接入基于 Verdaccio storage metadata 的包摘要列表。
 - 备份、恢复、升级按钮：已接入备份创建、带危险确认的恢复入口，以及固定版本 systemd unit 升级入口。
 - Dart/Flutter pub 区域先展示技术验证状态，验证完成后再开放安装：当前已提供外部 Hosted Pub Repository 配置助手，可生成 `pubspec.yaml` dependency、`publish_to`、token 命令和 publish/get 命令。
@@ -107,6 +107,7 @@ CREATE TABLE registry_backups (
 - [x] 列出私有包：已基于 Verdaccio storage 下 package metadata 生成包名、版本数量、latest version、大小和更新时间摘要。
 - [x] npm publish/install smoke test：已提供受控临时 scoped package 发布、安装回读、`require` 验证和退出清理流程；明文密码不进入 shell 命令字符串，真实测试服务器已完成 publish/install/require 验收。当前实现用临时 `.npmrc` 写入运行期生成的 `_auth`，避开部分 npm CLI 在非交互 `adduser` 下的不稳定行为。
 - [x] 修改上游 registry 配置：已支持通过 `VerdaccioConfigPolicy` 生成受控 uplink URL，并复用保存前备份和重启流程。
+- [x] 工作台配置策略编辑：macOS Access Policy UI 已接入 upstream URL 和 package access/publish mode，保存后写入生成的 `config.yaml`、创建备份、重启服务并写入远程变更审计。
 - [x] 保存配置前备份：已支持读取/保存 `config.yaml`，保存前创建 `.hhc-backup-*` 备份并重启服务；真实测试服务器已验证配置修改前备份和重启后健康检查。
 
 ### Task 4：反向代理
@@ -139,6 +140,7 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 安装命令和 health check 状态机测试。
 - [x] Verdaccio 状态、日志脱敏和配置保存前备份测试。
 - [x] Verdaccio 上游 registry 和权限策略配置生成/保存测试。
+- [x] macOS Registries 配置策略保存测试，覆盖生成配置写入、service restart 和 `remote_change_logs` 审计。
 - [x] Verdaccio 用户创建、改密、删除命令层测试，覆盖 htpasswd 依赖、备份、重启、远程变更审计和明文密码不进入命令字符串。
 - [x] Verdaccio npm smoke test harness 测试，覆盖临时包发布、安装、`require` marker 解析、非法 email 拒绝和明文密码不进入命令字符串。
 - [x] Verdaccio 服务控制和升级测试，覆盖受控 systemd action、unit 备份、固定版本 unit 写入、health check、状态刷新和审计日志。

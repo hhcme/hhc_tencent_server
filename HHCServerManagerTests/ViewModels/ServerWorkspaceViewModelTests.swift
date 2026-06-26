@@ -2509,6 +2509,44 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(logs.allSatisfy { $0.status == "success" })
     }
 
+    func testPrivateRegistriesWorkspaceSavesGeneratedConfigPolicyAndAuditsChange() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let viewModel = ServerWorkspaceViewModel()
+        let client = RegistryViewModelMockSSHClient()
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.verdaccioConfigPolicyDraft = VerdaccioConfigPolicy(
+            upstreamRegistryURL: "https://registry.npmmirror.com/",
+            accessMode: .authenticatedReadAndPublish
+        )
+        viewModel.saveVerdaccioConfigPolicy(
+            profile: profile,
+            sshClient: client,
+            verdaccioManager: manager,
+            repository: repository
+        )
+        try await waitUntil { viewModel.isSavingVerdaccioConfigPolicy == false && viewModel.verdaccioConfigSaveResult != nil }
+
+        let expectedConfig = try VerdaccioConfigurationBuilder.configurationYAML(
+            for: VerdaccioInstallDraft(),
+            policy: viewModel.verdaccioConfigPolicyDraft
+        )
+        XCTAssertEqual(viewModel.verdaccioConfigSaveResult?.path, "/srv/verdaccio/config.yaml")
+        XCTAssertTrue(viewModel.verdaccioConfigSaveResult?.backupPath.hasPrefix("/srv/verdaccio/config.yaml.hhc-backup-") == true)
+        XCTAssertTrue(viewModel.registryActionMessage?.contains("Saved Verdaccio access policy") == true)
+        XCTAssertTrue(client.commands.contains { $0.contains(Data(expectedConfig.utf8).base64EncodedString()) })
+        XCTAssertTrue(client.commands.contains { $0.contains("systemctl restart \"$service\"") })
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.first?.targetType, "registry")
+        XCTAssertEqual(logs.first?.action, "verdaccio-config-policy")
+        XCTAssertEqual(logs.first?.status, "success")
+        XCTAssertTrue(logs.first?.beforeSnapshot?.contains("backup=/srv/verdaccio/config.yaml.hhc-backup-") == true)
+        XCTAssertTrue(logs.first?.afterSnapshot?.contains("upstreamRegistryURL=https://registry.npmmirror.com/") == true)
+        XCTAssertTrue(logs.first?.afterSnapshot?.contains("accessMode=authenticatedReadAndPublish") == true)
+    }
+
     func testPrivateRegistriesWorkspaceManagesVerdaccioUsers() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)

@@ -1949,9 +1949,20 @@ struct VerdaccioInstallDraft: Equatable, Sendable {
     }
 }
 
-enum VerdaccioPackageAccessMode: String, Equatable, Sendable {
+enum VerdaccioPackageAccessMode: String, CaseIterable, Identifiable, Equatable, Sendable {
     case publicReadAuthenticatedPublish
     case authenticatedReadAndPublish
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .publicReadAuthenticatedPublish:
+            "Public read, authenticated publish"
+        case .authenticatedReadAndPublish:
+            "Authenticated read and publish"
+        }
+    }
 }
 
 struct VerdaccioConfigPolicy: Equatable, Sendable {

@@ -817,6 +817,7 @@ struct ServerWorkspaceView: View {
                 registryPreflightSection
                 verdaccioStatusSection
                 verdaccioServiceSection
+                verdaccioAccessPolicySection
                 verdaccioUsersSection
                 verdaccioBackupSection
                 verdaccioProxySection
@@ -1014,6 +1015,68 @@ struct ServerWorkspaceView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var verdaccioAccessPolicySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Access Policy")
+                .font(.headline)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Upstream")
+                        .foregroundStyle(.secondary)
+                    TextField("https://registry.npmjs.org/", text: $viewModel.verdaccioConfigPolicyDraft.upstreamRegistryURL)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 420)
+                }
+                GridRow {
+                    Text("Packages")
+                        .foregroundStyle(.secondary)
+                    Picker("Packages", selection: $viewModel.verdaccioConfigPolicyDraft.accessMode) {
+                        ForEach(VerdaccioPackageAccessMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 480)
+                }
+            }
+            .disabled(isRegistryBusy)
+
+            HStack(spacing: 8) {
+                Button(role: .destructive) {
+                    viewModel.saveVerdaccioConfigPolicy(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        verdaccioManager: appState.verdaccioManager,
+                        repository: appState.repository
+                    )
+                } label: {
+                    if viewModel.isSavingVerdaccioConfigPolicy {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Save Policy", systemImage: "lock.shield")
+                    }
+                }
+                .disabled(isRegistryBusy || !isRegistryDraftValid || !isVerdaccioPolicyValid)
+
+                Label(verdaccioPolicyValidationMessage, systemImage: isVerdaccioPolicyValid ? "checkmark.circle" : "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(isVerdaccioPolicyValid ? Color.secondary : Color.orange)
+            }
+
+            if let result = viewModel.verdaccioConfigSaveResult {
+                Label("Saved \(result.path) · backup \(result.backupPath)", systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
         .padding(12)
@@ -3558,6 +3621,7 @@ struct ServerWorkspaceView: View {
             viewModel.isCreatingVerdaccioBackup ||
             viewModel.isRestoringVerdaccioBackup ||
             viewModel.isMutatingVerdaccioUser ||
+            viewModel.isSavingVerdaccioConfigPolicy ||
             viewModel.isWritingVerdaccioProxy ||
             viewModel.isReloadingVerdaccioProxy ||
             viewModel.isRunningVerdaccioNpmSmokeTest ||
@@ -3577,6 +3641,19 @@ struct ServerWorkspaceView: View {
         do {
             try VerdaccioConfigurationBuilder.validate(viewModel.registryDraft)
             return "Install settings are ready for preflight."
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private var isVerdaccioPolicyValid: Bool {
+        (try? VerdaccioConfigurationBuilder.validate(viewModel.verdaccioConfigPolicyDraft)) != nil
+    }
+
+    private var verdaccioPolicyValidationMessage: String {
+        do {
+            try VerdaccioConfigurationBuilder.validate(viewModel.verdaccioConfigPolicyDraft)
+            return "Generated config will backup config.yaml and restart Verdaccio."
         } catch {
             return error.localizedDescription
         }

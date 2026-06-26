@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased / 未发布
 
 - Added editable Verdaccio install settings in the macOS Registries workspace with preflight/install blocking for invalid drafts before any SSH command is started.
+- Added macOS Verdaccio access policy editing for upstream registry URL and package access/publish mode, with generated config backup, restart, and remote-change audit coverage.
 - Added a macOS remote transfer "Resume All" action that requeues every failed, cancelled, or interrupted transfer while leaving completed transfers untouched.
 - Added pause/resume controls for the macOS remote file transfer queue so pending transfers are not dispatched while the queue is paused, with ViewModel coverage.
 - Added Windows native connected single-command execution with WinUI command input, ViewModel state, recent in-session commands, and core tests.
@@ -232,6 +233,7 @@ All notable changes to this project will be documented in this file.
 - 添加 Verdaccio 备份、恢复和 htpasswd 用户创建/改密/删除操作的远程变更审计日志。
 - 强化 Verdaccio 运行期安装：改为使用本地安装的固定版本包而不是运行期 `npx`，加入 health check 重试，将 npm smoke 认证改为临时 `.npmrc`，并新增默认跳过的真实 SSH lifecycle 测试，覆盖隔离安装、发布/安装、重启、配置备份、备份和恢复。
 - 在 macOS Registries 工作台加入可编辑 Verdaccio 安装参数，并在 preflight / install 前拦截非法草稿，避免触发任何 SSH 命令。
+- 在 macOS Registries 工作台加入 Verdaccio Access Policy 编辑，支持上游 registry URL 和包访问/发布模式，保存时生成配置、备份、重启并写入远程变更审计。
 - 启动 Phase 7 高级云资源能力，加入腾讯云 CBS 云盘/快照只读 API、计费/到期状态提取、SQLite 持久化、provider capability matrix 和统一资源搜索。
 - 添加 macOS 云资源中心，支持按账号/地域同步、跨资源过滤、provider capability matrix 展示和资源详情查看。
 - 添加阿里云和华为云只读 adapter，支持签名后的地域/项目发现、ECS 实例发现，并补充请求签名和字段映射 fixture 测试。
