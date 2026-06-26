@@ -316,7 +316,7 @@ Phase 1 必须支持密码认证。私钥认证至少支持一种经过真实测
 3. 不匹配则进入 `hostKeyChanged` 错误状态。
 4. 不允许静默覆盖；必须展示旧指纹和新指纹。
 
-当前已实现 OpenSSH `known_hosts` 普通明文 host 行导入核心：支持默认 22 端口 host、非默认端口 `[host]:port`、逗号分隔 host token，跳过 hashed/marker/comment/非法 key 行，并以导入后的 SHA256 指纹写入 `trusted_host_keys`；UI 文件选择入口后续可接入。
+当前已实现 OpenSSH `known_hosts` 普通明文 host 行导入：支持默认 22 端口 host、非默认端口 `[host]:port`、逗号分隔 host token，跳过 hashed/marker/comment/非法 key 行，并以导入后的 SHA256 指纹写入 `trusted_host_keys`；添加/编辑服务器表单已提供文件选择入口。
 
 ## 10. AppState 与 ViewModel
 
@@ -456,7 +456,7 @@ Phase 1 UI 必须以仓库内设计快照为实现参考：`docs/assets/design/m
 - [x] 实现 trust 查询、保存、匹配、冲突错误：`HostKeyTrustEvaluation` 覆盖 trusted/unknown/changed。
 - [x] 实现用户 trust/reject 流程：ViewModel 通过 `pendingHostKey`、`trustPendingHostKey`、`rejectPendingHostKey` 表达决策；未单独定义 `HostKeyTrustDecision` 枚举。
 - [x] 为 OpenSSH 后端提供等待用户决策的接口：未知 host key 抛出 `SSHClientError.unknownHostKey`，ViewModel 暂停当前动作，用户 trust 后重试原动作。
-- [x] 实现 `known_hosts` 导入核心：`HostKeyTrustStore` 可解析普通 OpenSSH `known_hosts` 行，匹配当前 profile 并保存 trust；跳过 hashed/marker/非法行。
+- [x] 实现 `known_hosts` 导入：`HostKeyTrustStore` 可解析普通 OpenSSH `known_hosts` 行，匹配当前 profile 并保存 trust；添加/编辑服务器表单提供文件选择入口；跳过 hashed/marker/非法行。
 - [x] 写单元测试覆盖首次信任、匹配、变更。
 
 验收：

@@ -57,6 +57,41 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.privateKeyFileName, "Existing private key")
     }
 
+    func testSaveImportsSelectedKnownHostsFileForNewServer() throws {
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.known-hosts-import.\(UUID().uuidString)")
+        let service = ServerManagementService(repository: repository, keychain: keychain)
+        let store = HostKeyTrustStore(repository: repository)
+        let knownHostsURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hhc-known-hosts-import-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: knownHostsURL) }
+
+        let publicKey = Data([1, 2, 3, 4]).base64EncodedString()
+        try """
+        ignored.example.internal ssh-ed25519 \(Data([9]).base64EncodedString())
+        example.internal ssh-ed25519 \(publicKey)
+        """.write(to: knownHostsURL, atomically: true, encoding: .utf8)
+
+        let viewModel = AddServerViewModel()
+        viewModel.name = "Tencent"
+        viewModel.host = "example.internal"
+        viewModel.port = "22"
+        viewModel.username = "root"
+        viewModel.authType = .password
+        viewModel.password = "secret"
+        try viewModel.selectKnownHostsFile(knownHostsURL)
+
+        let profile = try viewModel.save(using: service, hostKeyTrustStore: store)
+        defer { keychain.deleteCredentials(keychainRef: profile.keychainRef) }
+
+        let trustedKeys = try repository.fetchTrustedHostKeys(serverId: profile.id)
+        XCTAssertEqual(viewModel.knownHostsFileName, knownHostsURL.lastPathComponent)
+        XCTAssertEqual(viewModel.knownHostsImportResult, KnownHostsImportResult(importedCount: 1, skippedCount: 1))
+        XCTAssertEqual(trustedKeys.count, 1)
+        XCTAssertEqual(trustedKeys.first?.host, "example.internal")
+        XCTAssertEqual(trustedKeys.first?.algorithm, "ssh-ed25519")
+    }
+
     func testCloudImportViewModelRequiresVerifiedAccountRegionInstanceAndCredential() {
         let viewModel = CloudImportViewModel()
 

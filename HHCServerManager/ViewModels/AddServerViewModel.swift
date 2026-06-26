@@ -13,9 +13,12 @@ final class AddServerViewModel: ObservableObject {
     @Published var privateKeyData: Data?
     @Published var privateKeyFileName = ""
     @Published var passphrase = ""
+    @Published var knownHostsFileName = ""
+    @Published var knownHostsImportResult: KnownHostsImportResult?
     @Published var errorMessage: String?
     @Published var isSaving = false
     private var editingProfile: ServerProfile?
+    private var knownHostsContent: String?
 
     var canSave: Bool {
         validationError == nil
@@ -63,6 +66,9 @@ final class AddServerViewModel: ObservableObject {
         privateKeyData = nil
         privateKeyFileName = profile.authType == .privateKey ? "Existing private key" : ""
         passphrase = ""
+        knownHostsFileName = ""
+        knownHostsImportResult = nil
+        knownHostsContent = nil
     }
 
     func choosePrivateKey() {
@@ -83,7 +89,39 @@ final class AddServerViewModel: ObservableObject {
         }
     }
 
-    func save(using service: ServerManagementService) throws -> ServerProfile {
+    func chooseKnownHostsFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose known_hosts File"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = true
+
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try selectKnownHostsFile(url)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func selectKnownHostsFile(_ url: URL) throws {
+        knownHostsContent = try String(contentsOf: url, encoding: .utf8)
+        knownHostsFileName = url.lastPathComponent
+        knownHostsImportResult = nil
+    }
+
+    func clearKnownHostsFile() {
+        knownHostsContent = nil
+        knownHostsFileName = ""
+        knownHostsImportResult = nil
+    }
+
+    func save(
+        using service: ServerManagementService,
+        hostKeyTrustStore: HostKeyTrustStore? = nil
+    ) throws -> ServerProfile {
         if let validationError {
             throw AddServerError.validation(validationError)
         }
@@ -91,6 +129,7 @@ final class AddServerViewModel: ObservableObject {
         defer { isSaving = false }
 
         let portValue = Int(port) ?? 22
+        let savedProfile: ServerProfile
         if let editingProfile {
             let update: CredentialUpdate
             switch authType {
@@ -103,7 +142,7 @@ final class AddServerViewModel: ObservableObject {
                     update = .keepExisting
                 }
             }
-            return try service.updateServer(
+            savedProfile = try service.updateServer(
                 editingProfile,
                 name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                 host: host.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -113,25 +152,30 @@ final class AddServerViewModel: ObservableObject {
                 authType: authType,
                 credentialUpdate: update
             )
+        } else {
+            let credential: CredentialInput
+            switch authType {
+            case .password:
+                credential = .password(password)
+            case .privateKey:
+                credential = .privateKey(data: privateKeyData ?? Data(), passphrase: passphrase.nilIfBlank)
+            }
+
+            savedProfile = try service.createServer(
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                host: host.trimmingCharacters(in: .whitespacesAndNewlines),
+                port: portValue,
+                username: username.trimmingCharacters(in: .whitespacesAndNewlines),
+                groupName: groupName,
+                authType: authType,
+                credential: credential
+            )
         }
 
-        let credential: CredentialInput
-        switch authType {
-        case .password:
-            credential = .password(password)
-        case .privateKey:
-            credential = .privateKey(data: privateKeyData ?? Data(), passphrase: passphrase.nilIfBlank)
+        if let knownHostsContent, let hostKeyTrustStore {
+            knownHostsImportResult = try hostKeyTrustStore.importKnownHosts(knownHostsContent, for: savedProfile)
         }
-
-        return try service.createServer(
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            host: host.trimmingCharacters(in: .whitespacesAndNewlines),
-            port: portValue,
-            username: username.trimmingCharacters(in: .whitespacesAndNewlines),
-            groupName: groupName,
-            authType: authType,
-            credential: credential
-        )
+        return savedProfile
     }
 }
 

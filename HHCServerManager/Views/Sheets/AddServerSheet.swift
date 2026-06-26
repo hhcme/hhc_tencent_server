@@ -52,6 +52,26 @@ struct AddServerSheet: View {
                     }
                 }
 
+                Section("Host Key Trust") {
+                    HStack {
+                        Text(viewModel.knownHostsFileName.isEmpty ? "No known_hosts file selected" : viewModel.knownHostsFileName)
+                            .foregroundStyle(viewModel.knownHostsFileName.isEmpty ? .secondary : .primary)
+                        Spacer()
+                        if !viewModel.knownHostsFileName.isEmpty {
+                            Button {
+                                viewModel.clearKnownHostsFile()
+                            } label: {
+                                Label("Clear", systemImage: "xmark.circle")
+                            }
+                        }
+                        Button {
+                            viewModel.chooseKnownHostsFile()
+                        } label: {
+                            Label("Import", systemImage: "checkmark.shield")
+                        }
+                    }
+                }
+
                 if let validationError = viewModel.validationError {
                     Text(validationError)
                         .foregroundStyle(.red)
@@ -89,7 +109,10 @@ struct AddServerSheet: View {
 
     private func save() {
         do {
-            let profile = try viewModel.save(using: appState.serverManagementService)
+            let profile = try viewModel.save(
+                using: appState.serverManagementService,
+                hostKeyTrustStore: HostKeyTrustStore(repository: appState.repository)
+            )
             onSaved(profile)
             dismiss()
         } catch {
