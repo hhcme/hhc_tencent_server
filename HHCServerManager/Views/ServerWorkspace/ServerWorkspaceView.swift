@@ -22,6 +22,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingEnvironmentSave = false
     @State private var pendingFirewallRule: FirewallRuleRequest?
     @State private var pendingCloudSecurityGroupRule: CloudSecurityGroupRuleRequest?
+    @State private var pendingDeploymentRun: DeploymentRunRequest?
     @State private var pendingDeploymentRollback: DeploymentRollbackRequest?
     @State private var pendingVerdaccioInstall = false
     @State private var pendingVerdaccioUserDelete = false
@@ -205,6 +206,22 @@ struct ServerWorkspaceView: View {
                     applyCloudSecurityGroupRule(request.preview)
                 } : .default(Text(request.preview.action.displayName)) {
                     applyCloudSecurityGroupRule(request.preview)
+                },
+                secondaryButton: .cancel()
+            )
+        }
+        .alert(item: $pendingDeploymentRun) { request in
+            Alert(
+                title: Text("Run Deployment?"),
+                message: Text(request.risk.confirmationMessage),
+                primaryButton: .destructive(Text("Run")) {
+                    viewModel.runDeployment(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        deploymentRunner: appState.deploymentRunner,
+                        repository: appState.repository,
+                        serverManagementService: appState.serverManagementService
+                    )
                 },
                 secondaryButton: .cancel()
             )
@@ -1571,13 +1588,7 @@ struct ServerWorkspaceView: View {
 
             HStack(spacing: 8) {
                 Button {
-                    viewModel.runDeployment(
-                        profile: profile,
-                        sshClient: appState.sshClient,
-                        deploymentRunner: appState.deploymentRunner,
-                        repository: appState.repository,
-                        serverManagementService: appState.serverManagementService
-                    )
+                    prepareDeploymentRun()
                 } label: {
                     if viewModel.isRunningDeployment {
                         ProgressView()
@@ -3366,6 +3377,13 @@ struct ServerWorkspaceView: View {
         }
     }
 
+    private func prepareDeploymentRun() {
+        guard let risk = viewModel.deploymentRunRisk(serverId: profile.id) else {
+            return
+        }
+        pendingDeploymentRun = DeploymentRunRequest(risk: risk)
+    }
+
     private func prepareDeploymentRollback() {
         guard let project = viewModel.selectedDeploymentProject else {
             viewModel.deploymentErrorMessage = "Select a deployment project before rollback."
@@ -3817,6 +3835,14 @@ private struct DeploymentRollbackRequest: Identifiable {
 
     var risk: RemoteOperationRisk {
         RemoteOperationRiskFactory.deploymentRollback(project: project, run: run)
+    }
+}
+
+private struct DeploymentRunRequest: Identifiable {
+    var risk: RemoteOperationRisk
+
+    var id: String {
+        risk.id
     }
 }
 

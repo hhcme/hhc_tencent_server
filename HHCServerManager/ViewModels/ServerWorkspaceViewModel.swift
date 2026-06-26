@@ -2059,6 +2059,20 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    func deploymentRunRisk(serverId: UUID) -> RemoteOperationRisk? {
+        do {
+            let project = draftDeploymentProject(serverId: serverId)
+            let plan = try DeploymentCommandBuilder.buildPlan(for: project)
+            deploymentCommandPlan = plan
+            deploymentErrorMessage = nil
+            return RemoteOperationRiskFactory.deploymentRun(project: project, plan: plan)
+        } catch {
+            deploymentCommandPlan = nil
+            deploymentErrorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     func saveDeploymentProject(
         profile: ServerProfile,
         repository: ServerRepository,

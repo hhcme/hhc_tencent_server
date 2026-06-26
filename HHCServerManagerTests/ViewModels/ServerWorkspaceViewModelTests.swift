@@ -105,6 +105,14 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(rollbackRisk.auditAction, "rollback")
         XCTAssertTrue(rollbackRisk.confirmationMessage.contains("git reset --hard abc1234"))
 
+        let deploymentPlan = try! DeploymentCommandBuilder.buildPlan(for: deploymentProject)
+        let deployRisk = RemoteOperationRiskFactory.deploymentRun(project: deploymentProject, plan: deploymentPlan)
+        XCTAssertEqual(deployRisk.level, .high)
+        XCTAssertEqual(deployRisk.auditTargetType, "deployment")
+        XCTAssertEqual(deployRisk.auditAction, "deploy")
+        XCTAssertTrue(deployRisk.confirmationMessage.contains("git reset --hard 'origin/main'"))
+        XCTAssertTrue(deployRisk.confirmationMessage.contains("systemctl restart site.service"))
+
         let diskResource = CloudUnifiedResource(
             id: "disk:account:ap-guangzhou:disk-123",
             kind: .disk,
@@ -509,6 +517,29 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedDeploymentProject?.deployPath, "/srv/api")
         XCTAssertTrue(viewModel.deploymentCommandPlan?.commandPreview.contains("git reset --hard 'origin/release/2026.06'") == true)
         XCTAssertTrue(viewModel.deploymentCommandPlan?.commandPreview.contains("systemctl restart api.service") == true)
+    }
+
+    func testDeploymentRunRiskUsesCurrentDraftAndRefreshesPreview() {
+        let profile = makeProfile()
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.startNewDeploymentProject(serverId: profile.id)
+        viewModel.deploymentName = "API"
+        viewModel.deploymentRepositoryURL = "git@gitlab.com:hhc/api.git"
+        viewModel.deploymentBranch = "release/2026.06"
+        viewModel.deploymentPath = "/srv/api"
+        viewModel.deploymentBuildCommand = "npm ci && npm run build"
+        viewModel.deploymentRestartCommand = "systemctl restart api.service"
+
+        let risk = viewModel.deploymentRunRisk(serverId: profile.id)
+
+        XCTAssertNotNil(risk)
+        XCTAssertNil(viewModel.deploymentErrorMessage)
+        XCTAssertEqual(risk?.auditTargetType, "deployment")
+        XCTAssertEqual(risk?.auditAction, "deploy")
+        XCTAssertTrue(risk?.confirmationMessage.contains("git reset --hard 'origin/release/2026.06'") == true)
+        XCTAssertTrue(risk?.confirmationMessage.contains("systemctl restart api.service") == true)
+        XCTAssertEqual(viewModel.deploymentCommandPlan?.allowedRoot, "/srv")
     }
 
     func testDeploymentProjectRejectsPathOutsideAllowlist() throws {

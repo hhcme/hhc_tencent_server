@@ -927,6 +927,23 @@ enum RemoteOperationRiskFactory {
         )
     }
 
+    static func deploymentRun(project: DeploymentProject, plan: DeploymentCommandPlan) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "deployment-run-\(project.id)-\(project.updatedAt.timeIntervalSince1970)",
+            level: .high,
+            title: "Run Deployment",
+            target: "\(project.name) -> \(project.deployPath)",
+            commandPreview: plan.commandPreview,
+            impact: [
+                "The deployment working tree may be cloned, fetched, checked out, and reset.",
+                "Configured build, restart, and health check commands will run on the remote server.",
+            ],
+            recovery: "Use rollback from a completed run if the deployment needs to be reverted.",
+            auditTargetType: "deployment",
+            auditAction: "deploy"
+        )
+    }
+
     static func securityGroupChange(_ preview: CloudSecurityGroupRuleChangePreview) -> RemoteOperationRisk {
         let level: RemoteOperationRiskLevel
         if preview.warnings.contains(where: { $0.lowercased().contains("public internet") }) {

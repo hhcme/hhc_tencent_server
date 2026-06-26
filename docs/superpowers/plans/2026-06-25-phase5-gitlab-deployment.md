@@ -87,7 +87,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 
 - 工作台新增“部署”页。
 - 部署项目列表、添加、编辑、删除。（已完成基础 UI）
-- 手动部署按钮和部署前预览。（已完成基础 UI）
+- 手动部署按钮和部署前预览。（已完成基础 UI 和统一风险确认）
 - 部署运行详情：步骤、状态、日志、耗时、失败原因。（已完成基础 UI 和运行中日志自动刷新）
 - 回滚按钮：展示 previous commit，先展示统一风险确认，再触发受控 rollback。（已完成基础 UI 和风险确认）
 - webhook 设置：启用开关、secret、允许分支、本地 listener 启停和监听地址。（已完成配置、核心校验、listener 基础和 UI 接入）
@@ -123,6 +123,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] 健康检查命令失败时标记部署失败。
 - [x] 支持用户复制日志：当前 UI 日志和命令预览支持文本选择复制。
 - [x] 运行中自动刷新部署 run/log，日志区域显示 Live 状态。
+- [x] 手动部署前复用统一风险确认，展示部署目录、完整命令预览、影响和审计说明。
 - [x] 手动部署写入远程变更审计：部署结束后记录 `remote_change_logs`，包含 project target、deploy action、状态、摘要，以及 previous/target commit 快照；失败状态同样记录。
 
 ### Task 5：回滚
@@ -147,6 +148,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] DeploymentProjectStore 测试：已覆盖项目持久化、更新、按服务器过滤、删除级联运行和日志。
 - [x] DeploymentRunner 状态机测试：已覆盖成功执行、日志持久化、commit 捕获、步骤失败停止和取消落库。
 - [x] Deployment workspace ViewModel 测试：已覆盖项目表单保存、命令预览和 UI 触发手动部署后读取运行日志。
+- [x] Deployment 手动运行风险确认测试：已覆盖统一风险模型的 deploy 级别、审计类型、动作和当前草稿命令预览。
 - [x] Deployment live log refresh 测试：已覆盖部署运行中自动读取 running run 和 plan 日志。
 - [x] Deployment workspace 验收测试：已覆盖不在白名单目录内的项目不会保存，build 失败会停止后续 restart/health check，以及 health check 失败会在工作台显示 failed 状态和 stderr 日志。
 - [x] Deployment rollback 风险确认测试：已覆盖统一风险模型的级别、审计类型、动作和命令预览。
