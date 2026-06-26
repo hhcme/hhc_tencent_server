@@ -128,7 +128,7 @@ CREATE TABLE file_transfer_jobs (
 - [ ] 验证权限、断线恢复和正式传输队列。
 - [x] 形成技术验证结论并写入设计文档。
 
-结论：当前 macOS bootstrap 继续使用系统 OpenSSH 工具链。目录浏览和文本读写走 `ssh` 命令，文件上传/下载优先走 `rsync --partial --append-verify --progress` 以获得字节进度、部分文件保留和 append 校验续传；rsync 不可用或失败时先回退到 OpenSSH `sftp -b`，首传使用 `put` / `get`，只有 partial 文件大于 0 且小于源文件大小时才使用 `put -a` / `get -a` batch；SFTP 仍失败时再回退 `scp`。工作台传输队列当前允许最多两个任务并发运行，超出的任务保持 pending。失败、取消和中断任务现在会以同一条历史任务原地恢复为 pending/running，保留已有进度上下文并在成功后覆盖为 succeeded，避免重试后留下重复历史。已在真实 Linux 服务器上验证远端 `sftp` 命令存在、SFTP 上传/下载往返、SFTP partial upload/download 续传以及 scp 上传/下载往返可用；2026-06-26 已重新用当前代码运行 SSH smoke、SFTP 往返和 SFTP partial 续传三项 opt-in 集成测试并通过。SwiftNIO SSH/libssh2 的正式 SFTP 封装仍留到 native 传输队列阶段替换，避免在核心流程尚未稳定时引入额外 native binding 风险。
+结论：当前 macOS bootstrap 继续使用系统 OpenSSH 工具链。目录浏览和文本读写走 `ssh` 命令，文件上传/下载优先走 `rsync --partial --append-verify --progress` 以获得字节进度、部分文件保留和 append 校验续传；rsync 不可用或失败时先回退到 OpenSSH `sftp -b`，首传使用 `put` / `get`，只有 partial 文件大于 0 且小于源文件大小时才使用 `put -a` / `get -a` batch；SFTP 仍失败时再回退 `scp`。工作台传输队列当前允许最多两个任务并发运行，超出的任务保持 pending。失败、取消和中断任务现在会以同一条历史任务原地恢复为 pending/running，保留已有进度上下文并在成功后覆盖为 succeeded，避免重试后留下重复历史。已在真实 Linux 服务器上验证远端 `sftp` 命令存在、SFTP 上传/下载往返、SFTP partial upload/download 续传以及 scp 上传/下载往返可用；2026-06-26 已重新用当前代码运行 `testRealPrivateKeySmokeTestWhenEnvironmentIsConfigured`、`testRealSFTPTransferRoundTripWhenEnvironmentIsConfigured` 和 `testRealSFTPResumePartialTransfersWhenEnvironmentIsConfigured` 三项 opt-in 集成测试并通过。SwiftNIO SSH/libssh2 的正式 SFTP 封装仍留到 native 传输队列阶段替换，避免在核心流程尚未稳定时引入额外 native binding 风险。
 
 ### Task 6：文件管理器
 

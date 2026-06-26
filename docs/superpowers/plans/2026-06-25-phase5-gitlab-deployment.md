@@ -160,7 +160,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] GitLab webhook HTTP listener 测试：已覆盖 HTTP 请求解析、header/body 保留和响应格式。
 - [x] webhook 操作日志测试：已覆盖 started/succeeded 状态和 project target id。
 - [x] 日志脱敏测试：已覆盖 token、password、Authorization/Bearer、URL credentials。
-- [x] 真实 SSH 临时部署集成测试：已覆盖远端 `/tmp/hhc-deploy-*` 临时 Git 仓库、existing checkout、fetch/reset、build、health check、commit 捕获和日志落库；默认通过环境变量启用，2026-06-26 已重新用当前代码在真实服务器验证通过。
+- [x] 真实 SSH 临时部署集成测试：已覆盖远端 `/tmp/hhc-deploy-*` 临时 Git 仓库、existing checkout、fetch/reset、build、health check、commit 捕获和日志落库；默认通过环境变量启用，2026-06-26 已重新用当前代码运行 `testRealDeploymentRunnerDeploysTemporaryRepositoryWhenEnvironmentIsConfigured` 并在真实服务器验证通过。
 
 ### Task 8：手动验收
 
