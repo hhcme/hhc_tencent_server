@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Added Windows OpenSSH `known_hosts` import support with plain host parsing, non-default port matching, SHA256 fingerprint derivation, SQLite trust-store tests, ViewModel coverage, and a WinUI paste-import entry point.
 - Added Windows OpenSSH `known_hosts` file import support with ViewModel coverage and a WinUI file picker entry point.
 - Added a Windows native command cancel entry point and ViewModel coverage so running commands can be cancelled without entering recent-command history.
+- Added a macOS Audit workspace section for viewing per-server remote change logs and recent operation logs.
 - Added remote change audit logs for macOS remote file rename, text save/save-as, move-to-trash, and chmod actions, including metadata-only before/after snapshots and ViewModel coverage.
 - Added unified risk confirmation for manual macOS deployment runs before executing git reset/build/restart/health-check commands.
 - Added a macOS remote transfer "Resume All" action that requeues every failed, cancelled, or interrupted transfer while leaving completed transfers untouched.

@@ -92,6 +92,10 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var deploymentWebhookListenerURL: String?
     @Published var deploymentErrorMessage: String?
     @Published var deploymentActionMessage: String?
+    @Published var remoteChangeLogs: [RemoteChangeLogEntry] = []
+    @Published var operationLogs: [OperationLogEntry] = []
+    @Published var isLoadingAuditLogs = false
+    @Published var auditLogErrorMessage: String?
     @Published var registryDraft = VerdaccioInstallDraft() {
         didSet {
             guard registryDraft != oldValue else { return }
@@ -276,6 +280,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
         deploymentCommandPlan = nil
         deploymentErrorMessage = nil
         deploymentActionMessage = nil
+        remoteChangeLogs = []
+        operationLogs = []
+        auditLogErrorMessage = nil
         registryPreflightReport = nil
         verdaccioInstallResult = nil
         verdaccioStatusSnapshot = nil
@@ -343,6 +350,18 @@ final class ServerWorkspaceViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func loadAuditLogs(profile: ServerProfile, repository: ServerRepository) {
+        isLoadingAuditLogs = true
+        auditLogErrorMessage = nil
+        do {
+            remoteChangeLogs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+            operationLogs = try repository.fetchOperationLogs()
+        } catch {
+            auditLogErrorMessage = error.localizedDescription
+        }
+        isLoadingAuditLogs = false
     }
 
     func loadCachedDashboardSnapshot(profile: ServerProfile, repository: ServerRepository) {

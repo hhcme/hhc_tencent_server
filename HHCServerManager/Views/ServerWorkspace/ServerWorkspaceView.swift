@@ -67,6 +67,8 @@ struct ServerWorkspaceView: View {
                     .tag("deployments")
                 Label("Registries", systemImage: "shippingbox")
                     .tag("registries")
+                Label("Audit", systemImage: "list.bullet.rectangle")
+                    .tag("audit")
                 Label("Environment", systemImage: "slider.horizontal.3")
                     .tag("environment")
                 Label("Cron", systemImage: "calendar.badge.clock")
@@ -385,6 +387,8 @@ struct ServerWorkspaceView: View {
             deploymentsPanel
         case "registries":
             registriesPanel
+        case "audit":
+            auditPanel
         case "environment":
             environmentPanel
         case "cron":
@@ -724,6 +728,161 @@ struct ServerWorkspaceView: View {
         }
         .onAppear {
             viewModel.loadDeploymentProjects(profile: profile, repository: appState.repository)
+        }
+    }
+
+    private var auditPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Audit")
+                            .font(.title2.weight(.semibold))
+                        Text("Recent writes and local operations for \(profile.name).")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        viewModel.loadAuditLogs(profile: profile, repository: appState.repository)
+                    } label: {
+                        if viewModel.isLoadingAuditLogs {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(viewModel.isLoadingAuditLogs)
+                }
+
+                if let error = viewModel.auditLogErrorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                }
+
+                auditRemoteChangesSection
+                auditOperationLogsSection
+            }
+            .padding(24)
+        }
+        .onAppear {
+            viewModel.loadAuditLogs(profile: profile, repository: appState.repository)
+        }
+    }
+
+    private var auditRemoteChangesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Remote Change Logs")
+                .font(.headline)
+            if viewModel.remoteChangeLogs.isEmpty {
+                ContentUnavailableView(
+                    "No Remote Changes",
+                    systemImage: "list.bullet.rectangle",
+                    description: Text("Write actions for this server will appear here after they run.")
+                )
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(viewModel.remoteChangeLogs) { entry in
+                        auditRemoteChangeRow(entry)
+                    }
+                }
+            }
+        }
+    }
+
+    private var auditOperationLogsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Operation Logs")
+                .font(.headline)
+            if viewModel.operationLogs.isEmpty {
+                ContentUnavailableView(
+                    "No Operations",
+                    systemImage: "clock.badge.questionmark",
+                    description: Text("Local command and webhook operations will appear here.")
+                )
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(viewModel.operationLogs) { entry in
+                        auditOperationLogRow(entry)
+                    }
+                }
+            }
+        }
+    }
+
+    private func auditRemoteChangeRow(_ entry: RemoteChangeLogEntry) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(entry.targetType) · \(entry.action)")
+                    .font(.headline)
+                Spacer()
+                auditStatusBadge(entry.status)
+                Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let targetId = entry.targetId, !targetId.isEmpty {
+                Text(targetId)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            if let message = entry.message, !message.isEmpty {
+                Text(message)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func auditOperationLogRow(_ entry: OperationLogEntry) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(entry.scope) · \(entry.action)")
+                    .font(.headline)
+                Spacer()
+                auditStatusBadge(entry.status)
+                Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let targetId = entry.targetId, !targetId.isEmpty {
+                Text(targetId)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            if let message = entry.message, !message.isEmpty {
+                Text(message)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func auditStatusBadge(_ status: String) -> some View {
+        Text(status)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(auditStatusColor(status).opacity(0.16), in: Capsule())
+            .foregroundStyle(auditStatusColor(status))
+    }
+
+    private func auditStatusColor(_ status: String) -> Color {
+        switch status.lowercased() {
+        case "success", "succeeded":
+            .green
+        case "failed", "failure":
+            .red
+        case "cancelled", "canceled":
+            .orange
+        default:
+            .secondary
         }
     }
 

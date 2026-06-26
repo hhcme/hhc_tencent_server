@@ -888,6 +888,58 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertFalse(clearLog.message?.contains("uptime") ?? true)
     }
 
+    func testLoadAuditLogsLoadsCurrentServerRemoteChangesAndOperationLogs() throws {
+        let profile = makeProfile()
+        let otherProfile = makeProfile()
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        try repository.upsert(profile)
+        try repository.upsert(otherProfile)
+        try repository.saveRemoteChangeLog(RemoteChangeLogEntry(
+            id: UUID(),
+            serverId: profile.id,
+            providerId: nil,
+            targetType: "nginx",
+            targetId: "/etc/nginx/conf.d/app.conf",
+            action: "save",
+            beforeSnapshot: "old",
+            afterSnapshot: "new",
+            status: "success",
+            message: "saved",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_100)
+        ))
+        try repository.saveRemoteChangeLog(RemoteChangeLogEntry(
+            id: UUID(),
+            serverId: otherProfile.id,
+            providerId: nil,
+            targetType: "cron",
+            targetId: "job",
+            action: "disable",
+            beforeSnapshot: nil,
+            afterSnapshot: nil,
+            status: "success",
+            message: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_200)
+        ))
+        try repository.saveOperationLog(OperationLogEntry(
+            id: UUID(),
+            scope: "ssh",
+            action: "execute_command",
+            targetId: profile.id.uuidString,
+            status: "success",
+            message: "exit_code=0",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_300)
+        ))
+        let viewModel = ServerWorkspaceViewModel()
+
+        viewModel.loadAuditLogs(profile: profile, repository: repository)
+
+        XCTAssertFalse(viewModel.isLoadingAuditLogs)
+        XCTAssertNil(viewModel.auditLogErrorMessage)
+        XCTAssertEqual(viewModel.remoteChangeLogs.map(\.action), ["save"])
+        XCTAssertEqual(viewModel.remoteChangeLogs.first?.serverId, profile.id)
+        XCTAssertEqual(viewModel.operationLogs.map(\.action), ["execute_command"])
+    }
+
     func testRefreshDashboardLoadsCapabilitiesAndMetrics() async throws {
         let profile = makeProfile()
         let client = DashboardMockSSHClient()
