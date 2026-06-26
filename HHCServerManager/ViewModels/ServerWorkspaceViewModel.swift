@@ -1194,6 +1194,20 @@ final class ServerWorkspaceViewModel: ObservableObject {
         startNextRemoteFileTransferIfNeeded()
     }
 
+    func promoteRemoteFileTransfer(_ job: RemoteFileTransferJob) {
+        reorderPendingRemoteFileTransfer(job, targetQueueIndex: 0, actionMessage: "Transfer moved to next in queue.")
+    }
+
+    func moveRemoteFileTransferUp(_ job: RemoteFileTransferJob) {
+        guard let queueIndex = transferQueue.firstIndex(where: { $0.jobId == job.id }), queueIndex > 0 else { return }
+        reorderPendingRemoteFileTransfer(job, targetQueueIndex: queueIndex - 1, actionMessage: "Transfer moved up.")
+    }
+
+    func moveRemoteFileTransferDown(_ job: RemoteFileTransferJob) {
+        guard let queueIndex = transferQueue.firstIndex(where: { $0.jobId == job.id }), queueIndex < transferQueue.count - 1 else { return }
+        reorderPendingRemoteFileTransfer(job, targetQueueIndex: queueIndex + 1, actionMessage: "Transfer moved down.")
+    }
+
     func clearCompletedRemoteFileTransferHistory(profile: ServerProfile, repository: ServerRepository? = nil) {
         let terminalCount = remoteFileTransferJobs.filter { $0.status.isTerminal }.count
         guard terminalCount > 0 else { return }
@@ -3563,6 +3577,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     }
 
     private func startNextRemoteFileTransferIfNeeded() {
+        reorderPendingRemoteFileTransferJobsToMatchQueue()
+
         guard !isRemoteFileTransferQueuePaused else {
             isTransferringRemoteFile = !transferTasksByJobId.isEmpty
             return
@@ -3601,6 +3617,37 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private func reorderPendingRemoteFileTransfer(
+        _ job: RemoteFileTransferJob,
+        targetQueueIndex: Int,
+        actionMessage: String
+    ) {
+        guard job.status == .pending else { return }
+        guard let queueIndex = transferQueue.firstIndex(where: { $0.jobId == job.id }) else { return }
+
+        let request = transferQueue.remove(at: queueIndex)
+        let boundedIndex = min(max(targetQueueIndex, 0), transferQueue.count)
+        transferQueue.insert(request, at: boundedIndex)
+        reorderPendingRemoteFileTransferJobsToMatchQueue()
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = actionMessage
+    }
+
+    private func reorderPendingRemoteFileTransferJobsToMatchQueue() {
+        let queuedIds = transferQueue.map(\.jobId)
+        guard !queuedIds.isEmpty else { return }
+
+        let queuedIdSet = Set(queuedIds)
+        let queuedJobsById = Dictionary(uniqueKeysWithValues: remoteFileTransferJobs
+            .filter { queuedIdSet.contains($0.id) }
+            .map { ($0.id, $0) })
+        let orderedQueuedJobs = queuedIds.compactMap { queuedJobsById[$0] }
+        var remainingJobs = remoteFileTransferJobs.filter { !queuedIdSet.contains($0.id) }
+        let insertionIndex = remainingJobs.firstIndex { $0.status.isTerminal } ?? remainingJobs.count
+        remainingJobs.insert(contentsOf: orderedQueuedJobs, at: insertionIndex)
+        remoteFileTransferJobs = remainingJobs
     }
 
     private func runUploadTransfer(

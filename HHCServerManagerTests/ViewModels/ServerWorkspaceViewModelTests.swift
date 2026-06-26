@@ -2035,6 +2035,86 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         }
     }
 
+    func testReorderPendingRemoteFileTransfersControlsDispatchOrder() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = SlowRemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        viewModel.pauseRemoteFileTransferQueue()
+        for path in ["/tmp/first.log", "/tmp/second.log", "/tmp/third.log", "/tmp/fourth.log"] {
+            viewModel.uploadRemoteFile(
+                localURL: URL(fileURLWithPath: path),
+                profile: profile,
+                sshClient: client,
+                transferClient: client,
+                remoteFileService: service,
+                repository: repository
+            )
+        }
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.localPath), [
+            "/tmp/first.log",
+            "/tmp/second.log",
+            "/tmp/third.log",
+            "/tmp/fourth.log",
+        ])
+
+        let third = try XCTUnwrap(viewModel.remoteFileTransferJobs.first { $0.localPath == "/tmp/third.log" })
+        viewModel.promoteRemoteFileTransfer(third)
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Transfer moved to next in queue.")
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.localPath), [
+            "/tmp/third.log",
+            "/tmp/first.log",
+            "/tmp/second.log",
+            "/tmp/fourth.log",
+        ])
+
+        let fourth = try XCTUnwrap(viewModel.remoteFileTransferJobs.first { $0.localPath == "/tmp/fourth.log" })
+        viewModel.moveRemoteFileTransferUp(fourth)
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Transfer moved up.")
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.localPath), [
+            "/tmp/third.log",
+            "/tmp/first.log",
+            "/tmp/fourth.log",
+            "/tmp/second.log",
+        ])
+
+        let first = try XCTUnwrap(viewModel.remoteFileTransferJobs.first { $0.localPath == "/tmp/first.log" })
+        viewModel.moveRemoteFileTransferDown(first)
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Transfer moved down.")
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.localPath), [
+            "/tmp/third.log",
+            "/tmp/fourth.log",
+            "/tmp/first.log",
+            "/tmp/second.log",
+        ])
+
+        viewModel.resumeRemoteFileTransferQueue()
+
+        try await waitUntil {
+            Set(viewModel.remoteFileTransferJobs.filter { $0.status == .running }.map(\.localPath)) == Set([
+                "/tmp/third.log",
+                "/tmp/fourth.log",
+            ])
+        }
+
+        let persistedStatusesByPath = Dictionary(
+            uniqueKeysWithValues: try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+                .map { ($0.localPath, $0.status) }
+        )
+        XCTAssertEqual(persistedStatusesByPath["/tmp/third.log"], .running)
+        XCTAssertEqual(persistedStatusesByPath["/tmp/fourth.log"], .running)
+        XCTAssertEqual(persistedStatusesByPath["/tmp/first.log"], .pending)
+        XCTAssertEqual(persistedStatusesByPath["/tmp/second.log"], .pending)
+
+        viewModel.cancelPendingRemoteFileTransfers()
+        viewModel.cancelRemoteFileTransfer()
+        try await waitUntil {
+            viewModel.remoteFileTransferJobs.allSatisfy { $0.status == .cancelled }
+        }
+    }
+
     func testLoadRemoteFileTransferHistoryMarksUnfinishedJobsInterrupted() throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)

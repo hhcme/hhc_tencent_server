@@ -146,6 +146,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 增加 native-ready 传输队列元数据：`remote_file_transfers` 持久化 backend、是否可续传、是否支持流式进度；OpenSSH 传输结果会标记 `rsync` / `OpenSSH SFTP` / `scp`，工作台传输列表展示 backend、resumable 和 streaming progress，为后续替换 libssh2/SwiftNIO SFTP 后端保留同一队列合同。
 - [x] 增强传输队列按任务控制：工作台每条 pending/running 传输可单独取消；pending 任务取消后不会启动，running 任务取消只停止对应 Task，不影响其它运行中的传输，并继续持久化取消状态。
 - [x] 增加传输队列暂停/恢复调度：暂停后 running 任务继续执行，但 pending 任务不会因并发槽释放而自动启动；恢复后继续按并发上限调度。
+- [x] 增加 pending 传输队列排序控制：工作台每条待传任务可置为下一个、上移或下移，UI 顺序与真实调度队列保持一致，running 任务不被打断。
 - [x] 增加批量恢复入口：工作台可一键恢复所有 failed/cancelled/interrupted 传输，已成功的历史任务不会重复入队。
 - [x] 增加终态传输历史清理：工作台可清理 succeeded/failed/cancelled/interrupted 历史记录，pending/running 任务保留并继续受队列控制；清理动作写入 `operation_logs`，只记录数量不记录文件路径。
 - [ ] 实现正式 SFTP 和 native 级可恢复传输队列。

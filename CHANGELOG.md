@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased / 未发布
 
+- Added macOS remote transfer pending-queue ordering controls so queued transfers can be promoted or moved up/down without interrupting running jobs.
 - Added Windows native SQLite-backed command history metadata so recent commands survive ViewModel reloads without persisting stdout/stderr output.
 - Fixed the Windows known_hosts file import service path so CI compiles against the importer API.
 - Added a Cloud Resources Markdown report copy action for the current filtered resource set, including summary totals, provider/kind breakdowns, attention counts, sync time, and escaped table rows.

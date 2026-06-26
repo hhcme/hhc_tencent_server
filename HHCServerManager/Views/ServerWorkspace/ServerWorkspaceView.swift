@@ -2053,6 +2053,15 @@ struct ServerWorkspaceView: View {
                                 remoteFileService: appState.remoteFileService,
                                 repository: appState.repository
                             )
+                        },
+                        promote: { job in
+                            viewModel.promoteRemoteFileTransfer(job)
+                        },
+                        moveUp: { job in
+                            viewModel.moveRemoteFileTransferUp(job)
+                        },
+                        moveDown: { job in
+                            viewModel.moveRemoteFileTransferDown(job)
                         }
                     )
                 }
@@ -4938,6 +4947,9 @@ private struct RemoteTransferJobsView: View {
     let resumeQueue: () -> Void
     let retryAll: () -> Void
     let retry: (RemoteFileTransferJob) -> Void
+    let promote: (RemoteFileTransferJob) -> Void
+    let moveUp: (RemoteFileTransferJob) -> Void
+    let moveDown: (RemoteFileTransferJob) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -5014,6 +5026,10 @@ private struct RemoteTransferJobsView: View {
 
                     Spacer()
 
+                    if job.status == .pending {
+                        pendingOrderControls(for: job)
+                    }
+
                     if job.status == .pending || job.status == .running {
                         Button {
                             cancelJob(job)
@@ -5040,6 +5056,39 @@ private struct RemoteTransferJobsView: View {
         }
         .padding(10)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func pendingOrderControls(for job: RemoteFileTransferJob) -> some View {
+        let pendingJobs = jobs.filter { $0.status == .pending }
+        if let index = pendingJobs.firstIndex(where: { $0.id == job.id }) {
+            Button {
+                promote(job)
+            } label: {
+                Image(systemName: "arrow.up.to.line")
+            }
+            .buttonStyle(.borderless)
+            .disabled(index == 0)
+            .help("Move to next in queue")
+
+            Button {
+                moveUp(job)
+            } label: {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.borderless)
+            .disabled(index == 0)
+            .help("Move transfer up")
+
+            Button {
+                moveDown(job)
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.borderless)
+            .disabled(index == pendingJobs.count - 1)
+            .help("Move transfer down")
+        }
     }
 
     private func iconName(for job: RemoteFileTransferJob) -> String {
