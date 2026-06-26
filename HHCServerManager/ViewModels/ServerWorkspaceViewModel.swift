@@ -328,8 +328,18 @@ final class ServerWorkspaceViewModel: ObservableObject {
 
     func clearCommandHistory(profile: ServerProfile, repository: ServerRepository) {
         do {
+            let deletedCount = try repository.countCommandHistory(serverId: profile.id)
             try repository.deleteCommandHistory(serverId: profile.id)
             persistedCommandHistory = []
+            try repository.saveOperationLog(OperationLogEntry(
+                id: UUID(),
+                scope: "ssh",
+                action: "clear_command_history",
+                targetId: profile.id.uuidString,
+                status: "success",
+                message: "deleted_entries=\(deletedCount)",
+                createdAt: Date()
+            ))
         } catch {
             errorMessage = error.localizedDescription
         }

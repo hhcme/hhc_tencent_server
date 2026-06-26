@@ -121,6 +121,18 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func countCommandHistory(serverId: UUID) throws -> Int {
+        try database.query("""
+            SELECT COUNT(*)
+            FROM command_history
+            WHERE server_id = ?
+        """, bindings: [
+            .text(serverId.uuidString),
+        ]) { statement in
+            Int(sqlite3_column_int(statement, 0))
+        }.first ?? 0
+    }
+
     func deleteCommandHistory(serverId: UUID) throws {
         try database.execute("""
             DELETE FROM command_history

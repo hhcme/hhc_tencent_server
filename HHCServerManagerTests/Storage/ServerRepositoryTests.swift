@@ -124,8 +124,13 @@ final class ServerRepositoryTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 1_700_000_001)
         ))
 
+        XCTAssertEqual(try repository.countCommandHistory(serverId: firstServer.id), 1)
+        XCTAssertEqual(try repository.countCommandHistory(serverId: secondServer.id), 1)
+
         try repository.deleteCommandHistory(serverId: firstServer.id)
 
+        XCTAssertEqual(try repository.countCommandHistory(serverId: firstServer.id), 0)
+        XCTAssertEqual(try repository.countCommandHistory(serverId: secondServer.id), 1)
         XCTAssertTrue(try repository.fetchCommandHistory(serverId: firstServer.id).isEmpty)
         XCTAssertEqual(try repository.fetchCommandHistory(serverId: secondServer.id).map(\.command), ["uptime"])
     }

@@ -877,6 +877,15 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.persistedCommandHistory.isEmpty)
         XCTAssertTrue(try repository.fetchCommandHistory(serverId: profile.id).isEmpty)
         XCTAssertEqual(try repository.fetchCommandHistory(serverId: otherProfile.id).map(\.command), ["uptime"])
+
+        let logs = try repository.fetchOperationLogs()
+        let clearLog = try XCTUnwrap(logs.first { $0.action == "clear_command_history" })
+        XCTAssertEqual(clearLog.scope, "ssh")
+        XCTAssertEqual(clearLog.targetId, profile.id.uuidString)
+        XCTAssertEqual(clearLog.status, "success")
+        XCTAssertEqual(clearLog.message, "deleted_entries=1")
+        XCTAssertFalse(clearLog.message?.contains("whoami") ?? true)
+        XCTAssertFalse(clearLog.message?.contains("uptime") ?? true)
     }
 
     func testRefreshDashboardLoadsCapabilitiesAndMetrics() async throws {

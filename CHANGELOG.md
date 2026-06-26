@@ -56,6 +56,7 @@ All notable changes to this project will be documented in this file.
 - Added a macOS cloud import sheet for Tencent Cloud account verification, region loading, CVM syncing, instance selection, and SSH profile import.
 - Improved the command panel with separate stdout/stderr sections, failure summaries, and rerun buttons for persisted command history.
 - Added a per-server command history clear action for the macOS command panel, removing saved command metadata while leaving operation logs intact.
+- Added metadata-only operation logging for macOS command history clearing, recording deleted entry counts without storing command text.
 - Added cancellable command execution that terminates the underlying OpenSSH process when a running command is cancelled.
 - Started Phase 3 Dashboard foundations with SSH-based OS/capability detection, load/memory/disk/CPU metric parsing, Dashboard refresh state, and tests.
 - Expanded Dashboard SSH metrics with network traffic totals and process summary parsing.
