@@ -27,7 +27,7 @@
 - 指标命令必须有超时；解析失败时展示“能力不可用”而不是崩溃。
 - 云监控指标必须标明来源：Cloud API。
 - SSH 指标必须标明来源：SSH。
-- SwiftNIO/libssh2 正式 SFTP 和 native 级传输队列未落地前，文件管理器只能宣称支持 OpenSSH bootstrap 批量传输；当前队列支持有限并发，失败/取消/中断任务可从历史记录原地恢复，rsync 路径可提供运行中字节进度、部分文件保留和 append 校验续传，OpenSSH `sftp -b` fallback 在 rsync 不可用时首传使用 `put` / `get`，只有 partial 文件大于 0 且小于源文件大小时才通过 `put -a` / `get -a` 尝试续传，scp 最终回退路径只保证开始/完成进度。
+- SwiftNIO/libssh2 正式 SFTP 和 native 级传输队列未落地前，文件管理器只能宣称支持 OpenSSH bootstrap 批量传输；当前队列支持有限并发，失败/取消/中断任务可从历史记录原地恢复，rsync 路径可提供运行中字节、速度和 ETA 进度、部分文件保留和 append 校验续传，OpenSSH `sftp -b` fallback 在 rsync 不可用时首传使用 `put` / `get`，只有 partial 文件大于 0 且小于源文件大小时才通过 `put -a` / `get -a` 尝试续传，scp 最终回退路径只保证开始/完成进度。
 - 文件编辑保存必须先写临时文件，再原子替换或备份原文件。
 
 ## 4. 数据模型
@@ -128,7 +128,7 @@ CREATE TABLE file_transfer_jobs (
 - [ ] 验证权限、断线恢复和正式传输队列。
 - [x] 形成技术验证结论并写入设计文档。
 
-结论：当前 macOS bootstrap 继续使用系统 OpenSSH 工具链。目录浏览和文本读写走 `ssh` 命令，文件上传/下载优先走 `rsync --partial --append-verify --progress` 以获得字节进度、部分文件保留和 append 校验续传；rsync 不可用或失败时先回退到 OpenSSH `sftp -b`，首传使用 `put` / `get`，只有 partial 文件大于 0 且小于源文件大小时才使用 `put -a` / `get -a` batch；SFTP 仍失败时再回退 `scp`。工作台传输队列当前允许最多两个任务并发运行，超出的任务保持 pending。失败、取消和中断任务现在会以同一条历史任务原地恢复为 pending/running，保留已有进度上下文并在成功后覆盖为 succeeded，避免重试后留下重复历史。已在真实 Linux 服务器上验证远端 `sftp` 命令存在、SFTP 上传/下载往返、SFTP partial upload/download 续传以及 scp 上传/下载往返可用；2026-06-26 已重新用当前代码运行 `testRealPrivateKeySmokeTestWhenEnvironmentIsConfigured`、`testRealSFTPTransferRoundTripWhenEnvironmentIsConfigured` 和 `testRealSFTPResumePartialTransfersWhenEnvironmentIsConfigured` 三项 opt-in 集成测试并通过。SwiftNIO SSH/libssh2 的正式 SFTP 封装仍留到 native 传输队列阶段替换，避免在核心流程尚未稳定时引入额外 native binding 风险。
+结论：当前 macOS bootstrap 继续使用系统 OpenSSH 工具链。目录浏览和文本读写走 `ssh` 命令，文件上传/下载优先走 `rsync --partial --append-verify --progress` 以获得字节、速度和 ETA 进度、部分文件保留和 append 校验续传；rsync 不可用或失败时先回退到 OpenSSH `sftp -b`，首传使用 `put` / `get`，只有 partial 文件大于 0 且小于源文件大小时才使用 `put -a` / `get -a` batch；SFTP 仍失败时再回退 `scp`。工作台传输队列当前允许最多两个任务并发运行，超出的任务保持 pending。失败、取消和中断任务现在会以同一条历史任务原地恢复为 pending/running，保留已有进度上下文并在成功后覆盖为 succeeded，避免重试后留下重复历史。已在真实 Linux 服务器上验证远端 `sftp` 命令存在、SFTP 上传/下载往返、SFTP partial upload/download 续传以及 scp 上传/下载往返可用；2026-06-26 已重新用当前代码运行 `testRealPrivateKeySmokeTestWhenEnvironmentIsConfigured`、`testRealSFTPTransferRoundTripWhenEnvironmentIsConfigured` 和 `testRealSFTPResumePartialTransfersWhenEnvironmentIsConfigured` 三项 opt-in 集成测试并通过。SwiftNIO SSH/libssh2 的正式 SFTP 封装仍留到 native 传输队列阶段替换，避免在核心流程尚未稳定时引入额外 native binding 风险。
 
 ### Task 6：文件管理器
 
@@ -139,7 +139,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 实现多选批量上传和选中文件批量下载到目录，复用有限并发传输队列。
 - [x] 实现传输进度状态展示和完成/失败/取消历史持久化。
 - [x] 建立传输进度回调模型，运行中进度可更新 UI 并持久化到 `remote_file_transfers`。
-- [x] 增加 rsync bootstrap 传输路径，支持字节进度解析、部分文件保留和 `--append-verify` 续传，失败时优先回退 OpenSSH `sftp -b`；首传使用 `put` / `get`，只有 partial 文件大于 0 且小于源文件大小时才使用 `put -a` / `get -a`，最后回退 scp。
+- [x] 增加 rsync bootstrap 传输路径，支持字节、速度和 ETA 进度解析、部分文件保留和 `--append-verify` 续传，失败时优先回退 OpenSSH `sftp -b`；首传使用 `put` / `get`，只有 partial 文件大于 0 且小于源文件大小时才使用 `put -a` / `get -a`，最后回退 scp。
 - [x] 实现 pending/running 任务持久化，重新进入工作台时将遗留未完成任务标记为 interrupted。
 - [x] 实现 bootstrap 有限并发传输队列。
 - [x] 实现失败、取消和中断传输任务的原地恢复入口；rsync 路径可利用 `--partial --append-verify` 保留的部分文件继续传输，恢复时复用原任务 ID、保留已有进度上下文并在成功后覆盖为 succeeded，SFTP fallback 只有在 partial 大小有效时才通过 `put -a` / `get -a` 尝试续传，native 传输队列留到正式 SFTP 队列阶段。
@@ -179,7 +179,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 队列暂停/恢复调度测试：`ServerWorkspaceViewModelTests.testPauseRemoteFileTransferQueueStopsPendingDispatchUntilResumed` 覆盖暂停期间并发槽释放后 pending 不启动，恢复后 pending 进入 running 并持久化。
 - [x] 批量恢复测试：`ServerWorkspaceViewModelTests.testRetryAllRemoteFileTransfersOnlyQueuesRetryableJobs` 覆盖 failed upload 和 interrupted download 一键恢复，并确认 succeeded 历史不会重复执行。
 - [x] 终态传输历史清理测试：`ServerRepositoryTests.testDeleteTerminalRemoteFileTransferJobsKeepsActiveJobs` 和 `ServerWorkspaceViewModelTests.testClearCompletedRemoteFileTransferHistoryKeepsActiveJobs` 覆盖清理 succeeded/failed/cancelled/interrupted，保留 pending/running，并写入不含文件路径的本地操作审计。
-- [x] rsync 进度输出解析和 `--append-verify` 参数测试。
+- [x] rsync 字节/速度/ETA 进度输出解析和 `--append-verify` 参数测试。
 - [x] OpenSSH SFTP fallback partial 大小解析和续传门禁测试，覆盖 0 字节、完整 partial 和超长 partial 不使用 append resume。
 - [x] 可选真实 SFTP 集成测试：`SSHIntegrationTests.testRealSFTPTransferRoundTripWhenEnvironmentIsConfigured` 会禁用 rsync 和 scp fallback，强制走 OpenSSH `sftp -b`，在远端 `/tmp/hhc-transfer-*` 完成首传上传、内容校验、下载和清理。
 - [x] 可选真实 SFTP partial 续传集成测试：`SSHIntegrationTests.testRealSFTPResumePartialTransfersWhenEnvironmentIsConfigured` 会预置远端 partial upload 和本地 partial download，强制验证 `put -a` / `get -a` 可续传到完整内容。

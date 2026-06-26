@@ -1744,14 +1744,14 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         let runningJob = try XCTUnwrap(viewModel.remoteFileTransferJobs.first)
         XCTAssertEqual(runningJob.status, .running)
         XCTAssertEqual(runningJob.byteCount, 1_024)
-        XCTAssertEqual(runningJob.message, "Transferred 512 of 1024 bytes.")
+        XCTAssertEqual(runningJob.message, "Transferred 512 B of 1.0 KB · 256 B/s · ETA 2s.")
 
         let persisted = try XCTUnwrap(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).first)
         XCTAssertEqual(persisted.status, .running)
         XCTAssertEqual(persisted.progressFraction, 0.5)
         XCTAssertEqual(persisted.byteCount, 1_024)
         XCTAssertEqual(persisted.supportsStreamingProgress, true)
-        XCTAssertEqual(persisted.message, "Transferred 512 of 1024 bytes.")
+        XCTAssertEqual(persisted.message, "Transferred 512 B of 1.0 KB · 256 B/s · ETA 2s.")
 
         viewModel.cancelRemoteFileTransfer()
         try await waitUntil { viewModel.remoteFileTransferJobs.first?.status == .cancelled }
@@ -3470,7 +3470,13 @@ private final class SlowRemoteFileTransferMockSSHClient: SSHClient, RemoteFileTr
     }
 
     func uploadFile(localURL: URL, remotePath: String, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
-        progressHandler?(RemoteFileTransferProgress(completedBytes: 512, totalBytes: 1_024, fraction: 0.5))
+        progressHandler?(RemoteFileTransferProgress(
+            completedBytes: 512,
+            totalBytes: 1_024,
+            fraction: 0.5,
+            transferRateBytesPerSecond: 256,
+            estimatedSecondsRemaining: 2
+        ))
         try await Task.sleep(nanoseconds: 5_000_000_000)
         return RemoteFileTransferResult(
             remotePath: remotePath,
@@ -3481,7 +3487,13 @@ private final class SlowRemoteFileTransferMockSSHClient: SSHClient, RemoteFileTr
     }
 
     func downloadFile(remotePath: String, localURL: URL, profile: ServerProfile, progressHandler: (@Sendable (RemoteFileTransferProgress) -> Void)?) async throws -> RemoteFileTransferResult {
-        progressHandler?(RemoteFileTransferProgress(completedBytes: 512, totalBytes: 1_024, fraction: 0.5))
+        progressHandler?(RemoteFileTransferProgress(
+            completedBytes: 512,
+            totalBytes: 1_024,
+            fraction: 0.5,
+            transferRateBytesPerSecond: 256,
+            estimatedSecondsRemaining: 2
+        ))
         try await Task.sleep(nanoseconds: 5_000_000_000)
         return RemoteFileTransferResult(
             remotePath: remotePath,

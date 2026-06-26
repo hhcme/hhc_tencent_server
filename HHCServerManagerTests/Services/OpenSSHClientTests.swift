@@ -53,6 +53,21 @@ final class OpenSSHClientTests: XCTestCase {
         XCTAssertEqual(progress?.completedBytes, 1_024)
         XCTAssertEqual(progress?.totalBytes, 2_048)
         XCTAssertEqual(progress?.fraction, 0.5)
+        XCTAssertEqual(progress?.transferRateBytesPerSecond, 100 * 1_024)
+        XCTAssertEqual(progress?.estimatedSecondsRemaining, 1)
+    }
+
+    func testRsyncProgressUpdateParsesHumanReadableSpeedAndETA() {
+        let progress = OpenSSHClient.rsyncProgressUpdate(fromLine: "  1,048,576  25%    1.50MB/s    0:01:10")
+
+        XCTAssertEqual(progress?.completedBytes, 1_048_576)
+        XCTAssertEqual(progress?.fraction, 0.25)
+        XCTAssertEqual(progress?.transferRateBytesPerSecond, 1.5 * 1_024 * 1_024)
+        XCTAssertEqual(progress?.estimatedSecondsRemaining, 70)
+        XCTAssertEqual(OpenSSHClient.parseRsyncTransferRate("900B/s"), 900)
+        XCTAssertEqual(OpenSSHClient.parseRsyncTransferRate("2.00GB/s"), 2 * 1_024 * 1_024 * 1_024)
+        XCTAssertNil(OpenSSHClient.parseRsyncTransferRate("not-a-rate"))
+        XCTAssertNil(OpenSSHClient.parseRsyncETA("00:10"))
     }
 
     func testRsyncProgressUpdatesParseCarriageReturnDelimitedOutput() {

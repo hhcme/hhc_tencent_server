@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased / 未发布
 
+- Added human-readable remote transfer progress by parsing rsync speed and ETA and surfacing byte/speed/ETA summaries in the macOS workspace.
 - Added editable Verdaccio install settings in the macOS Registries workspace with preflight/install blocking for invalid drafts before any SSH command is started.
 - Added macOS Verdaccio access policy editing for upstream registry URL and package access/publish mode, with generated config backup, restart, and remote-change audit coverage.
 - Added HostKeyTrustStore `known_hosts` import support for plain OpenSSH host entries, including non-default port matching, SHA256 fingerprint derivation, and an Add/Edit Server import entry point.

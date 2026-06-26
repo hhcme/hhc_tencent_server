@@ -462,11 +462,21 @@ struct RemoteFileTransferProgress: Equatable, Hashable, Sendable {
     var completedBytes: Int64?
     var totalBytes: Int64?
     var fraction: Double?
+    var transferRateBytesPerSecond: Double?
+    var estimatedSecondsRemaining: TimeInterval?
 
-    init(completedBytes: Int64? = nil, totalBytes: Int64? = nil, fraction: Double? = nil) {
+    init(
+        completedBytes: Int64? = nil,
+        totalBytes: Int64? = nil,
+        fraction: Double? = nil,
+        transferRateBytesPerSecond: Double? = nil,
+        estimatedSecondsRemaining: TimeInterval? = nil
+    ) {
         self.completedBytes = completedBytes
         self.totalBytes = totalBytes
         self.fraction = fraction.map(Self.clampedFraction)
+        self.transferRateBytesPerSecond = transferRateBytesPerSecond
+        self.estimatedSecondsRemaining = estimatedSecondsRemaining
     }
 
     private static func clampedFraction(_ value: Double) -> Double {

@@ -621,11 +621,53 @@ final class OpenSSHClient: SSHClient, RemoteFileTransferClient, @unchecked Senda
         }
         let fraction = percent / 100
         let totalBytes = fraction > 0 ? Int64((Double(completedBytes) / fraction).rounded()) : nil
+        let transferRate = columns.count >= 3 ? parseRsyncTransferRate(columns[2]) : nil
+        let eta = columns.count >= 4 ? parseRsyncETA(columns[3]) : nil
         return RemoteFileTransferProgress(
             completedBytes: completedBytes,
             totalBytes: totalBytes,
-            fraction: fraction
+            fraction: fraction,
+            transferRateBytesPerSecond: transferRate,
+            estimatedSecondsRemaining: eta
         )
+    }
+
+    static func parseRsyncTransferRate(_ value: String) -> Double? {
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/s", with: "")
+        guard !normalized.isEmpty else { return nil }
+
+        let numberText = normalized.prefix { character in
+            character.isNumber || character == "."
+        }
+        guard let number = Double(numberText) else { return nil }
+        let unit = normalized.dropFirst(numberText.count).lowercased()
+        let multiplier: Double
+        switch unit {
+        case "", "b":
+            multiplier = 1
+        case "k", "kb", "kib":
+            multiplier = 1_024
+        case "m", "mb", "mib":
+            multiplier = 1_024 * 1_024
+        case "g", "gb", "gib":
+            multiplier = 1_024 * 1_024 * 1_024
+        case "t", "tb", "tib":
+            multiplier = 1_024 * 1_024 * 1_024 * 1_024
+        default:
+            return nil
+        }
+        return number * multiplier
+    }
+
+    static func parseRsyncETA(_ value: String) -> TimeInterval? {
+        let parts = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ":")
+            .compactMap { TimeInterval($0) }
+        guard parts.count == 3 else { return nil }
+        return parts[0] * 3_600 + parts[1] * 60 + parts[2]
     }
 
     private func appSupportURL() throws -> URL {

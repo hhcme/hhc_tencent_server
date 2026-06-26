@@ -3811,10 +3811,52 @@ final class ServerWorkspaceViewModel: ObservableObject {
         guard let completed = progress.completedBytes else {
             return nil
         }
+        let progressText: String
         if let total = progress.totalBytes, total > 0 {
-            return "Transferred \(completed) of \(total) bytes."
+            progressText = "Transferred \(formatTransferBytes(completed)) of \(formatTransferBytes(total))"
+        } else {
+            progressText = "Transferred \(formatTransferBytes(completed))"
         }
-        return "Transferred \(completed) bytes."
+
+        var details: [String] = []
+        if let rate = progress.transferRateBytesPerSecond, rate > 0 {
+            details.append("\(formatTransferBytes(Int64(rate.rounded())))/s")
+        }
+        if let eta = progress.estimatedSecondsRemaining, eta > 0 {
+            details.append("ETA \(formatTransferDuration(eta))")
+        }
+        if details.isEmpty {
+            return "\(progressText)."
+        }
+        return "\(progressText) · \(details.joined(separator: " · "))."
+    }
+
+    private static func formatTransferBytes(_ bytes: Int64) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var value = Double(bytes)
+        var unitIndex = 0
+        while value >= 1_024, unitIndex < units.count - 1 {
+            value /= 1_024
+            unitIndex += 1
+        }
+        if unitIndex == 0 {
+            return "\(Int(value)) \(units[unitIndex])"
+        }
+        return String(format: "%.1f %@", value, units[unitIndex])
+    }
+
+    private static func formatTransferDuration(_ seconds: TimeInterval) -> String {
+        let totalSeconds = max(Int(seconds.rounded()), 0)
+        let hours = totalSeconds / 3_600
+        let minutes = (totalSeconds % 3_600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        }
+        if minutes > 0 {
+            return "\(minutes)m \(seconds)s"
+        }
+        return "\(seconds)s"
     }
 
     private static func remoteFileTransferDisplayName(_ job: RemoteFileTransferJob) -> String {
