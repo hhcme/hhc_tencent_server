@@ -384,6 +384,12 @@ private struct CloudResourceCenterSheet: View {
 
             Section("Capabilities") {
                 CapabilityMatrixView(rows: viewModel.capabilityRows)
+                Button {
+                    viewModel.copyCapabilityMatrixReportToPasteboard()
+                } label: {
+                    Label("Copy Capability Report", systemImage: "doc.on.doc")
+                }
+                .disabled(viewModel.isWorking)
             }
         }
         .formStyle(.grouped)

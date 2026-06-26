@@ -674,6 +674,45 @@ final class CloudResourceCenterViewModel: ObservableObject {
         statusMessage = "Copied \(resources.count) visible cloud resources as Markdown."
     }
 
+    func capabilityMatrixReportMarkdown() -> String {
+        var lines: [String] = [
+            "# Provider Capability Matrix",
+            "",
+            "- Providers: \(Set(capabilityRows.map(\.providerId)).count)",
+            "- Capabilities: \(CloudCapability.allCases.count)",
+            "- Effective capabilities: \(capabilityRows.filter(\.isEffective).count)",
+            "- Runtime disabled: \(capabilityRows.filter(\.isRuntimeDisabled).count)",
+            "",
+            "| Provider | Registered | Capability | Supported | Effective | Runtime Disabled Reason |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+
+        for row in capabilityRows.sorted(by: Self.capabilityReportSort) {
+            lines.append([
+                row.providerName,
+                row.isRegistered ? "yes" : "no",
+                row.capability.displayName,
+                row.isSupported ? "yes" : "no",
+                row.isEffective ? "yes" : "no",
+                row.runtimeDisabledReason ?? "",
+            ].map(Self.markdownTableCell).joined(separator: " | ").withTableBounds)
+        }
+
+        if capabilityRows.isEmpty {
+            lines.append("| none | no | none | no | no | Capability matrix has not been loaded. |")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    func copyCapabilityMatrixReportToPasteboard() {
+        let report = capabilityMatrixReportMarkdown()
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(report, forType: .string)
+        statusMessage = "Copied provider capability matrix as Markdown."
+    }
+
     private func selectedAccount(from accounts: [CloudProviderAccount]) -> CloudProviderAccount? {
         guard let selectedAccountId else { return nil }
         return accounts.first { $0.id == selectedAccountId }
@@ -816,6 +855,13 @@ final class CloudResourceCenterViewModel: ObservableObject {
             .replacingOccurrences(of: "|", with: "\\|")
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func capabilityReportSort(_ lhs: ProviderCapabilityStatus, _ rhs: ProviderCapabilityStatus) -> Bool {
+        if lhs.providerName != rhs.providerName {
+            return lhs.providerName < rhs.providerName
+        }
+        return lhs.capability.rawValue < rhs.capability.rawValue
     }
 }
 

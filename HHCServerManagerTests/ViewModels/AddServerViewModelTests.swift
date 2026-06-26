@@ -460,6 +460,33 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.supportsRuntimeCapability(.cloudDisks, providerId: .tencentCloud))
     }
 
+    func testCloudResourceCenterBuildsCapabilityMatrixMarkdownReport() {
+        let viewModel = CloudResourceCenterViewModel()
+        let registry = CloudProviderRegistry(adapters: [
+            MockResourceCenterCloudAdapter(
+                providerId: .tencentCloud,
+                capabilities: [.regions, .instanceDiscovery, .snapshotActions]
+            ),
+        ])
+        viewModel.refreshCapabilityMatrix(registry: registry)
+        _ = viewModel.recordRuntimeCapabilityFailure(
+            .snapshotActions,
+            providerId: .tencentCloud,
+            error: CloudProviderError.permissionDenied("UnauthorizedOperation|missing snapshot policy")
+        )
+
+        let report = viewModel.capabilityMatrixReportMarkdown()
+
+        XCTAssertTrue(report.contains("# Provider Capability Matrix"))
+        XCTAssertTrue(report.contains("- Providers: 3"))
+        XCTAssertTrue(report.contains("- Capabilities: \(CloudCapability.allCases.count)"))
+        XCTAssertTrue(report.contains("- Runtime disabled: 1"))
+        XCTAssertTrue(report.contains("| Provider | Registered | Capability | Supported | Effective | Runtime Disabled Reason |"))
+        XCTAssertTrue(report.contains("| Mock Cloud | yes | Snapshot Actions | yes | no |"))
+        XCTAssertTrue(report.contains("UnauthorizedOperation\\|missing snapshot policy"))
+        XCTAssertTrue(report.contains("| Alibaba Cloud | no | Instance Discovery | no | no |"))
+    }
+
     func testCloudResourceCenterRefreshAppliesLocalFiltersAndResetsSelection() throws {
         let repository = ServerRepository(database: try AppDatabase.inMemory())
         let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.cloud-resource-center.\(UUID().uuidString)")

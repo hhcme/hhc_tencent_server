@@ -117,6 +117,7 @@ CREATE TABLE cloud_billing_states (
 - 已为云资源中心危险操作加入成功后的 best-effort provider 刷新：快照操作后刷新快照，云盘挂载/卸载后刷新云盘，实例电源操作后刷新实例；刷新失败不会推翻已成功提交的写操作，会保留本地过渡态并提示刷新失败。
 - 已为云资源中心加入基于当前筛选结果的资源摘要：展示可见资源总数、按资源类型/provider 聚合、需要关注的异常状态数量和最近同步时间。
 - 已为云资源中心加入当前筛选结果的 Markdown 报告复制：报告包含筛选条件、资源摘要、provider/type 聚合和转义后的资源表格，便于开源 issue、真实云账号验收和调试时共享精简上下文。
+- 已为云资源中心加入 provider capability matrix Markdown 报告复制：报告包含 provider 注册状态、capability 支持状态、运行时降级状态和降级原因，便于真实云账号权限档位验收和开源问题排查。
 - 已为三家云 HTTP 请求统一加入共享并发节流器；默认最多 4 个云 API 请求同时进入 provider transport，测试可注入独立 limiter 覆盖并发上限，并覆盖等待中请求取消后不泄漏并发槽。
 
 ## 6. UI 范围
@@ -199,6 +200,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 资源搜索和过滤服务。
 - [x] 高级资源详情页。
 - [x] capability matrix 展示。
+- [x] capability matrix Markdown 报告复制：可复制 provider 注册、支持、effective 和运行时禁用原因。
 - [x] 三家云账号导入入口。
 - [x] 三家云快照操作风险确认：确认弹窗包含 provider-aware API/action 预览。
 - [x] 三家云云盘挂载/卸载风险确认：确认弹窗包含 provider-aware API/action 预览。
@@ -224,6 +226,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 云资源中心本地筛选 ViewModel 测试，覆盖 account、region、kind、status、text filter 和过滤结果变化后的 selected resource 重置。
 - [x] 云资源中心摘要 ViewModel 测试，覆盖当前筛选结果的类型/provider 聚合、异常状态数量和最近同步时间。
 - [x] 云资源中心 Markdown 报告 ViewModel 测试，覆盖当前筛选条件、摘要、最近同步时间、资源表格和 Markdown 特殊字符转义。
+- [x] 云资源中心 capability matrix Markdown 报告测试，覆盖未注册 provider、支持但运行时禁用的 capability、effective 状态和 Markdown 特殊字符转义。
 - [x] 云资源中心操作后刷新 ViewModel 测试，覆盖云盘挂载成功后从本地 `ATTACHING` 过渡态刷新为 provider 返回的 `ATTACHED` 状态。
 - [x] 真实多云只读同步 opt-in 集成测试入口：`CloudIntegrationTests` 默认跳过，启用 `HHC_TEST_CLOUD_REAL=1` 和对应云厂商只读凭据后会验证 credential、region/project、实例、云盘、快照、计费同步和统一资源作用域。
 

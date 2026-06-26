@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased / 未发布
 
+- Added a Cloud Resources provider capability matrix Markdown report copy action, including registered/supported/effective/runtime-disabled states.
 - Added a macOS deployment run Markdown report copy action with run metadata and redacted log rows.
 - Added a macOS Audit Markdown report copy action for current-server remote change and operation logs, with escaped table rows and no before/after snapshot export.
 - Added macOS remote transfer pending-queue ordering controls so queued transfers can be promoted or moved up/down without interrupting running jobs.

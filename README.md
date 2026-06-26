@@ -21,7 +21,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - Verdaccio has guarded real-server lifecycle coverage for isolated install, user creation, npm publish/install smoke, restart, config backup, and backup/restore; production deployment and proxy exposure still require environment-specific validation.
 - Cloud account metadata and cloud credential storage foundation are in place.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper are in place.
-- Tencent Cloud, Alibaba Cloud, and Huawei Cloud adapters now cover instance discovery, selected power/disk/snapshot/security-group operations, linked dashboard metrics, filtered resource summaries, and Markdown report copy with mock-backed tests.
+- Tencent Cloud, Alibaba Cloud, and Huawei Cloud adapters now cover instance discovery, selected power/disk/snapshot/security-group operations, linked dashboard metrics, filtered resource summaries, provider capability reports, and Markdown report copy with mock-backed tests.
 - Windows native Phase 8 has started with a WinUI 3 / Windows App SDK / .NET solution skeleton, password/private-key server CRUD flows, cancellable connected single-command execution, and CI-covered core layers; Windows-host validation is still pending.
 - Bilingual README for the project introduction; detailed design and implementation documents are maintained in Chinese.
 - MIT licensed.
@@ -35,7 +35,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - Verdaccio 已有受保护的真实服务器生命周期覆盖：隔离安装、用户创建、npm publish/install smoke、重启、配置备份和备份/恢复；生产环境部署和 proxy 暴露仍需按目标环境单独验收。
 - 云账号元数据和云凭据存储基础已经落地。
 - 云厂商 adapter 协议、能力 registry、统一错误和超时包装已经落地。
-- 腾讯云、阿里云和华为云 adapter 已覆盖实例发现、部分电源/云盘/快照/安全组操作、已关联实例 Dashboard 指标、筛选后的资源摘要和 Markdown 报告复制，并有 mock 测试覆盖。
+- 腾讯云、阿里云和华为云 adapter 已覆盖实例发现、部分电源/云盘/快照/安全组操作、已关联实例 Dashboard 指标、筛选后的资源摘要、provider capability 报告和 Markdown 报告复制，并有 mock 测试覆盖。
 - Windows 原生版 Phase 8 已启动，加入 WinUI 3 / Windows App SDK / .NET solution 骨架、密码/私钥服务器 CRUD 流程、可取消的连接后单条命令执行和 CI 覆盖的核心层；Windows 主机验收仍待补齐。
 - README 作为项目介绍保留中英文；详细设计和实施计划默认使用中文维护。
 - 使用 MIT 开源协议。
