@@ -1616,6 +1616,66 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         }
     }
 
+    func testPauseRemoteFileTransferQueueStopsPendingDispatchUntilResumed() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = SlowRemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        for path in ["/tmp/first-large.log", "/tmp/second-large.log", "/tmp/third-large.log"] {
+            viewModel.uploadRemoteFile(
+                localURL: URL(fileURLWithPath: path),
+                profile: profile,
+                sshClient: client,
+                transferClient: client,
+                remoteFileService: service,
+                repository: repository
+            )
+        }
+        try await waitUntil { viewModel.remoteFileTransferJobs.filter { $0.status == .running }.count == 2 }
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first { $0.localPath == "/tmp/third-large.log" }?.status, .pending)
+
+        viewModel.pauseRemoteFileTransferQueue()
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Transfer queue paused.")
+        let first = try XCTUnwrap(viewModel.remoteFileTransferJobs.first { $0.localPath == "/tmp/first-large.log" })
+        viewModel.cancelRemoteFileTransfer(first)
+
+        try await waitUntil {
+            viewModel.remoteFileTransferJobs.first { $0.localPath == "/tmp/first-large.log" }?.status == .cancelled
+        }
+        XCTAssertTrue(viewModel.isRemoteFileTransferQueuePaused)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first { $0.localPath == "/tmp/second-large.log" }?.status, .running)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.first { $0.localPath == "/tmp/third-large.log" }?.status, .pending)
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.filter { $0.status == .running }.count, 1)
+
+        var persistedStatusesByPath = Dictionary(
+            uniqueKeysWithValues: try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+                .map { ($0.localPath, $0.status) }
+        )
+        XCTAssertEqual(persistedStatusesByPath["/tmp/first-large.log"], .cancelled)
+        XCTAssertEqual(persistedStatusesByPath["/tmp/second-large.log"], .running)
+        XCTAssertEqual(persistedStatusesByPath["/tmp/third-large.log"], .pending)
+
+        viewModel.resumeRemoteFileTransferQueue()
+
+        try await waitUntil {
+            viewModel.remoteFileTransferJobs.first { $0.localPath == "/tmp/third-large.log" }?.status == .running
+        }
+        XCTAssertFalse(viewModel.isRemoteFileTransferQueuePaused)
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Transfer queue resumed.")
+        persistedStatusesByPath = Dictionary(
+            uniqueKeysWithValues: try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+                .map { ($0.localPath, $0.status) }
+        )
+        XCTAssertEqual(persistedStatusesByPath["/tmp/third-large.log"], .running)
+
+        viewModel.cancelRemoteFileTransfer()
+        try await waitUntil {
+            viewModel.remoteFileTransferJobs.allSatisfy { $0.status == .cancelled }
+        }
+    }
+
     func testLoadRemoteFileTransferHistoryMarksUnfinishedJobsInterrupted() throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)

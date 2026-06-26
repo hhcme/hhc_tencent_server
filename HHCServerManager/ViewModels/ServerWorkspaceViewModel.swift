@@ -20,6 +20,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isLoadingRemoteText = false
     @Published var isSavingRemoteText = false
     @Published var isTransferringRemoteFile = false
+    @Published var isRemoteFileTransferQueuePaused = false
     @Published var remoteFileTransferJobs: [RemoteFileTransferJob] = []
     @Published var systemdUnitList: SystemdUnitList?
     @Published var selectedSystemdUnit: SystemdUnit?
@@ -966,6 +967,19 @@ final class ServerWorkspaceViewModel: ObservableObject {
             finishRemoteFileTransferJob(request.jobId, status: .cancelled, message: "Transfer cancelled.")
             persistRemoteFileTransferJob(request.jobId, profile: request.profile, repository: request.repository)
         }
+    }
+
+    func pauseRemoteFileTransferQueue() {
+        guard !isRemoteFileTransferQueuePaused else { return }
+        isRemoteFileTransferQueuePaused = true
+        remoteFileActionMessage = "Transfer queue paused."
+    }
+
+    func resumeRemoteFileTransferQueue() {
+        guard isRemoteFileTransferQueuePaused else { return }
+        isRemoteFileTransferQueuePaused = false
+        remoteFileActionMessage = "Transfer queue resumed."
+        startNextRemoteFileTransferIfNeeded()
     }
 
     func loadSystemdUnits(
@@ -3189,6 +3203,11 @@ final class ServerWorkspaceViewModel: ObservableObject {
     }
 
     private func startNextRemoteFileTransferIfNeeded() {
+        guard !isRemoteFileTransferQueuePaused else {
+            isTransferringRemoteFile = !transferTasksByJobId.isEmpty
+            return
+        }
+
         while transferTasksByJobId.count < maximumConcurrentRemoteFileTransfers, !transferQueue.isEmpty {
             let request = transferQueue.removeFirst()
             isTransferringRemoteFile = true

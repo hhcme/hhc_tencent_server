@@ -145,6 +145,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 实现失败、取消和中断传输任务的原地恢复入口；rsync 路径可利用 `--partial --append-verify` 保留的部分文件继续传输，恢复时复用原任务 ID、保留已有进度上下文并在成功后覆盖为 succeeded，SFTP fallback 检测到 partial 时通过 `put -a` / `get -a` 尝试续传，native 传输队列留到正式 SFTP 队列阶段。
 - [x] 增加 native-ready 传输队列元数据：`remote_file_transfers` 持久化 backend、是否可续传、是否支持流式进度；OpenSSH 传输结果会标记 `rsync` / `OpenSSH SFTP` / `scp`，工作台传输列表展示 backend、resumable 和 streaming progress，为后续替换 libssh2/SwiftNIO SFTP 后端保留同一队列合同。
 - [x] 增强传输队列按任务控制：工作台每条 pending/running 传输可单独取消；pending 任务取消后不会启动，running 任务取消只停止对应 Task，不影响其它运行中的传输，并继续持久化取消状态。
+- [x] 增加传输队列暂停/恢复调度：暂停后 running 任务继续执行，但 pending 任务不会因并发槽释放而自动启动；恢复后继续按并发上限调度。
 - [ ] 实现正式 SFTP 和 native 级可恢复传输队列。
 - [x] 实现重命名。
 - [x] 实现权限查看基础展示。
@@ -172,6 +173,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 运行中传输进度回调、UI 状态更新和持久化测试。
 - [x] 传输 backend / resumable / streaming progress 元数据持久化和恢复测试：`ServerRepositoryTests.testRemoteFileTransferJobsPersistOrderAndCascade` 覆盖 SQLite 字段，`ServerWorkspaceViewModelTests.testResumeRemoteFileTransferReusesFailedUploadJobHistory` 覆盖恢复任务成功后写回 native SFTP 能力，`testRemoteFileTransferProgressUpdatesRunningJobAndPersistence` 覆盖运行中流式进度能力持久化。
 - [x] 按任务取消队列测试：`ServerWorkspaceViewModelTests.testCancelSinglePendingRemoteFileTransferDoesNotStartIt` 覆盖单个 pending 取消不启动且写入 cancelled，`testCancelSingleRunningRemoteFileTransferLeavesOtherRunning` 覆盖取消单个 running 不影响其它运行任务。
+- [x] 队列暂停/恢复调度测试：`ServerWorkspaceViewModelTests.testPauseRemoteFileTransferQueueStopsPendingDispatchUntilResumed` 覆盖暂停期间并发槽释放后 pending 不启动，恢复后 pending 进入 running 并持久化。
 - [x] rsync 进度输出解析和 `--append-verify` 参数测试。
 - [x] 可选真实 SFTP 集成测试：`SSHIntegrationTests.testRealSFTPTransferRoundTripWhenEnvironmentIsConfigured` 会禁用 rsync 和 scp fallback，强制走 OpenSSH `sftp -b`，在远端 `/tmp/hhc-transfer-*` 完成首传上传、内容校验、下载和清理。
 - [x] 可选真实 SFTP partial 续传集成测试：`SSHIntegrationTests.testRealSFTPResumePartialTransfersWhenEnvironmentIsConfigured` 会预置远端 partial upload 和本地 partial download，强制验证 `put -a` / `get -a` 可续传到完整内容。

@@ -1732,6 +1732,7 @@ struct ServerWorkspaceView: View {
                 if !viewModel.remoteFileTransferJobs.isEmpty {
                     RemoteTransferJobsView(
                         jobs: viewModel.remoteFileTransferJobs,
+                        isQueuePaused: viewModel.isRemoteFileTransferQueuePaused,
                         cancel: {
                             viewModel.cancelRemoteFileTransfer()
                         },
@@ -1740,6 +1741,12 @@ struct ServerWorkspaceView: View {
                         },
                         clearPending: {
                             viewModel.cancelPendingRemoteFileTransfers()
+                        },
+                        pauseQueue: {
+                            viewModel.pauseRemoteFileTransferQueue()
+                        },
+                        resumeQueue: {
+                            viewModel.resumeRemoteFileTransferQueue()
                         },
                         retry: { job in
                             viewModel.retryRemoteFileTransfer(
@@ -4474,9 +4481,12 @@ private struct RemoteTextSaveAsSheet: View {
 
 private struct RemoteTransferJobsView: View {
     let jobs: [RemoteFileTransferJob]
+    let isQueuePaused: Bool
     let cancel: () -> Void
     let cancelJob: (RemoteFileTransferJob) -> Void
     let clearPending: () -> Void
+    let pauseQueue: () -> Void
+    let resumeQueue: () -> Void
     let retry: (RemoteFileTransferJob) -> Void
 
     var body: some View {
@@ -4486,6 +4496,12 @@ private struct RemoteTransferJobsView: View {
                     .font(.headline)
                 Spacer()
                 if jobs.contains(where: { $0.status == .pending }) {
+                    Button {
+                        isQueuePaused ? resumeQueue() : pauseQueue()
+                    } label: {
+                        Label(isQueuePaused ? "Resume" : "Pause", systemImage: isQueuePaused ? "play.fill" : "pause.fill")
+                    }
+                    .buttonStyle(.bordered)
                     Button {
                         clearPending()
                     } label: {
