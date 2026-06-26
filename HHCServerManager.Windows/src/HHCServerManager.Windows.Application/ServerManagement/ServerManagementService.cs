@@ -151,6 +151,22 @@ public sealed class ServerManagementService(
         return await importer.ImportAsync(knownHostsContent, profile, cancellationToken);
     }
 
+    public async Task<KnownHostsImportResult> ImportKnownHostsFileAsync(
+        ServerProfile profile,
+        string knownHostsPath,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(knownHostsPath))
+        {
+            throw new InvalidOperationException("Known hosts file path is required.");
+        }
+
+        await using var stream = File.OpenRead(knownHostsPath);
+        using var reader = new StreamReader(stream);
+        var importer = new OpenSshKnownHostsImporter(hostKeys, _timeProvider);
+        return await importer.ImportFileAsync(reader, profile, cancellationToken);
+    }
+
     public async Task<SshHostKey> ScanHostKeyAsync(
         ServerProfile profile,
         IWindowsSshClient sshClient,

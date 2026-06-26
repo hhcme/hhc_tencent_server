@@ -4,6 +4,8 @@ using HHCServerManager.Windows.Domain.Ssh;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Storage.Pickers;
+using WinRT.Interop;
 
 namespace HHCServerManager.Windows.App;
 
@@ -176,6 +178,28 @@ public sealed partial class MainWindow : Window
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
         {
             await ViewModel.ImportKnownHostsForSelectedServerAsync(knownHostsBox.Text);
+        }
+    }
+
+    private async void ImportKnownHostsFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedServer is null)
+        {
+            return;
+        }
+
+        var picker = new FileOpenPicker
+        {
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary
+        };
+        picker.FileTypeFilter.Add(".txt");
+        picker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+
+        var file = await picker.PickSingleFileAsync();
+        if (file is not null)
+        {
+            await ViewModel.ImportKnownHostsFileForSelectedServerAsync(file.Path);
         }
     }
 

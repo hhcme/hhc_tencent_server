@@ -137,7 +137,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] 实现 `printf hhc-ssh-ok` smoke test 编排；已提供 Windows-only 真实服务器执行测试入口，真实执行待 Windows 主机验收。
 - [x] 实现连接后的单条 SSH 命令执行：复用 SSH.NET adapter 和连接状态机，命令输入会 trim，空命令被拒绝，stdout/stderr 写入工作台输出区，并保留会话内最近命令；选择最近命令只会填回输入框，不会立即执行远端命令。
 - [x] 实现连接检查和 smoke test 运行中的取消：Disconnect 会取消当前 SSH.NET 操作的 cancellation token，状态恢复为 disconnected，且取消后可重新连接。
-- [x] 实现 OpenSSH `known_hosts` 导入：`OpenSshKnownHostsImporter` 可解析普通明文 host 行、非默认端口 `[host]:port` 和逗号分隔 host token，计算 SHA256 指纹并写入 Windows `IHostKeyTrustStore`；`MainWindowViewModel` 和 WinUI command bar 已提供当前服务器的粘贴导入入口，文件选择器入口留到 Windows 主机验收时接入。
+- [x] 实现 OpenSSH `known_hosts` 导入：`OpenSshKnownHostsImporter` 可解析普通明文 host 行、非默认端口 `[host]:port` 和逗号分隔 host token，计算 SHA256 指纹并写入 Windows `IHostKeyTrustStore`；`MainWindowViewModel` 和 WinUI command bar 已提供当前服务器的粘贴导入入口和文件选择器入口。
 
 ### Task 5：Windows UI
 
@@ -164,7 +164,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] Windows 服务器列表搜索和空状态测试：`MainWindowViewModelFiltersServerListAndKeepsWorkspaceSelection` 覆盖 name/host/username/group 搜索、无结果空状态，以及搜索过滤不会清空当前工作台选择。
 - [x] Windows 单条命令执行测试：`MainWindowViewModelRunsCustomCommandAfterConnection` 覆盖连接后执行自定义命令、输出展示和会话内最近命令；`MainWindowViewModelRejectsBlankCustomCommand` 覆盖空命令拒绝；`MainWindowViewModelSelectsRecentCommandWithoutRunningIt` 和 `MainWindowViewModelRecentCommandsDeduplicateAndKeepTenItems` 覆盖最近命令选择、去重和 10 条上限。
 - [x] Windows 连接取消测试：`MainWindowViewModelDisconnectCancelsRunningHostKeyScan` 和 `MainWindowViewModelDisconnectCancelsRunningSmokeTestAndCanReconnect` 覆盖运行中 host key scan / smoke test 取消、状态恢复和后续重连。
-- [x] Windows `known_hosts` 导入测试：覆盖默认端口明文 host 导入、非默认端口 `[host]:port` 匹配、hashed/marker/不匹配/非法 key 行跳过，以及 ViewModel 当前服务器导入和空内容拒绝。
+- [x] Windows `known_hosts` 导入测试：覆盖默认端口明文 host 导入、非默认端口 `[host]:port` 匹配、hashed/marker/不匹配/非法 key 行跳过，以及 ViewModel 当前服务器粘贴导入、文件导入和空内容拒绝。
 - [x] GitHub Actions Windows core tests：Windows runner 运行 `scripts/ci-windows-core.ps1`，覆盖不依赖 WinUI/XAML 编译器的核心层。
 - [x] 可选真实 SSH 集成测试：`RealWindowsSshSmokeTestWhenEnvironmentIsConfigured` 默认跳过，Windows 主机设置 `HHC_WINDOWS_TEST_SSH_REAL=1` 和 SSH 环境变量后会覆盖 Credential Manager、SSH.NET host key scan、trust、`printf hhc-ssh-ok`、删除清理。
 

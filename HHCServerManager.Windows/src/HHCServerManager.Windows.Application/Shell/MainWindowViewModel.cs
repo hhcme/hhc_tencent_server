@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using HHCServerManager.Windows.Application.Ports;
+using HHCServerManager.Windows.Application.Security;
 using HHCServerManager.Windows.Application.ServerManagement;
 using HHCServerManager.Windows.Domain.Security;
 using HHCServerManager.Windows.Domain.Servers;
@@ -372,14 +373,38 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 SelectedServer,
                 knownHostsContent,
                 cancellationToken);
-            StatusMessage = result.ImportedCount == 0
-                ? $"No matching known_hosts entries were imported. Skipped {result.SkippedCount}."
-                : $"Imported {result.ImportedCount} known_hosts entry for {SelectedServer.Name}. Skipped {result.SkippedCount}.";
+            StatusMessage = FormatKnownHostsImportStatus(result);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
             ErrorMessage = error.Message;
             StatusMessage = "Could not import known_hosts.";
+        }
+    }
+
+    public async Task ImportKnownHostsFileForSelectedServerAsync(
+        string knownHostsPath,
+        CancellationToken cancellationToken = default)
+    {
+        if (SelectedServer is null)
+        {
+            ErrorMessage = "Select a server before importing known_hosts.";
+            return;
+        }
+
+        ErrorMessage = null;
+        try
+        {
+            var result = await _serverManagement.ImportKnownHostsFileAsync(
+                SelectedServer,
+                knownHostsPath,
+                cancellationToken);
+            StatusMessage = FormatKnownHostsImportStatus(result);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            ErrorMessage = error.Message;
+            StatusMessage = "Could not import known_hosts file.";
         }
     }
 
@@ -548,6 +573,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(HasRecentCommands));
         OnPropertyChanged(nameof(HasNoRecentCommands));
     }
+
+    private string FormatKnownHostsImportStatus(KnownHostsImportResult result) =>
+        result.ImportedCount == 0
+            ? $"No matching known_hosts entries were imported. Skipped {result.SkippedCount}."
+            : $"Imported {result.ImportedCount} known_hosts entry for {SelectedServer?.Name}. Skipped {result.SkippedCount}.";
 
     private void RefreshVisibleServers()
     {

@@ -20,6 +20,7 @@
             <AppBarButton Icon="Refresh" Label="Refresh" Click="Refresh_Click" />
             <CommandBar.SecondaryCommands>
                 <AppBarButton Icon="Import" Label="Import known_hosts for selected server" Click="ImportKnownHosts_Click" />
+                <AppBarButton Icon="OpenFile" Label="Import known_hosts file" Click="ImportKnownHostsFile_Click" />
                 <AppBarButton Icon="Delete" Label="Delete selected server" Click="DeleteServer_Click" />
             </CommandBar.SecondaryCommands>
         </CommandBar>
