@@ -7,5 +7,6 @@ public enum WindowsConnectionState
     AwaitingHostKeyTrust,
     Connected,
     RunningSmokeTest,
+    RunningCommand,
     Failed
 }

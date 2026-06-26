@@ -145,9 +145,10 @@ Phase 8 的第一目标不是功能全量追平，而是：
 2. 服务器配置 CRUD。
 3. Windows Credential Manager 凭据存储。
 4. 真实 SSH 连接和 `printf hhc-ssh-ok` smoke test。
-5. 复用云 provider adapter 的领域模型。
+5. 连接后执行单条 SSH 命令。
+6. 复用云 provider adapter 的领域模型。
 
-当前仓库已加入 WinUI 3 / Windows App SDK 2.2.0 / .NET 10 solution 骨架，并完成可在 macOS 上验证的核心层测试。WinUI XAML 编译、MSIX 打包、Credential Manager 真实读写和真实 SSH smoke test 仍需 Windows 主机补验。
+当前仓库已加入 WinUI 3 / Windows App SDK 2.2.0 / .NET 10 solution 骨架，并完成可在 macOS 上验证的核心层测试，包括服务器 CRUD、host key trust、smoke test 状态机、取消和连接后的单条命令执行。WinUI XAML 编译、MSIX 打包、Credential Manager 真实读写和真实 SSH smoke test 仍需 Windows 主机补验。
 
 ## 9. 参考资料
 

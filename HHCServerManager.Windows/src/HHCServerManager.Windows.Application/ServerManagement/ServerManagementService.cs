@@ -155,4 +155,20 @@ public sealed class ServerManagementService(
             ?? throw new InvalidOperationException("Credential is missing for this server.");
         return await sshClient.ExecuteAsync(profile, credential, "printf hhc-ssh-ok", cancellationToken);
     }
+
+    public async Task<CommandResult> RunCommandAsync(
+        ServerProfile profile,
+        IWindowsSshClient sshClient,
+        string command,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            throw new InvalidOperationException("Command is required.");
+        }
+
+        var credential = await credentials.ReadAsync(profile.CredentialRef, cancellationToken)
+            ?? throw new InvalidOperationException("Credential is missing for this server.");
+        return await sshClient.ExecuteAsync(profile, credential, command.Trim(), cancellationToken);
+    }
 }

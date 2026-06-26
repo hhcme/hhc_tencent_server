@@ -13,8 +13,9 @@
 3. 实现 Windows 版服务器 CRUD。
 4. 使用 Windows Credential Manager / DPAPI 保存 SSH 凭据。
 5. 实现真实 SSH 连接、host key trust、`printf hhc-ssh-ok` smoke test。
-6. 复用 macOS 版领域概念和接口命名，不强行共享 UI 代码。
-7. 输出 Windows 后续追平计划。
+6. 实现连接后的单条 SSH 命令执行。
+7. 复用 macOS 版领域概念和接口命名，不强行共享 UI 代码。
+8. 输出 Windows 后续追平计划。
 
 ## 2. 非目标
 
@@ -96,6 +97,7 @@ CREATE TABLE trusted_host_keys (
 - 服务器切换器。
 - Host key trust dialog。
 - Connect / Disconnect / Smoke Test。
+- 连接后的单条命令输入、执行和输出展示。
 
 Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 
@@ -133,6 +135,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] 实现密码认证 adapter。
 - [x] 实现私钥认证 adapter；已提供 Windows-only 真实私钥/passphrase 测试入口，真实 Windows 主机上的私钥/passphrase 组合待验收。
 - [x] 实现 `printf hhc-ssh-ok` smoke test 编排；已提供 Windows-only 真实服务器执行测试入口，真实执行待 Windows 主机验收。
+- [x] 实现连接后的单条 SSH 命令执行：复用 SSH.NET adapter 和连接状态机，命令输入会 trim，空命令被拒绝，stdout/stderr 写入工作台输出区，并保留会话内最近命令。
 - [x] 实现连接检查和 smoke test 运行中的取消：Disconnect 会取消当前 SSH.NET 操作的 cancellation token，状态恢复为 disconnected，且取消后可重新连接。
 
 ### Task 5：Windows UI
@@ -144,6 +147,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] 单服务器工作台骨架。
 - [x] 服务器切换器入口骨架：左侧服务器列表选择即切换当前工作台上下文。
 - [x] Host key trust dialog：连接遇到未知或变更指纹时弹出确认 dialog，工作台侧栏也展示 presented fingerprint，并提供 trust/reject 操作。
+- [x] 单条命令执行入口：工作台 Overview 提供命令输入框和 Run 按钮，连接成功且命令非空时可执行，输出复用命令输出区。
 - [x] 错误提示和输出复制：错误通过 InfoBar 展示，命令输出区提供复制按钮。
 
 ### Task 6：测试
@@ -157,6 +161,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] Windows 添加私钥服务器 ViewModel 测试：覆盖私钥/passphrase 进入 Credential Store、profile 记录为 `PrivateKey`、SQLite 不保存私钥材料、空私钥拒绝。
 - [x] Windows 编辑服务器测试：覆盖 profile 更新、保留/替换凭据、认证类型切换必须提供新凭据、host/port 变化清理旧 trusted host key、ViewModel 替换当前选中服务器。
 - [x] Windows 服务器列表搜索和空状态测试：`MainWindowViewModelFiltersServerListAndKeepsWorkspaceSelection` 覆盖 name/host/username/group 搜索、无结果空状态，以及搜索过滤不会清空当前工作台选择。
+- [x] Windows 单条命令执行测试：`MainWindowViewModelRunsCustomCommandAfterConnection` 覆盖连接后执行自定义命令、输出展示和会话内最近命令；`MainWindowViewModelRejectsBlankCustomCommand` 覆盖空命令拒绝。
 - [x] Windows 连接取消测试：`MainWindowViewModelDisconnectCancelsRunningHostKeyScan` 和 `MainWindowViewModelDisconnectCancelsRunningSmokeTestAndCanReconnect` 覆盖运行中 host key scan / smoke test 取消、状态恢复和后续重连。
 - [x] GitHub Actions Windows core tests：Windows runner 运行 `scripts/ci-windows-core.ps1`，覆盖不依赖 WinUI/XAML 编译器的核心层。
 - [x] 可选真实 SSH 集成测试：`RealWindowsSshSmokeTestWhenEnvironmentIsConfigured` 默认跳过，Windows 主机设置 `HHC_WINDOWS_TEST_SSH_REAL=1` 和 SSH 环境变量后会覆盖 Credential Manager、SSH.NET host key scan、trust、`printf hhc-ssh-ok`、删除清理。
@@ -169,6 +174,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [ ] 首次连接弹出 host key trust dialog。
 - [ ] 确认后连接成功。
 - [ ] smoke test 返回 `hhc-ssh-ok`。
+- [ ] 连接后执行 `uname -a` 并展示输出。
 - [ ] 主机指纹变化会阻断连接。
 - [ ] 删除服务器后凭据清理。
 - [ ] MSIX 或开发包可安装运行。

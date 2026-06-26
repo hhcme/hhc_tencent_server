@@ -156,6 +156,8 @@ public sealed partial class MainWindow : Window
 
     private async void SmokeTest_Click(object sender, RoutedEventArgs e) => await ViewModel.RunSmokeTestAsync();
 
+    private async void RunCommand_Click(object sender, RoutedEventArgs e) => await ViewModel.RunCommandAsync();
+
     private void Disconnect_Click(object sender, RoutedEventArgs e) => ViewModel.Disconnect();
 
     private void CopyOutput_Click(object sender, RoutedEventArgs e)

@@ -260,6 +260,54 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task MainWindowViewModelRunsCustomCommandAfterConnection()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("", "custom-output", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.AddPasswordServerAsync("Prod", "example.internal", 22, "root", "secret");
+        await viewModel.ConnectAsync();
+        await viewModel.TrustPendingHostKeyAndConnectAsync();
+
+        viewModel.CommandInput = "  whoami  ";
+        await viewModel.RunCommandAsync();
+
+        Assert.Equal(WindowsConnectionState.Connected, viewModel.ConnectionState);
+        Assert.Equal("custom-output", viewModel.CommandOutput);
+        Assert.Equal("Command succeeded.", viewModel.StatusMessage);
+        Assert.Equal(["whoami"], viewModel.RecentCommands.ToArray());
+    }
+
+    [Fact]
+    public async Task MainWindowViewModelRejectsBlankCustomCommand()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("", "custom-output", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.AddPasswordServerAsync("Prod", "example.internal", 22, "root", "secret");
+        await viewModel.ConnectAsync();
+        await viewModel.TrustPendingHostKeyAndConnectAsync();
+
+        viewModel.CommandInput = "   ";
+        await viewModel.RunCommandAsync();
+
+        Assert.Equal(WindowsConnectionState.Connected, viewModel.ConnectionState);
+        Assert.Equal("Command is required.", viewModel.ErrorMessage);
+        Assert.Equal("Could not run command.", viewModel.StatusMessage);
+        Assert.Empty(viewModel.RecentCommands);
+    }
+
+    [Fact]
     public async Task MainWindowViewModelAddsPrivateKeyServerWithoutPersistingKeyMaterialToSqlite()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"hhc-windows-private-key-{Guid.NewGuid():N}.sqlite");

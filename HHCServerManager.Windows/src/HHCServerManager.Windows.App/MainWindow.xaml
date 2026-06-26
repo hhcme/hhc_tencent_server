@@ -130,6 +130,22 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
+                            <TextBox
+                                Header="Command"
+                                PlaceholderText="uname -a"
+                                Text="{x:Bind ViewModel.CommandInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <Button
+                                Grid.Column="1"
+                                Margin="8,28,0,0"
+                                Content="Run"
+                                IsEnabled="{x:Bind ViewModel.CanRunCommand, Mode=OneWay}"
+                                Click="RunCommand_Click" />
+                        </Grid>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <TextBlock Text="Overview" Style="{StaticResource SubtitleTextBlockStyle}" />
                             <Button Grid.Column="1" Content="Copy output" Click="CopyOutput_Click" />
                         </Grid>

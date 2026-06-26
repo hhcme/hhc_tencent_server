@@ -19,6 +19,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private PendingHostKeyTrust? _pendingHostKeyTrust;
     private string _statusMessage = "Select a server to connect.";
     private string _commandOutput = "Command output will appear here after connection.";
+    private string _commandInput = "uname -a";
     private string _serverSearchText = string.Empty;
     private ServerProfile? _selectedVisibleServer;
     private string? _errorMessage;
@@ -39,6 +40,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public ObservableCollection<ServerProfile> Servers { get; } = [];
 
     public ObservableCollection<ServerProfile> VisibleServers { get; } = [];
+
+    public ObservableCollection<string> RecentCommands { get; } = [];
 
     public string ServerSearchText
     {
@@ -79,6 +82,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(SelectedServerSubtitle));
                 OnPropertyChanged(nameof(CanConnect));
                 OnPropertyChanged(nameof(CanRunSmokeTest));
+                OnPropertyChanged(nameof(CanRunCommand));
             }
         }
     }
@@ -100,6 +104,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(SelectedServerSubtitle));
                 OnPropertyChanged(nameof(CanConnect));
                 OnPropertyChanged(nameof(CanRunSmokeTest));
+                OnPropertyChanged(nameof(CanRunCommand));
                 OnPropertyChanged(nameof(CanConfirmHostKey));
                 OnPropertyChanged(nameof(CanDisconnect));
                 OnPropertyChanged(nameof(IsBusy));
@@ -132,6 +137,18 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         private set => SetProperty(ref _commandOutput, value);
     }
 
+    public string CommandInput
+    {
+        get => _commandInput;
+        set
+        {
+            if (SetProperty(ref _commandInput, value))
+            {
+                OnPropertyChanged(nameof(CanRunCommand));
+            }
+        }
+    }
+
     public string? ErrorMessage
     {
         get => _errorMessage;
@@ -157,11 +174,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             ? "Add a Windows SSH server to start."
             : "Adjust the search text or clear the filter.";
 
-    public bool IsBusy => ConnectionState is WindowsConnectionState.CheckingHostKey or WindowsConnectionState.RunningSmokeTest;
+    public bool IsBusy => ConnectionState is WindowsConnectionState.CheckingHostKey
+        or WindowsConnectionState.RunningSmokeTest
+        or WindowsConnectionState.RunningCommand;
 
     public bool CanConnect => SelectedServer is not null && !IsBusy && ConnectionState != WindowsConnectionState.Connected;
 
     public bool CanRunSmokeTest => SelectedServer is not null && ConnectionState == WindowsConnectionState.Connected;
+
+    public bool CanRunCommand => CanRunSmokeTest && !string.IsNullOrWhiteSpace(CommandInput);
 
     public bool CanConfirmHostKey => PendingHostKeyTrust is not null && ConnectionState == WindowsConnectionState.AwaitingHostKeyTrust;
 
@@ -414,6 +435,36 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }, cancellationToken);
     }
 
+    public async Task RunCommandAsync(CancellationToken cancellationToken = default)
+    {
+        if (SelectedServer is null || ConnectionState != WindowsConnectionState.Connected)
+        {
+            ErrorMessage = "Connect to a server before running a command.";
+            return;
+        }
+
+        var command = CommandInput.Trim();
+        if (command.Length == 0)
+        {
+            ErrorMessage = "Command is required.";
+            StatusMessage = "Could not run command.";
+            OnPropertyChanged(nameof(CanRunCommand));
+            return;
+        }
+
+        await RunAsync(WindowsConnectionState.RunningCommand, async operationCancellationToken =>
+        {
+            StatusMessage = $"Running command: {command}";
+            var result = await _serverManagement.RunCommandAsync(SelectedServer, _sshClient, command, operationCancellationToken);
+            CommandOutput = string.IsNullOrEmpty(result.Stderr)
+                ? result.Stdout
+                : $"{result.Stdout}{Environment.NewLine}{result.Stderr}";
+            RememberCommand(result.Command);
+            ConnectionState = result.Succeeded ? WindowsConnectionState.Connected : WindowsConnectionState.Failed;
+            StatusMessage = result.Succeeded ? "Command succeeded." : $"Command failed with exit code {result.ExitCode}.";
+        }, cancellationToken);
+    }
+
     public void Disconnect()
     {
         if (IsBusy)
@@ -436,6 +487,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         RefreshVisibleServers();
         SelectedServer = updated;
+    }
+
+    private void RememberCommand(string command)
+    {
+        var existingIndex = RecentCommands.IndexOf(command);
+        if (existingIndex >= 0)
+        {
+            RecentCommands.RemoveAt(existingIndex);
+        }
+
+        RecentCommands.Insert(0, command);
+        while (RecentCommands.Count > 10)
+        {
+            RecentCommands.RemoveAt(RecentCommands.Count - 1);
+        }
     }
 
     private void RefreshVisibleServers()

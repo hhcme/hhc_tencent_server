@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased / 未发布
 
+- Added Windows native connected single-command execution with WinUI command input, ViewModel state, recent in-session commands, and core tests.
 - Added remote change audit records for manual deployment and rollback runs, including project target, status, summary, and previous/target commit snapshots.
 - Added Windows native ViewModel cancellation for running host-key scans and SSH smoke tests, with core tests for cancellation and reconnect.
 - Added an OpenSSH `sftp reget/reput` fallback between rsync and scp so remote file transfers can attempt resumable upload/download when rsync is unavailable or fails.
