@@ -1526,6 +1526,14 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.remoteFileActionMessage, "Cleared 2 completed transfers.")
         XCTAssertNil(viewModel.remoteFileErrorMessage)
         XCTAssertEqual(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).map(\.id), [pending.id, running.id])
+
+        let logs = try repository.fetchOperationLogs(targetId: profile.id.uuidString)
+        let clearLog = try XCTUnwrap(logs.first { $0.action == "clear_transfer_history" })
+        XCTAssertEqual(clearLog.scope, "remote_file")
+        XCTAssertEqual(clearLog.status, "success")
+        XCTAssertEqual(clearLog.message, "deleted_entries=2")
+        XCTAssertFalse(clearLog.message?.contains("done.env") ?? true)
+        XCTAssertFalse(clearLog.message?.contains("failed.env") ?? true)
     }
 
     func testResumeRemoteFileTransferReusesFailedUploadJobHistory() async throws {

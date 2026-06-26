@@ -1200,6 +1200,15 @@ final class ServerWorkspaceViewModel: ObservableObject {
 
         do {
             try repository?.deleteTerminalRemoteFileTransferJobs(serverId: profile.id)
+            try repository?.saveOperationLog(OperationLogEntry(
+                id: UUID(),
+                scope: "remote_file",
+                action: "clear_transfer_history",
+                targetId: profile.id.uuidString,
+                status: "success",
+                message: "deleted_entries=\(terminalCount)",
+                createdAt: Date()
+            ))
             remoteFileTransferJobs.removeAll { $0.status.isTerminal }
             remoteFileActionMessage = "Cleared \(terminalCount) completed transfer\(terminalCount == 1 ? "" : "s")."
             remoteFileErrorMessage = nil
