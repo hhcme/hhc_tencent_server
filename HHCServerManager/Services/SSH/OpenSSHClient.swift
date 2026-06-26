@@ -12,19 +12,19 @@ enum SSHClientError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unknownHostKey:
-            "This server host key is not trusted yet."
+            L10n.string("This server host key is not trusted yet.")
         case let .hostKeyChanged(current, trusted):
-            "Host key changed. Trusted \(trusted.fingerprintSHA256), current \(current.fingerprintSHA256)."
+            L10n.format("Host key changed. Trusted %@, current %@.", trusted.fingerprintSHA256, current.fingerprintSHA256)
         case .missingPrivateKey:
-            "Private key data was not found in Keychain."
+            L10n.string("Private key data was not found in Keychain.")
         case .missingPassword:
-            "Password was not found in Keychain."
+            L10n.string("Password was not found in Keychain.")
         case let .processFailed(message):
             message
         case .invalidHostKeyScan:
-            "Could not read a valid host key from ssh-keyscan."
+            L10n.string("Could not read a valid host key from ssh-keyscan.")
         case .cancelled:
-            "Command was cancelled."
+            L10n.string("Command was cancelled.")
         }
     }
 }

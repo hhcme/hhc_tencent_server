@@ -26,6 +26,7 @@
 		100000000000000000000117 /* HostKeyTrustStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000020 /* HostKeyTrustStore.swift */; };
 		100000000000000000000118 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000021 /* Localization.swift */; };
 		100000000000000000000119 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000024 /* Localizable.strings */; };
+		100000000000000000000120 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000027 /* InfoPlist.strings */; };
 		900000000000000000000101 /* ServerRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000001 /* ServerRepositoryTests.swift */; };
 		900000000000000000000102 /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000002 /* KeychainServiceTests.swift */; };
 		900000000000000000000103 /* ServerManagementServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000003 /* ServerManagementServiceTests.swift */; };
@@ -71,6 +72,8 @@
 		100000000000000000000021 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
 		100000000000000000000022 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		100000000000000000000023 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = "en.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		100000000000000000000025 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		100000000000000000000026 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = "en.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		900000000000000000000001 /* ServerRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRepositoryTests.swift; sourceTree = "<group>"; };
 		900000000000000000000002 /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
 		900000000000000000000003 /* ServerManagementServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementServiceTests.swift; sourceTree = "<group>"; };
@@ -91,6 +94,15 @@
 				100000000000000000000023 /* en */,
 			);
 			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+		100000000000000000000027 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				100000000000000000000025 /* zh-Hans */,
+				100000000000000000000026 /* en */,
+			);
+			name = InfoPlist.strings;
 			sourceTree = "<group>";
 		};
 /* End PBXVariantGroup section */
@@ -199,6 +211,7 @@
 				100000000000000000000017 /* HHCServerManager.entitlements */,
 				100000000000000000000021 /* Localization.swift */,
 				100000000000000000000024 /* Localizable.strings */,
+				100000000000000000000027 /* InfoPlist.strings */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -378,6 +391,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000119 /* Localizable.strings in Resources */,
+				100000000000000000000120 /* InfoPlist.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

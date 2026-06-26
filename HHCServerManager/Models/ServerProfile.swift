@@ -1885,13 +1885,13 @@ enum SSHConnectionState: Equatable, Hashable {
     var displayName: String {
         switch self {
         case .disconnected:
-            "Disconnected"
+            L10n.string("Disconnected")
         case .connecting:
-            "Connecting"
+            L10n.string("Connecting")
         case .connected:
-            "Connected"
+            L10n.string("Connected")
         case .failed:
-            "Failed"
+            L10n.string("Failed")
         }
     }
 }

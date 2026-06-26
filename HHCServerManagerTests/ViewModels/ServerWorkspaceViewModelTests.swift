@@ -837,7 +837,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isRunningCommand)
         XCTAssertEqual(viewModel.lastCommandFailure, CommandFailureSummary(
             command: "sleep 30",
-            message: "Command was cancelled."
+            message: L10n.string("Command was cancelled.")
         ))
     }
 

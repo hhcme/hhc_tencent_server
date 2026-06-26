@@ -403,10 +403,10 @@ struct ServerWorkspaceView: View {
             Button {
                 appState.closeWorkspace()
             } label: {
-                Label("Servers", systemImage: "chevron.left")
+                Label(L10n.string("Servers"), systemImage: "chevron.left")
             }
 
-            Picker("Current Server", selection: currentServerBinding) {
+            Picker(L10n.string("Current Server"), selection: currentServerBinding) {
                 ForEach(appState.servers) { server in
                     Text(server.name).tag(server.id)
                 }
@@ -422,7 +422,7 @@ struct ServerWorkspaceView: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Label("Smoke Test", systemImage: "checkmark.seal")
+                    Label(L10n.string("Smoke Test"), systemImage: "checkmark.seal")
                 }
             }
             .disabled(viewModel.isRunningSmokeTest)
@@ -475,13 +475,13 @@ struct ServerWorkspaceView: View {
                             ProgressView()
                                 .controlSize(.small)
                         } else {
-                            Label("Refresh Dashboard", systemImage: "arrow.clockwise")
+                            Label(L10n.string("Refresh Dashboard"), systemImage: "arrow.clockwise")
                         }
                     }
                     .disabled(viewModel.isRefreshingDashboard)
 
                     Toggle(isOn: dashboardAutoRefreshBinding) {
-                        Label("Auto", systemImage: "timer")
+                        Label(L10n.string("Auto"), systemImage: "timer")
                     }
                     .toggleStyle(.switch)
                     .disabled(viewModel.connectionState == .connecting)
@@ -489,7 +489,7 @@ struct ServerWorkspaceView: View {
                     Button {
                         viewModel.connect(profile: profile, sshClient: appState.sshClient)
                     } label: {
-                        Label("Connect", systemImage: "bolt.horizontal.circle")
+                        Label(L10n.string("Connect"), systemImage: "bolt.horizontal.circle")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.isRunningSmokeTest || viewModel.connectionState == .connecting)
@@ -497,7 +497,7 @@ struct ServerWorkspaceView: View {
                     Button {
                         viewModel.disconnect()
                     } label: {
-                        Label("Disconnect", systemImage: "xmark.circle")
+                        Label(L10n.string("Disconnect"), systemImage: "xmark.circle")
                     }
                     .disabled(viewModel.connectionState == .disconnected || viewModel.connectionState == .connecting)
                 }
@@ -516,7 +516,7 @@ struct ServerWorkspaceView: View {
     private var dashboardPanel: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Dashboard")
+                Text(L10n.string("Dashboard"))
                     .font(.title2.weight(.semibold))
                 Spacer()
                 if let capturedAt = viewModel.dashboardSnapshot?.capturedAt {
@@ -537,7 +537,7 @@ struct ServerWorkspaceView: View {
                 if !snapshot.warnings.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(snapshot.warnings) { warning in
-                            Label("\(warning.source): \(warning.message)", systemImage: "exclamationmark.triangle")
+                            Label("\(L10n.string(warning.source)): \(L10n.string(warning.message))", systemImage: "exclamationmark.triangle")
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                         }
@@ -551,9 +551,9 @@ struct ServerWorkspaceView: View {
                 }
             } else {
                 ContentUnavailableView(
-                    "No Dashboard Snapshot",
+                    L10n.string("No Dashboard Snapshot"),
                     systemImage: "gauge.with.dots.needle.67percent",
-                    description: Text("Refresh the dashboard to collect SSH metrics and server capabilities.")
+                    description: Text(L10n.string("Refresh the dashboard to collect SSH metrics and server capabilities."))
                 )
                 .frame(maxWidth: .infinity, minHeight: 180)
             }
@@ -564,18 +564,18 @@ struct ServerWorkspaceView: View {
         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
             if let osName = capabilities.osName {
                 GridRow {
-                    Text("OS").foregroundStyle(.secondary)
+                    Text(L10n.string("OS")).foregroundStyle(.secondary)
                     Text(osName)
                 }
             }
             if let kernelVersion = capabilities.kernelVersion {
                 GridRow {
-                    Text("Kernel").foregroundStyle(.secondary)
+                    Text(L10n.string("Kernel")).foregroundStyle(.secondary)
                     Text(kernelVersion)
                 }
             }
             GridRow {
-                Text("Capabilities").foregroundStyle(.secondary)
+                Text(L10n.string("Capabilities")).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     CapabilityBadge(title: "/proc", enabled: capabilities.hasProc)
                     CapabilityBadge(title: "systemd", enabled: capabilities.hasSystemd)
@@ -4492,10 +4492,10 @@ private struct DashboardMetricTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(metric.name)
+                Text(L10n.string(metric.name))
                     .font(.headline)
                 Spacer()
-                Text(metric.source)
+                Text(L10n.string(metric.source))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -4504,7 +4504,7 @@ private struct DashboardMetricTile: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             if let unit = metric.unit {
-                Text(unit)
+                Text(L10n.string(unit))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
