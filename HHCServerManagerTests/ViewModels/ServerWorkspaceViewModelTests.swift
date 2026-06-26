@@ -113,6 +113,33 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(deployRisk.confirmationMessage.contains("git reset --hard 'origin/main'"))
         XCTAssertTrue(deployRisk.confirmationMessage.contains("systemctl restart site.service"))
 
+        let verdaccioDraft = VerdaccioInstallDraft(
+            name: "Team Registry",
+            installPath: "/srv/verdaccio",
+            dataPath: "/srv/verdaccio/storage",
+            listenHost: "127.0.0.1",
+            listenPort: 4873,
+            serviceName: "verdaccio",
+            version: "5.31.2"
+        )
+        let verdaccioRestartRisk = RemoteOperationRiskFactory.verdaccioServiceAction(.restart, draft: verdaccioDraft)
+        XCTAssertEqual(verdaccioRestartRisk.level, RemoteOperationRiskLevel.medium)
+        XCTAssertEqual(verdaccioRestartRisk.auditTargetType, "registry")
+        XCTAssertEqual(verdaccioRestartRisk.auditAction, "restart")
+        XCTAssertTrue(verdaccioRestartRisk.confirmationMessage.contains("systemctl restart"))
+        XCTAssertTrue(verdaccioRestartRisk.confirmationMessage.contains("verdaccio.service"))
+
+        let verdaccioStopRisk = RemoteOperationRiskFactory.verdaccioServiceAction(.stop, draft: verdaccioDraft)
+        XCTAssertEqual(verdaccioStopRisk.level, RemoteOperationRiskLevel.high)
+        XCTAssertEqual(verdaccioStopRisk.auditAction, "stop")
+
+        let verdaccioUpgradeRisk = RemoteOperationRiskFactory.verdaccioUpgrade(draft: verdaccioDraft)
+        XCTAssertEqual(verdaccioUpgradeRisk.level, RemoteOperationRiskLevel.high)
+        XCTAssertEqual(verdaccioUpgradeRisk.auditTargetType, "registry")
+        XCTAssertEqual(verdaccioUpgradeRisk.auditAction, "upgrade")
+        XCTAssertTrue(verdaccioUpgradeRisk.confirmationMessage.contains("pinned Verdaccio 5.31.2"))
+        XCTAssertTrue(verdaccioUpgradeRisk.confirmationMessage.contains("health check"))
+
         let diskResource = CloudUnifiedResource(
             id: "disk:account:ap-guangzhou:disk-123",
             kind: .disk,

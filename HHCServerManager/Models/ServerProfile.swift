@@ -944,6 +944,40 @@ enum RemoteOperationRiskFactory {
         )
     }
 
+    static func verdaccioServiceAction(_ action: VerdaccioServiceAction, draft: VerdaccioInstallDraft) -> RemoteOperationRisk {
+        let serviceName = "\(draft.serviceName.trimmingCharacters(in: .whitespacesAndNewlines)).service"
+        let level: RemoteOperationRiskLevel = action == .stop ? .high : .medium
+        return RemoteOperationRisk(
+            id: "verdaccio-service-\(action.rawValue)-\(serviceName)",
+            level: level,
+            title: "\(action.displayName) Verdaccio",
+            target: serviceName,
+            commandPreview: VerdaccioManager.serviceActionCommand(action, for: draft),
+            impact: ["The Verdaccio service state will change on the remote server."],
+            recovery: "Use another service action after reviewing systemd status and Verdaccio logs.",
+            auditTargetType: "registry",
+            auditAction: action.rawValue
+        )
+    }
+
+    static func verdaccioUpgrade(draft: VerdaccioInstallDraft) -> RemoteOperationRisk {
+        let serviceName = "\(draft.serviceName.trimmingCharacters(in: .whitespacesAndNewlines)).service"
+        return RemoteOperationRisk(
+            id: "verdaccio-upgrade-\(serviceName)-\(draft.version.trimmingCharacters(in: .whitespacesAndNewlines))",
+            level: .high,
+            title: "Upgrade Verdaccio",
+            target: "\(serviceName) -> \(draft.version.trimmingCharacters(in: .whitespacesAndNewlines))",
+            commandPreview: "backup systemd unit -> write pinned Verdaccio \(draft.version.trimmingCharacters(in: .whitespacesAndNewlines)) unit -> daemon-reload -> restart -> health check",
+            impact: [
+                "The Verdaccio systemd unit will be replaced with the selected pinned version.",
+                "The registry service will restart and may briefly interrupt package publish/install requests.",
+            ],
+            recovery: "Restore the backed up systemd unit and restart Verdaccio if the upgrade needs to be reverted.",
+            auditTargetType: "registry",
+            auditAction: "upgrade"
+        )
+    }
+
     static func securityGroupChange(_ preview: CloudSecurityGroupRuleChangePreview) -> RemoteOperationRisk {
         let level: RemoteOperationRiskLevel
         if preview.warnings.contains(where: { $0.lowercased().contains("public internet") }) {

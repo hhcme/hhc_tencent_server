@@ -28,6 +28,7 @@ struct ServerWorkspaceView: View {
     @State private var pendingVerdaccioUserDelete = false
     @State private var pendingVerdaccioRestore = false
     @State private var pendingVerdaccioProxyReload = false
+    @State private var pendingRegistryRisk: RegistryRiskRequest?
     @State private var securityGroupDraftDirection: CloudSecurityGroupRuleDirection = .ingress
     @State private var securityGroupDraftProtocol = "TCP"
     @State private var securityGroupDraftPort = "22"
@@ -293,6 +294,7 @@ struct ServerWorkspaceView: View {
         } message: {
             Text(verdaccioProxyReloadConfirmationMessage)
         }
+        .alert(item: $pendingRegistryRisk, content: registryRiskAlert)
         .sheet(item: $remoteFileRenameEntry) { entry in
             RenameRemoteFileSheet(
                 entry: entry,
@@ -989,7 +991,7 @@ struct ServerWorkspaceView: View {
             HStack(spacing: 8) {
                 ForEach(VerdaccioServiceAction.allCases) { action in
                     Button(role: action == .stop ? .destructive : nil) {
-                        performVerdaccioServiceAction(action)
+                        pendingRegistryRisk = .verdaccioService(action, draft: viewModel.registryDraft)
                     } label: {
                         if viewModel.isControllingVerdaccioService {
                             ProgressView().controlSize(.small)
@@ -1004,12 +1006,7 @@ struct ServerWorkspaceView: View {
                     .frame(height: 20)
 
                 Button(role: .destructive) {
-                    viewModel.upgradeVerdaccio(
-                        profile: profile,
-                        sshClient: appState.sshClient,
-                        verdaccioManager: appState.verdaccioManager,
-                        repository: appState.repository
-                    )
+                    pendingRegistryRisk = .verdaccioUpgrade(draft: viewModel.registryDraft)
                 } label: {
                     if viewModel.isUpgradingVerdaccio {
                         ProgressView().controlSize(.small)
@@ -3765,6 +3762,32 @@ struct ServerWorkspaceView: View {
         )
     }
 
+    private func performRegistryRiskRequest(_ request: RegistryRiskRequest) {
+        switch request.action {
+        case .verdaccioService(let action):
+            performVerdaccioServiceAction(action)
+        case .verdaccioUpgrade:
+            viewModel.upgradeVerdaccio(
+                profile: profile,
+                sshClient: appState.sshClient,
+                verdaccioManager: appState.verdaccioManager,
+                repository: appState.repository
+            )
+        }
+    }
+
+    private func registryRiskAlert(_ request: RegistryRiskRequest) -> Alert {
+        let primaryButton: Alert.Button = request.isDestructive
+            ? .destructive(Text(request.confirmButtonTitle)) { performRegistryRiskRequest(request) }
+            : .default(Text(request.confirmButtonTitle)) { performRegistryRiskRequest(request) }
+        return Alert(
+            title: Text("\(request.risk.title)?"),
+            message: Text(request.risk.confirmationMessage),
+            primaryButton: primaryButton,
+            secondaryButton: .cancel()
+        )
+    }
+
     private var isNginxDraftDirty: Bool {
         viewModel.nginxConfigDraft != (viewModel.nginxConfigContent?.content ?? "")
     }
@@ -3843,6 +3866,52 @@ private struct DeploymentRunRequest: Identifiable {
 
     var id: String {
         risk.id
+    }
+}
+
+private struct RegistryRiskRequest: Identifiable {
+    enum Action {
+        case verdaccioService(VerdaccioServiceAction)
+        case verdaccioUpgrade
+    }
+
+    var action: Action
+    var risk: RemoteOperationRisk
+
+    var id: String {
+        risk.id
+    }
+
+    var confirmButtonTitle: String {
+        switch action {
+        case .verdaccioService(let action):
+            action.displayName
+        case .verdaccioUpgrade:
+            "Upgrade"
+        }
+    }
+
+    var isDestructive: Bool {
+        switch action {
+        case .verdaccioService(let action):
+            action == .stop || action == .restart
+        case .verdaccioUpgrade:
+            true
+        }
+    }
+
+    static func verdaccioService(_ action: VerdaccioServiceAction, draft: VerdaccioInstallDraft) -> RegistryRiskRequest {
+        RegistryRiskRequest(
+            action: .verdaccioService(action),
+            risk: RemoteOperationRiskFactory.verdaccioServiceAction(action, draft: draft)
+        )
+    }
+
+    static func verdaccioUpgrade(draft: VerdaccioInstallDraft) -> RegistryRiskRequest {
+        RegistryRiskRequest(
+            action: .verdaccioUpgrade,
+            risk: RemoteOperationRiskFactory.verdaccioUpgrade(draft: draft)
+        )
     }
 }
 
