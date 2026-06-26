@@ -357,7 +357,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         auditLogErrorMessage = nil
         do {
             remoteChangeLogs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
-            operationLogs = try repository.fetchOperationLogs()
+            operationLogs = try repository.fetchOperationLogs(targetId: profile.id.uuidString)
         } catch {
             auditLogErrorMessage = error.localizedDescription
         }

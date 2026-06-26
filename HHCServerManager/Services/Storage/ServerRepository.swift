@@ -284,8 +284,23 @@ final class ServerRepository: @unchecked Sendable {
         ])
     }
 
-    func fetchOperationLogs(limit: Int = 100) throws -> [OperationLogEntry] {
-        try database.query("""
+    func fetchOperationLogs(targetId: String? = nil, limit: Int = 100) throws -> [OperationLogEntry] {
+        if let targetId {
+            return try database.query("""
+                SELECT id, scope, action, target_id, status, message, created_at
+                FROM operation_logs
+                WHERE target_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, bindings: [
+                .text(targetId),
+                .int(max(1, limit)),
+            ]) { statement in
+                try Self.mapOperationLogEntry(statement)
+            }
+        }
+
+        return try database.query("""
             SELECT id, scope, action, target_id, status, message, created_at
             FROM operation_logs
             ORDER BY created_at DESC

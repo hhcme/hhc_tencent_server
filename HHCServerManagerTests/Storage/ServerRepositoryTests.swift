@@ -275,6 +275,10 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertEqual(logs.map(\.targetId), ["server-b", "server-a"])
         XCTAssertEqual(logs[0].status, "failed")
         XCTAssertEqual(logs[1].message, "exit_code=0")
+
+        let serverALogs = try repository.fetchOperationLogs(targetId: "server-a")
+        XCTAssertEqual(serverALogs.map(\.targetId), ["server-a"])
+        XCTAssertEqual(serverALogs.first?.message, "exit_code=0")
     }
 
     func testRemoteChangeLogsPersistFilterAndCascadeServerToNull() throws {

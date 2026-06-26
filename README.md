@@ -17,7 +17,7 @@ HHC 服务器管理器是一个开源的 macOS 原生服务器管理客户端，
 - Credentials stored in macOS Keychain.
 - Host key verification as a first-class security requirement.
 - Server browser, dedicated server workspace, real smoke test, simplified command panel, and command metadata history are underway.
-- Dashboard auto-refresh, SSH metrics, linked cloud metrics, security group inspection and confirmed single-rule changes, remote file browsing, lightweight text editing with Save As, permission changes, queued batch upload/download, systemd Services, Cron management, guarded Nginx config edit/test/reload, limited Firewall rule changes, guarded Environment file editing, GitLab-style deployments, Verdaccio registry management, and an Audit workspace for recent operation/change logs are underway.
+- Dashboard auto-refresh, SSH metrics, linked cloud metrics, security group inspection and confirmed single-rule changes, remote file browsing, lightweight text editing with Save As, permission changes, queued batch upload/download, systemd Services, Cron management, guarded Nginx config edit/test/reload, limited Firewall rule changes, guarded Environment file editing, GitLab-style deployments, Verdaccio registry management, and an Audit workspace for current-server operation/change logs are underway.
 - Verdaccio has guarded real-server lifecycle coverage for isolated install, user creation, npm publish/install smoke, restart, config backup, and backup/restore; production deployment and proxy exposure still require environment-specific validation.
 - Cloud account metadata and cloud credential storage foundation are in place.
 - Cloud provider adapter protocol, capability registry, normalized errors, and timeout wrapper are in place.

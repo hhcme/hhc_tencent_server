@@ -929,6 +929,15 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             message: "exit_code=0",
             createdAt: Date(timeIntervalSince1970: 1_700_000_300)
         ))
+        try repository.saveOperationLog(OperationLogEntry(
+            id: UUID(),
+            scope: "ssh",
+            action: "execute_command",
+            targetId: otherProfile.id.uuidString,
+            status: "failed",
+            message: "timeout",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_400)
+        ))
         let viewModel = ServerWorkspaceViewModel()
 
         viewModel.loadAuditLogs(profile: profile, repository: repository)
@@ -938,6 +947,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.remoteChangeLogs.map(\.action), ["save"])
         XCTAssertEqual(viewModel.remoteChangeLogs.first?.serverId, profile.id)
         XCTAssertEqual(viewModel.operationLogs.map(\.action), ["execute_command"])
+        XCTAssertEqual(viewModel.operationLogs.map(\.targetId), [profile.id.uuidString])
     }
 
     func testRefreshDashboardLoadsCapabilitiesAndMetrics() async throws {
