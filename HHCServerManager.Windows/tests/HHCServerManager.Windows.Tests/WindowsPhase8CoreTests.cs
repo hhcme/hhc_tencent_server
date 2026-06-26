@@ -1,5 +1,6 @@
 using HHCServerManager.Windows.Application.Ports;
 using HHCServerManager.Windows.Application.ServerManagement;
+using HHCServerManager.Windows.Application.Security;
 using HHCServerManager.Windows.Application.Shell;
 using HHCServerManager.Windows.Domain.Security;
 using HHCServerManager.Windows.Domain.Servers;
@@ -114,6 +115,74 @@ public sealed class WindowsPhase8CoreTests
 
         Assert.Equal(HostKeyTrustDecision.Trusted, trusted.Decision);
         Assert.Equal(HostKeyTrustDecision.Mismatch, mismatch.Decision);
+    }
+
+    [Fact]
+    public async Task KnownHostsImporterTrustsMatchingOpenSshHostEntry()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var profile = await service.AddServerAsync(
+            "Prod",
+            "example.internal",
+            22,
+            "root",
+            SshAuthType.Password,
+            null,
+            new CredentialInput.Password("secret"));
+        var publicKey = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 });
+        var importer = new OpenSshKnownHostsImporter(hostKeys);
+
+        var result = await importer.ImportAsync(
+            $"""
+            # Existing user known_hosts entry
+            other.internal ssh-ed25519 {Convert.ToBase64String(new byte[] { 9 })}
+            example.internal ssh-ed25519 {publicKey} imported-comment
+            """,
+            profile);
+
+        var trusted = await hostKeys.FindAsync(profile.Id, profile.Endpoint);
+        Assert.Equal(new KnownHostsImportResult(1, 2), result);
+        Assert.NotNull(trusted);
+        Assert.Equal("ssh-ed25519", trusted.Algorithm);
+        Assert.StartsWith("SHA256:", trusted.FingerprintSha256, StringComparison.Ordinal);
+        Assert.Equal($"example.internal ssh-ed25519 {publicKey}", trusted.RawPublicKey);
+    }
+
+    [Fact]
+    public async Task KnownHostsImporterMatchesBracketedNonDefaultPortAndSkipsUnsupportedLines()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var profile = await service.AddServerAsync(
+            "Prod",
+            "example.internal",
+            2222,
+            "root",
+            SshAuthType.Password,
+            null,
+            new CredentialInput.Password("secret"));
+        var publicKey = Convert.ToBase64String(new byte[] { 5, 6, 7, 8 });
+        var importer = new OpenSshKnownHostsImporter(hostKeys);
+
+        var result = await importer.ImportAsync(
+            $"""
+            |1|hashed|entry ssh-ed25519 {Convert.ToBase64String(new byte[] { 1 })}
+            @cert-authority *.internal ssh-ed25519 {Convert.ToBase64String(new byte[] { 2 })}
+            example.internal ssh-ed25519 {Convert.ToBase64String(new byte[] { 3 })}
+            [example.internal]:2222 ssh-ed25519 {publicKey}
+            example.internal ssh-ed25519 not-base64
+            """,
+            profile);
+
+        var trusted = await hostKeys.FindAsync(profile.Id, profile.Endpoint);
+        Assert.Equal(new KnownHostsImportResult(1, 4), result);
+        Assert.NotNull(trusted);
+        Assert.Equal($"example.internal ssh-ed25519 {publicKey}", trusted.RawPublicKey);
     }
 
     [Fact]
