@@ -92,7 +92,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var deploymentWebhookListenerURL: String?
     @Published var deploymentErrorMessage: String?
     @Published var deploymentActionMessage: String?
-    @Published var registryDraft = VerdaccioInstallDraft()
+    @Published var registryDraft = VerdaccioInstallDraft() {
+        didSet {
+            guard registryDraft != oldValue else { return }
+            registryPreflightReport = nil
+            verdaccioInstallResult = nil
+            registryActionMessage = nil
+        }
+    }
     @Published var registryPreflightReport: RegistryPreflightReport?
     @Published var verdaccioInstallResult: VerdaccioInstallResult?
     @Published var verdaccioStatusSnapshot: VerdaccioStatusSnapshot?
@@ -2338,14 +2345,27 @@ final class ServerWorkspaceViewModel: ObservableObject {
         ].joined(separator: "\n")
     }
 
+    @discardableResult
+    func validateRegistryDraftForEditing() -> Bool {
+        do {
+            try VerdaccioConfigurationBuilder.validate(registryDraft)
+            registryErrorMessage = nil
+            return true
+        } catch {
+            registryActionMessage = nil
+            registryErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func runRegistryPreflight(
         profile: ServerProfile,
         sshClient: SSHClient,
         registryPreflightChecker: RegistryPreflightChecker
     ) {
         guard !isRunningRegistryPreflight else { return }
+        guard validateRegistryDraftForEditing() else { return }
         isRunningRegistryPreflight = true
-        registryErrorMessage = nil
         registryActionMessage = nil
 
         Task {
@@ -2421,8 +2441,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         verdaccioManager: VerdaccioManager? = nil
     ) {
         guard !isInstallingVerdaccio else { return }
+        guard validateRegistryDraftForEditing() else { return }
         isInstallingVerdaccio = true
-        registryErrorMessage = nil
         registryActionMessage = nil
 
         Task {

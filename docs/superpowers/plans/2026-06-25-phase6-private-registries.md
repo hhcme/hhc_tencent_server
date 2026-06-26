@@ -71,7 +71,7 @@ CREATE TABLE registry_backups (
 ## 6. UI 范围
 
 - 工作台新增“包仓库”页：已接入 macOS Registries section，支持 Verdaccio preflight、安装、状态、用户管理、包列表、备份/恢复入口和 Nginx proxy 写入/reload 入口。
-- 安装向导：类型、路径、端口、访问范围、服务名；当前 UI 先接入默认 Verdaccio 草稿和安装确认，后续再开放高级表单编辑。
+- 安装向导：类型、路径、端口、访问范围、服务名；macOS Registries 工作台已接入 Verdaccio 安装参数编辑区，可修改名称、固定版本、安装路径、数据路径、监听地址/端口和 systemd service 名称，并在 preflight / install 前阻止非法草稿触发远端动作。
 - Verdaccio 状态卡：版本、运行状态、端口、storage 占用、最近日志。
 - 用户和权限配置入口：已接入 htpasswd 用户创建、改密、确认删除和 npm publish/install smoke test；包权限策略仍由配置生成层控制，后续再开放高级 UI。
 - 包列表和搜索：当前已接入基于 Verdaccio storage metadata 的包摘要列表。
@@ -97,6 +97,7 @@ CREATE TABLE registry_backups (
 - [x] 创建 systemd service：已生成 systemd unit 模板，包含固定 Verdaccio 版本、工作目录、重启策略和基础 hardening；真实测试表明运行期使用本地固定安装包比每次 `npx` 拉取更稳定，当前 service 已改为执行 install path 下的 `node_modules/.bin/verdaccio`。
 - [x] 启动并验证健康检查：已生成 `systemctl daemon-reload`、`enable --now`、`restart` 和 `/-/ping` health check 流程，mock/contract 测试已覆盖；真实测试服务器已完成 install/start/health check 验收，health check 使用短重试避免刚重启时的瞬时连接失败。
 - [x] 固定版本升级：已支持备份当前 systemd unit、写入新固定版本 unit、`daemon-reload`、重启、health check、状态刷新和远程变更审计；真实服务器升级验收仍待执行。
+- [x] 安装参数编辑和动作前校验：macOS UI 已开放 Verdaccio 名称、版本、路径、监听地址/端口和 service 名编辑；ViewModel 会在 preflight / install 前复用配置校验，非法草稿不会发起 SSH 命令。
 
 ### Task 3：Verdaccio 管理
 
@@ -143,6 +144,7 @@ CREATE TABLE registry_backups (
 - [x] Verdaccio 服务控制和升级测试，覆盖受控 systemd action、unit 备份、固定版本 unit 写入、health check、状态刷新和审计日志。
 - [x] Verdaccio 真实 SSH lifecycle 集成测试入口：默认跳过，设置 `HHC_TEST_VERDACCIO_REAL=1` 后会在真实服务器创建临时 Verdaccio service/path，覆盖 install、user、npm smoke、restart、config backup、backup、restore 和远端清理。
 - [x] macOS Registries 工作台 ViewModel 测试，覆盖 preflight、安装、状态、用户管理、npm smoke test、包列表、备份/恢复入口、备份/恢复审计和 Nginx proxy 写入/reload。
+- [x] macOS Registries 安装草稿校验测试，覆盖非法路径在 preflight / install 前被拦截且不执行远端命令。
 - [x] Verdaccio Nginx proxy 生成、写入、`nginx -t` 和 reload contract 测试。
 - [x] Dart/Flutter Hosted Pub Repository 配置助手测试，覆盖配置生成、HTTP warning、危险 URL 拒绝、非法 package/env var 拒绝和 ViewModel 状态更新。
 - [x] 备份归档命令测试。

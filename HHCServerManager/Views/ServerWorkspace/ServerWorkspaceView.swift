@@ -742,7 +742,7 @@ struct ServerWorkspaceView: View {
                                 Label("Preflight", systemImage: "checklist")
                             }
                         }
-                        .disabled(isRegistryBusy)
+                        .disabled(isRegistryBusy || !isRegistryDraftValid)
 
                         Button {
                             pendingVerdaccioInstall = true
@@ -753,7 +753,7 @@ struct ServerWorkspaceView: View {
                                 Label("Install", systemImage: "arrow.down.circle")
                             }
                         }
-                        .disabled(isRegistryBusy || !isRegistryPreflightReady)
+                        .disabled(isRegistryBusy || !isRegistryDraftValid || !isRegistryPreflightReady)
 
                         Button {
                             viewModel.loadVerdaccioStatus(
@@ -812,28 +812,7 @@ struct ServerWorkspaceView: View {
                         .foregroundStyle(.orange)
                 }
 
-                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
-                    GridRow {
-                        Text("Install Path").foregroundStyle(.secondary)
-                        Text(viewModel.registryDraft.installPath)
-                            .font(.system(.body, design: .monospaced))
-                    }
-                    GridRow {
-                        Text("Data Path").foregroundStyle(.secondary)
-                        Text(viewModel.registryDraft.dataPath)
-                            .font(.system(.body, design: .monospaced))
-                    }
-                    GridRow {
-                        Text("Service").foregroundStyle(.secondary)
-                        Text("\(viewModel.registryDraft.serviceName).service")
-                            .font(.system(.body, design: .monospaced))
-                    }
-                    GridRow {
-                        Text("Version").foregroundStyle(.secondary)
-                        Text(viewModel.registryDraft.version)
-                            .font(.system(.body, design: .monospaced))
-                    }
-                }
+                verdaccioInstallSettingsSection
 
                 registryPreflightSection
                 verdaccioStatusSection
@@ -847,6 +826,86 @@ struct ServerWorkspaceView: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var verdaccioInstallSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Install Settings")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    viewModel.validateRegistryDraftForEditing()
+                } label: {
+                    Label("Validate", systemImage: isRegistryDraftValid ? "checkmark.circle" : "exclamationmark.triangle")
+                }
+                .disabled(isRegistryBusy)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Name")
+                        .foregroundStyle(.secondary)
+                    TextField("Verdaccio", text: $viewModel.registryDraft.name)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 220)
+                }
+                GridRow {
+                    Text("Version")
+                        .foregroundStyle(.secondary)
+                    TextField("5.31.1", text: $viewModel.registryDraft.version)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 140)
+                }
+                GridRow {
+                    Text("Install Path")
+                        .foregroundStyle(.secondary)
+                    TextField("/srv/verdaccio", text: $viewModel.registryDraft.installPath)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 560)
+                }
+                GridRow {
+                    Text("Data Path")
+                        .foregroundStyle(.secondary)
+                    TextField("/srv/verdaccio/storage", text: $viewModel.registryDraft.dataPath)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 560)
+                }
+                GridRow {
+                    Text("Listen")
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        TextField("127.0.0.1", text: $viewModel.registryDraft.listenHost)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(maxWidth: 180)
+                        Text(":")
+                            .foregroundStyle(.secondary)
+                        TextField("4873", value: $viewModel.registryDraft.listenPort, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(width: 86)
+                    }
+                }
+                GridRow {
+                    Text("Service")
+                        .foregroundStyle(.secondary)
+                    TextField("verdaccio", text: $viewModel.registryDraft.serviceName)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 220)
+                }
+            }
+            .disabled(isRegistryBusy)
+
+            Label(registryDraftValidationMessage, systemImage: isRegistryDraftValid ? "checkmark.circle" : "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(isRegistryDraftValid ? Color.secondary : Color.orange)
+        }
+        .padding(12)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var registryPreflightSection: some View {
@@ -3508,6 +3567,19 @@ struct ServerWorkspaceView: View {
 
     private var isRegistryPreflightReady: Bool {
         viewModel.registryPreflightReport?.isReady == true
+    }
+
+    private var isRegistryDraftValid: Bool {
+        (try? VerdaccioConfigurationBuilder.validate(viewModel.registryDraft)) != nil
+    }
+
+    private var registryDraftValidationMessage: String {
+        do {
+            try VerdaccioConfigurationBuilder.validate(viewModel.registryDraft)
+            return "Install settings are ready for preflight."
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     private var isVerdaccioUserReady: Bool {

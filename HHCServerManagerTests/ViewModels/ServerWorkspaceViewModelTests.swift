@@ -2420,6 +2420,54 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_ACTIVE_STATE__") })
     }
 
+    func testPrivateRegistriesWorkspaceRejectsInvalidInstallDraftBeforeRemoteActions() async throws {
+        let profile = makeProfile()
+        let viewModel = ServerWorkspaceViewModel()
+        let client = RegistryViewModelMockSSHClient()
+        let preflight = RegistryPreflightChecker()
+        let installer = VerdaccioInstaller()
+
+        viewModel.registryDraft.installPath = "/etc/verdaccio"
+
+        viewModel.runRegistryPreflight(
+            profile: profile,
+            sshClient: client,
+            registryPreflightChecker: preflight
+        )
+        viewModel.installVerdaccio(
+            profile: profile,
+            sshClient: client,
+            verdaccioInstaller: installer
+        )
+
+        XCTAssertFalse(viewModel.isRunningRegistryPreflight)
+        XCTAssertFalse(viewModel.isInstallingVerdaccio)
+        XCTAssertNil(viewModel.registryPreflightReport)
+        XCTAssertNil(viewModel.verdaccioInstallResult)
+        XCTAssertTrue(viewModel.registryErrorMessage?.contains("must be under /srv") == true)
+        XCTAssertTrue(client.commands.isEmpty)
+    }
+
+    func testPrivateRegistriesWorkspaceInvalidatesPreflightWhenInstallDraftChanges() async throws {
+        let profile = makeProfile()
+        let viewModel = ServerWorkspaceViewModel()
+        let client = RegistryViewModelMockSSHClient()
+        let preflight = RegistryPreflightChecker()
+
+        viewModel.runRegistryPreflight(
+            profile: profile,
+            sshClient: client,
+            registryPreflightChecker: preflight
+        )
+        try await waitUntil { viewModel.isRunningRegistryPreflight == false && viewModel.registryPreflightReport != nil }
+
+        viewModel.registryDraft.listenPort = 4874
+
+        XCTAssertNil(viewModel.registryPreflightReport)
+        XCTAssertNil(viewModel.verdaccioInstallResult)
+        XCTAssertNil(viewModel.registryActionMessage)
+    }
+
     func testPrivateRegistriesWorkspaceControlsAndUpgradesVerdaccioService() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)
