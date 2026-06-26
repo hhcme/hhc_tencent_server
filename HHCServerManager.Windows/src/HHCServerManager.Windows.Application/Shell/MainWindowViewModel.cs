@@ -351,6 +351,34 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    public async Task ImportKnownHostsForSelectedServerAsync(
+        string knownHostsContent,
+        CancellationToken cancellationToken = default)
+    {
+        if (SelectedServer is null)
+        {
+            ErrorMessage = "Select a server before importing known_hosts.";
+            return;
+        }
+
+        ErrorMessage = null;
+        try
+        {
+            var result = await _serverManagement.ImportKnownHostsAsync(
+                SelectedServer,
+                knownHostsContent,
+                cancellationToken);
+            StatusMessage = result.ImportedCount == 0
+                ? $"No matching known_hosts entries were imported. Skipped {result.SkippedCount}."
+                : $"Imported {result.ImportedCount} known_hosts entry for {SelectedServer.Name}. Skipped {result.SkippedCount}.";
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            ErrorMessage = error.Message;
+            StatusMessage = "Could not import known_hosts.";
+        }
+    }
+
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
         if (SelectedServer is null)

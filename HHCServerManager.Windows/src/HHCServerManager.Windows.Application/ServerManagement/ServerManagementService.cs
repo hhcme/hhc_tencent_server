@@ -1,4 +1,5 @@
 using HHCServerManager.Windows.Application.Ports;
+using HHCServerManager.Windows.Application.Security;
 using HHCServerManager.Windows.Domain.Security;
 using HHCServerManager.Windows.Domain.Servers;
 using HHCServerManager.Windows.Domain.Ssh;
@@ -134,6 +135,20 @@ public sealed class ServerManagementService(
             _timeProvider);
         await hostKeys.SaveAsync(trusted, cancellationToken);
         return trusted;
+    }
+
+    public async Task<KnownHostsImportResult> ImportKnownHostsAsync(
+        ServerProfile profile,
+        string knownHostsContent,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(knownHostsContent))
+        {
+            throw new InvalidOperationException("Known hosts content is required.");
+        }
+
+        var importer = new OpenSshKnownHostsImporter(hostKeys, _timeProvider);
+        return await importer.ImportAsync(knownHostsContent, profile, cancellationToken);
     }
 
     public async Task<SshHostKey> ScanHostKeyAsync(

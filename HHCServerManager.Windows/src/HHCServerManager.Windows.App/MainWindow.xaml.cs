@@ -141,6 +141,44 @@ public sealed partial class MainWindow : Window
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await ViewModel.LoadServersAsync();
 
+    private async void ImportKnownHosts_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedServer is null)
+        {
+            return;
+        }
+
+        var knownHostsBox = new TextBox
+        {
+            AcceptsReturn = true,
+            MinHeight = 220,
+            PlaceholderText = "Paste lines from ~/.ssh/known_hosts",
+            TextWrapping = TextWrapping.NoWrap
+        };
+        var content = new StackPanel { Spacing = 10 };
+        content.Children.Add(new TextBlock
+        {
+            Text = "Paste OpenSSH known_hosts entries. Only entries matching the selected host and port will be trusted.",
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(knownHostsBox);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Import known_hosts",
+            Content = content,
+            PrimaryButtonText = "Import",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            await ViewModel.ImportKnownHostsForSelectedServerAsync(knownHostsBox.Text);
+        }
+    }
+
     private async void Connect_Click(object sender, RoutedEventArgs e)
     {
         await ViewModel.ConnectAsync();

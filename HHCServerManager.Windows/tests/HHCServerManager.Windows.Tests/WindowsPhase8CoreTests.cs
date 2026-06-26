@@ -186,6 +186,54 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task MainWindowViewModelImportsKnownHostsForSelectedServer()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.AddPasswordServerAsync("Prod", "example.internal", 2222, "root", "secret");
+        var publicKey = Convert.ToBase64String(new byte[] { 11, 12, 13, 14 });
+
+        await viewModel.ImportKnownHostsForSelectedServerAsync(
+            $"""
+            other.internal ssh-ed25519 {Convert.ToBase64String(new byte[] { 1 })}
+            [example.internal]:2222 ssh-ed25519 {publicKey}
+            """);
+
+        var trusted = await hostKeys.FindAsync(viewModel.SelectedServer!.Id, viewModel.SelectedServer.Endpoint);
+        Assert.NotNull(trusted);
+        Assert.StartsWith("SHA256:", trusted.FingerprintSha256, StringComparison.Ordinal);
+        Assert.Equal($"example.internal ssh-ed25519 {publicKey}", trusted.RawPublicKey);
+        Assert.Equal("Imported 1 known_hosts entry for Prod. Skipped 1.", viewModel.StatusMessage);
+        Assert.Null(viewModel.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task MainWindowViewModelRejectsBlankKnownHostsImport()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("printf hhc-ssh-ok", "hhc-ssh-ok", "", 0, TimeSpan.FromMilliseconds(4)));
+        var viewModel = new MainWindowViewModel(repository, service, ssh);
+        await viewModel.AddPasswordServerAsync("Prod", "example.internal", 22, "root", "secret");
+
+        await viewModel.ImportKnownHostsForSelectedServerAsync("   ");
+
+        Assert.Equal("Could not import known_hosts.", viewModel.StatusMessage);
+        Assert.Equal("Known hosts content is required.", viewModel.ErrorMessage);
+        Assert.Null(await hostKeys.FindAsync(viewModel.SelectedServer!.Id, viewModel.SelectedServer.Endpoint));
+    }
+
+    [Fact]
     public async Task ServerDeletionRemovesCredentialAndTrustedHostKey()
     {
         await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");

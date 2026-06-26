@@ -78,7 +78,7 @@ xcodebuild \
 - ServerWorkspaceViewModel：连接状态、主机指纹确认、smoke test、单条命令执行与取消、本次会话输出历史、stdout/stderr 分开展示、失败摘要、持久化命令元数据历史、历史命令重跑、Dashboard 手动/自动刷新、远程目录浏览、排队批量上传/下载、当前传输取消、待传队列清空、传输任务状态记录、重命名、chmod 权限修改、可恢复移入回收目录、轻量文本编辑、腾讯云安全组查看和单条规则变更、systemd 服务管理、Cron 管理、Nginx 配置管理、Firewall 状态流和 Environment 文件管理。
 - SSHIntegrationTests：通过环境变量启用，默认跳过；包含真实 SSH smoke test、SFTP 往返、SFTP partial upload/download 续传、临时 Git 仓库部署闭环、Phase 4 systemd/Cron/Environment 受控写操作和 Verdaccio lifecycle 集成用例。
 - CloudIntegrationTests：通过环境变量启用，默认跳过；包含腾讯云、阿里云、华为云真实只读账号的 credential validate、region/project 拉取、实例/云盘/快照/计费同步和统一资源列表作用域校验。
-- Windows core tests：通过 GitHub Actions Windows runner 或 `scripts/ci-windows-core.ps1` 运行，覆盖 Windows Domain、SQLite repository、Credential Manager 平台边界、SQLite 凭据隔离、host key trust、SSH 状态机、密码/私钥添加服务器、编辑服务器 ViewModel 和 smoke test 编排。
+- Windows core tests：通过 GitHub Actions Windows runner 或 `scripts/ci-windows-core.ps1` 运行，覆盖 Windows Domain、SQLite repository、Credential Manager 平台边界、SQLite 凭据隔离、host key trust、OpenSSH `known_hosts` 导入、SSH 状态机、密码/私钥添加服务器、编辑服务器 ViewModel 和 smoke test 编排。
 
 ## 真实 SSH 手动验证
 
