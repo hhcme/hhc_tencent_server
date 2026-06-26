@@ -564,6 +564,95 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedResourceId, "snapshot:\(account.id.uuidString):ap-guangzhou:snap-before-upgrade")
     }
 
+    func testCloudResourceCenterBuildsSummaryForVisibleResources() throws {
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.cloud-resource-summary.\(UUID().uuidString)")
+        let appState = AppState(repository: repository, keychain: keychain)
+        let olderSync = Date(timeIntervalSince1970: 1_700_000_000)
+        let newerSync = Date(timeIntervalSince1970: 1_700_000_600)
+        let account = CloudProviderAccount(
+            id: UUID(),
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            keychainRef: "cloud_test",
+            enabled: true,
+            createdAt: olderSync,
+            updatedAt: olderSync
+        )
+        try repository.upsertCloudProviderAccount(account)
+        try repository.upsertCloudInstanceLink(CloudInstanceLink(
+            id: UUID(),
+            serverId: nil,
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            instanceId: "ins-prod",
+            displayName: "prod-web",
+            publicIp: "203.0.113.10",
+            privateIp: nil,
+            status: "RUNNING",
+            instanceType: "S5.SMALL1",
+            zoneId: nil,
+            vpcId: nil,
+            securityGroupIds: [],
+            rawJSON: nil,
+            lastSyncedAt: olderSync
+        ))
+        try repository.upsertCloudDisk(CloudDisk(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            diskId: "disk-error",
+            instanceId: nil,
+            name: "error-disk",
+            diskType: "CLOUD_PREMIUM",
+            sizeGB: 100,
+            status: "ERROR",
+            billingType: "POSTPAID_BY_HOUR",
+            expiredTime: nil,
+            rawJSON: nil,
+            lastSyncedAt: newerSync
+        ))
+        try repository.upsertCloudSnapshot(CloudSnapshot(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            snapshotId: "snap-normal",
+            diskId: "disk-error",
+            name: "normal-snapshot",
+            status: "NORMAL",
+            sizeGB: 100,
+            createdAtProvider: newerSync,
+            rawJSON: nil,
+            lastSyncedAt: newerSync
+        ))
+        appState.reloadServers()
+
+        let viewModel = CloudResourceCenterViewModel()
+        viewModel.selectedAccountId = account.id
+        viewModel.selectedRegionId = "ap-guangzhou"
+        viewModel.refreshLocalResources(appState: appState)
+
+        XCTAssertEqual(viewModel.resourceSummary.totalCount, 3)
+        XCTAssertEqual(viewModel.resourceSummary.attentionCount, 1)
+        XCTAssertEqual(viewModel.resourceSummary.latestSyncAt, newerSync)
+        XCTAssertEqual(
+            viewModel.resourceSummary.kindCounts.map { "\($0.kind.rawValue):\($0.count)" },
+            ["instance:1", "disk:1", "snapshot:1"]
+        )
+        XCTAssertEqual(viewModel.resourceSummary.providerCounts.map(\.providerId), [.tencentCloud])
+
+        viewModel.kindFilter = .disk
+        viewModel.refreshLocalResources(appState: appState)
+
+        XCTAssertEqual(viewModel.resources.map(\.resourceId), ["disk-error"])
+        XCTAssertEqual(viewModel.resourceSummary.totalCount, 1)
+        XCTAssertEqual(viewModel.resourceSummary.kindCounts.map(\.kind), [.disk])
+        XCTAssertEqual(viewModel.resourceSummary.attentionCount, 1)
+    }
+
     func testCloudResourceCenterRefreshesProviderStateAfterDiskAction() async throws {
         let recorder = ResourceCenterCloudActionRecorder()
         let registry = CloudProviderRegistry(adapters: [

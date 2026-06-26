@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Added Windows OpenSSH `known_hosts` import support with plain host parsing, non-default port matching, SHA256 fingerprint derivation, SQLite trust-store tests, ViewModel coverage, and a WinUI paste-import entry point.
 - Added Windows OpenSSH `known_hosts` file import support with ViewModel coverage and a WinUI file picker entry point.
 - Added a Windows native command cancel entry point and ViewModel coverage so running commands can be cancelled without entering recent-command history.
+- Added a macOS Cloud Resources summary panel with filtered resource totals, provider/kind breakdowns, attention-state counts, latest sync time, and ViewModel coverage.
 - Added a macOS Audit workspace section for viewing per-server remote change logs and server-targeted operation logs.
 - Added macOS remote transfer finished-history cleanup so succeeded, failed, cancelled, and interrupted transfer records can be cleared while pending/running jobs remain active, with metadata-only operation audit logging.
 - Revalidated guarded real SSH smoke, OpenSSH SFTP round-trip, SFTP partial resume, and temporary Git deployment integration tests on the current macOS code path.

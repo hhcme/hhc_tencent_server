@@ -311,6 +311,50 @@ enum CloudResourceKindFilter: String, CaseIterable, Identifiable {
     }
 }
 
+struct CloudResourceKindSummary: Identifiable, Equatable {
+    var id: CloudResourceKind { kind }
+    let kind: CloudResourceKind
+    let count: Int
+}
+
+struct CloudResourceProviderSummary: Identifiable, Equatable {
+    var id: CloudProviderID { providerId }
+    let providerId: CloudProviderID
+    let count: Int
+}
+
+struct CloudResourceSummary: Equatable {
+    let totalCount: Int
+    let kindCounts: [CloudResourceKindSummary]
+    let providerCounts: [CloudResourceProviderSummary]
+    let attentionCount: Int
+    let latestSyncAt: Date?
+
+    static let empty = CloudResourceSummary(
+        totalCount: 0,
+        kindCounts: [],
+        providerCounts: [],
+        attentionCount: 0,
+        latestSyncAt: nil
+    )
+
+    static func make(resources: [CloudUnifiedResource]) -> CloudResourceSummary {
+        CloudResourceSummary(
+            totalCount: resources.count,
+            kindCounts: CloudResourceKind.allCases.compactMap { kind in
+                let count = resources.filter { $0.kind == kind }.count
+                return count > 0 ? CloudResourceKindSummary(kind: kind, count: count) : nil
+            },
+            providerCounts: CloudProviderID.allCases.compactMap { providerId in
+                let count = resources.filter { $0.providerId == providerId }.count
+                return count > 0 ? CloudResourceProviderSummary(providerId: providerId, count: count) : nil
+            },
+            attentionCount: resources.filter(\.needsAttention).count,
+            latestSyncAt: resources.compactMap(\.lastSyncedAt).max()
+        )
+    }
+}
+
 @MainActor
 final class CloudResourceCenterViewModel: ObservableObject {
     @Published var selectedAccountId: UUID?
@@ -320,6 +364,7 @@ final class CloudResourceCenterViewModel: ObservableObject {
     @Published var statusFilter = ""
     @Published var kindFilter: CloudResourceKindFilter = .all
     @Published private(set) var resources: [CloudUnifiedResource] = []
+    @Published private(set) var resourceSummary: CloudResourceSummary = .empty
     @Published private(set) var capabilityRows: [ProviderCapabilityStatus] = []
     @Published var selectedResourceId: String?
     @Published var isWorking = false
@@ -394,6 +439,7 @@ final class CloudResourceCenterViewModel: ObservableObject {
                 regionId: selectedRegionId.nilIfBlank,
                 query: query
             )
+            resourceSummary = CloudResourceSummary.make(resources: resources)
             if let selectedResourceId, !resources.contains(where: { $0.id == selectedResourceId }) {
                 self.selectedResourceId = resources.first?.id
             } else if selectedResourceId == nil {
@@ -695,6 +741,46 @@ final class CloudResourceCenterViewModel: ObservableObject {
         case .authenticationFailed, .adapterNotRegistered, .timeout, .rateLimited, .networkFailure, .cancelled:
             return nil
         }
+    }
+}
+
+private extension CloudUnifiedResource {
+    var needsAttention: Bool {
+        guard let status = status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !status.isEmpty else {
+            return false
+        }
+        let healthyStatuses: Set<String> = [
+            "active",
+            "attached",
+            "available",
+            "default",
+            "in_use",
+            "in-use",
+            "normal",
+            "postpaid_by_hour",
+            "prepaid",
+            "running",
+            "stopped",
+            "unattached",
+        ]
+        if healthyStatuses.contains(status) {
+            return false
+        }
+        return status.contains("error") ||
+            status.contains("fail") ||
+            status.contains("expired") ||
+            status.contains("frozen") ||
+            status.contains("arrear") ||
+            status.contains("overdue") ||
+            status.contains("denied") ||
+            status.contains("warning") ||
+            status.contains("unhealthy") ||
+            status.contains("abnormal") ||
+            status.contains("欠费") ||
+            status.contains("冻结") ||
+            status.contains("过期") ||
+            status.contains("失败")
     }
 }
 

@@ -372,6 +372,10 @@ private struct CloudResourceCenterSheet: View {
                 }
             }
 
+            Section("Summary") {
+                CloudResourceSummaryView(summary: viewModel.resourceSummary)
+            }
+
             Section("Capabilities") {
                 CapabilityMatrixView(rows: viewModel.capabilityRows)
             }
@@ -630,6 +634,64 @@ private struct CloudResourceCenterSheet: View {
             risk: RemoteOperationRiskFactory.cloudInstancePower(resource: resource, action: action),
             confirmTitle: action.displayName
         )
+    }
+}
+
+private struct CloudResourceSummaryView: View {
+    let summary: CloudResourceSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
+                summaryMetric("Total", "\(summary.totalCount)", systemImage: "square.grid.2x2")
+                summaryMetric("Needs Attention", "\(summary.attentionCount)", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(summary.attentionCount > 0 ? .orange : .secondary)
+            }
+
+            if !summary.kindCounts.isEmpty {
+                flowSummary(summary.kindCounts.map { ("\($0.kind.displayName)", "\($0.count)") })
+            }
+
+            if !summary.providerCounts.isEmpty {
+                flowSummary(summary.providerCounts.map { ($0.providerId.displayName, "\($0.count)") })
+            }
+
+            if let latestSyncAt = summary.latestSyncAt {
+                Label("Last sync \(AppDatabase.string(from: latestSyncAt))", systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func summaryMetric(_ title: String, _ value: String, systemImage: String) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(.title3.weight(.semibold))
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: systemImage)
+        }
+        .labelStyle(.titleAndIcon)
+    }
+
+    private func flowSummary(_ pairs: [(String, String)]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 6)], alignment: .leading, spacing: 6) {
+            ForEach(pairs, id: \.0) { title, value in
+                HStack(spacing: 5) {
+                    Text(value)
+                        .font(.caption.weight(.semibold))
+                    Text(title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
     }
 }
 
