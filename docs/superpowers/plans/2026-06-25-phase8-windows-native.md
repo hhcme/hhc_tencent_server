@@ -163,6 +163,7 @@ Windows UI 要贴近 Fluent Design，而不是照搬 macOS 视觉。
 - [x] Windows 编辑服务器测试：覆盖 profile 更新、保留/替换凭据、认证类型切换必须提供新凭据、host/port 变化清理旧 trusted host key、ViewModel 替换当前选中服务器。
 - [x] Windows 服务器列表搜索和空状态测试：`MainWindowViewModelFiltersServerListAndKeepsWorkspaceSelection` 覆盖 name/host/username/group 搜索、无结果空状态，以及搜索过滤不会清空当前工作台选择。
 - [x] Windows 单条命令执行测试：`MainWindowViewModelRunsCustomCommandAfterConnection` 覆盖连接后执行自定义命令、输出展示和会话内最近命令；`MainWindowViewModelRejectsBlankCustomCommand` 覆盖空命令拒绝；`MainWindowViewModelDisconnectCancelsRunningCommandWithoutRememberingIt` 覆盖运行中命令取消、状态恢复和不写入最近命令；`MainWindowViewModelSelectsRecentCommandWithoutRunningIt` 和 `MainWindowViewModelRecentCommandsDeduplicateAndKeepTenItems` 覆盖最近命令选择、去重和 10 条上限。
+- [x] Windows SQLite 命令历史元数据：`SqliteRepositoryPersistsCommandHistoryMetadataAndCascadesOnServerDelete` 覆盖命令、exit code、耗时和时间落库、stdout/stderr 不落库、删除服务器后级联清理；`MainWindowViewModelRestoresRecentCommandsFromSqliteMetadata` 覆盖 ViewModel 重新加载后恢复最近命令。
 - [x] Windows 连接取消测试：`MainWindowViewModelDisconnectCancelsRunningHostKeyScan` 和 `MainWindowViewModelDisconnectCancelsRunningSmokeTestAndCanReconnect` 覆盖运行中 host key scan / smoke test 取消、状态恢复和后续重连。
 - [x] Windows `known_hosts` 导入测试：覆盖默认端口明文 host 导入、非默认端口 `[host]:port` 匹配、hashed/marker/不匹配/非法 key 行跳过，以及 ViewModel 当前服务器粘贴导入、文件导入和空内容拒绝。
 - [x] GitHub Actions Windows core tests：Windows runner 运行 `scripts/ci-windows-core.ps1`，覆盖不依赖 WinUI/XAML 编译器的核心层。

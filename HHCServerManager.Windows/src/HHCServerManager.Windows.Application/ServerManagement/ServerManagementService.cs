@@ -161,10 +161,8 @@ public sealed class ServerManagementService(
             throw new InvalidOperationException("Known hosts file path is required.");
         }
 
-        await using var stream = File.OpenRead(knownHostsPath);
-        using var reader = new StreamReader(stream);
         var importer = new OpenSshKnownHostsImporter(hostKeys, _timeProvider);
-        return await importer.ImportFileAsync(reader, profile, cancellationToken);
+        return await importer.ImportFileAsync(knownHostsPath, profile, cancellationToken);
     }
 
     public async Task<SshHostKey> ScanHostKeyAsync(

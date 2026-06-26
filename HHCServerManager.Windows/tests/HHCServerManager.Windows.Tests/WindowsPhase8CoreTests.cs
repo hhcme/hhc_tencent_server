@@ -91,6 +91,52 @@ public sealed class WindowsPhase8CoreTests
     }
 
     [Fact]
+    public async Task SqliteRepositoryPersistsCommandHistoryMetadataAndCascadesOnServerDelete()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hhc-windows-command-history-{Guid.NewGuid():N}.sqlite");
+        var stdout = "linux output must not be persisted";
+        var stderr = "stderr must not be persisted";
+        try
+        {
+            await using var repository = new SqliteServerRepository($"Data Source={databasePath};Pooling=False");
+            var profile = ServerProfile.Create(
+                "Prod",
+                "203.0.113.10",
+                22,
+                "root",
+                SshAuthType.Password,
+                "ops");
+            await repository.UpsertAsync(profile);
+            var entry = CommandHistoryEntry.FromResult(
+                profile.Id,
+                new CommandResult("uname -a", stdout, stderr, 1, TimeSpan.FromMilliseconds(42)),
+                DateTimeOffset.Parse("2026-06-26T00:00:00Z"));
+
+            await repository.SaveCommandHistoryAsync(entry);
+            var history = await repository.ListRecentCommandHistoryAsync(profile.Id);
+
+            Assert.Single(history);
+            Assert.Equal("uname -a", history[0].Command);
+            Assert.Equal(1, history[0].ExitCode);
+            Assert.Equal(42, history[0].DurationMilliseconds);
+            var databaseText = System.Text.Encoding.UTF8.GetString(await File.ReadAllBytesAsync(databasePath));
+            Assert.DoesNotContain(stdout, databaseText);
+            Assert.DoesNotContain(stderr, databaseText);
+
+            await repository.DeleteAsync(profile.Id);
+
+            Assert.Empty(await repository.ListRecentCommandHistoryAsync(profile.Id));
+        }
+        finally
+        {
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+        }
+    }
+
+    [Fact]
     public async Task HostKeyTrustStoreDetectsTrustedAndMismatchedKeys()
     {
         await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
@@ -520,6 +566,37 @@ public sealed class WindowsPhase8CoreTests
         Assert.DoesNotContain("cmd-0", viewModel.RecentCommands);
         Assert.True(viewModel.HasRecentCommands);
         Assert.False(viewModel.HasNoRecentCommands);
+    }
+
+    [Fact]
+    public async Task MainWindowViewModelRestoresRecentCommandsFromSqliteMetadata()
+    {
+        await using var hostKeys = new SqliteHostKeyTrustStore("Data Source=:memory:");
+        await using var repository = new SqliteServerRepository("Data Source=:memory:");
+        var credentials = new InMemoryCredentialStore();
+        var service = new ServerManagementService(repository, hostKeys, credentials);
+        var ssh = new FakeWindowsSshClient(
+            new SshHostKey("ssh-ed25519", "SHA256:first", "ssh-ed25519 AAAA"),
+            new CommandResult("", "custom-output", "sensitive stderr should stay out of sqlite", 0, TimeSpan.FromMilliseconds(4)));
+        var firstViewModel = new MainWindowViewModel(repository, service, ssh);
+        await firstViewModel.AddPasswordServerAsync("Prod", "example.internal", 22, "root", "secret");
+        await firstViewModel.ConnectAsync();
+        await firstViewModel.TrustPendingHostKeyAndConnectAsync();
+
+        firstViewModel.CommandInput = "whoami";
+        await firstViewModel.RunCommandAsync();
+        firstViewModel.CommandInput = "uptime";
+        await firstViewModel.RunCommandAsync();
+        firstViewModel.CommandInput = "whoami";
+        await firstViewModel.RunCommandAsync();
+
+        var secondViewModel = new MainWindowViewModel(repository, service, ssh);
+        await secondViewModel.LoadServersAsync();
+
+        Assert.Equal(["whoami", "uptime"], secondViewModel.RecentCommands.ToArray());
+        Assert.True(secondViewModel.HasRecentCommands);
+        Assert.False(secondViewModel.HasNoRecentCommands);
+        Assert.Equal("Command output will appear here after connection.", secondViewModel.CommandOutput);
     }
 
     [Fact]

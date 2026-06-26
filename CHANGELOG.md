@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased / 未发布
 
+- Added Windows native SQLite-backed command history metadata so recent commands survive ViewModel reloads without persisting stdout/stderr output.
+- Fixed the Windows known_hosts file import service path so CI compiles against the importer API.
 - Added a Cloud Resources Markdown report copy action for the current filtered resource set, including summary totals, provider/kind breakdowns, attention counts, sync time, and escaped table rows.
 - Added human-readable remote transfer progress by parsing rsync speed and ETA and surfacing byte/speed/ETA summaries in the macOS workspace.
 - Added editable Verdaccio install settings in the macOS Registries workspace with preflight/install blocking for invalid drafts before any SSH command is started.

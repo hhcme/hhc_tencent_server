@@ -77,6 +77,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             {
                 SyncSelectedVisibleServer();
                 Disconnect();
+                _ = LoadRecentCommandsForSelectedServerAsync();
                 StatusMessage = value is null ? "Select a server to connect." : $"Ready: {value.Username}@{value.Host}:{value.Port}";
                 CommandOutput = "Command output will appear here after connection.";
                 OnPropertyChanged(nameof(SelectedServerTitle));
@@ -224,6 +225,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         RefreshVisibleServers();
         SelectedServer ??= Servers.FirstOrDefault();
+        await LoadRecentCommandsForSelectedServerAsync(cancellationToken);
     }
 
     public async Task AddPasswordServerAsync(
@@ -520,7 +522,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             CommandOutput = string.IsNullOrEmpty(result.Stderr)
                 ? result.Stdout
                 : $"{result.Stdout}{Environment.NewLine}{result.Stderr}";
-            RememberCommand(result.Command);
+            await _profiles.SaveCommandHistoryAsync(
+                CommandHistoryEntry.FromResult(SelectedServer.Id, result),
+                operationCancellationToken);
+            await LoadRecentCommandsForSelectedServerAsync(operationCancellationToken);
             ConnectionState = result.Succeeded ? WindowsConnectionState.Connected : WindowsConnectionState.Failed;
             StatusMessage = result.Succeeded ? "Command succeeded." : $"Command failed with exit code {result.ExitCode}.";
         }, cancellationToken);
@@ -559,6 +564,30 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
         RefreshVisibleServers();
         SelectedServer = updated;
+    }
+
+    private async Task LoadRecentCommandsForSelectedServerAsync(CancellationToken cancellationToken = default)
+    {
+        RecentCommands.Clear();
+        if (SelectedServer is null)
+        {
+            OnPropertyChanged(nameof(HasRecentCommands));
+            OnPropertyChanged(nameof(HasNoRecentCommands));
+            return;
+        }
+
+        var history = await _profiles.ListRecentCommandHistoryAsync(SelectedServer.Id, 25, cancellationToken);
+        foreach (var command in history
+            .Select(entry => entry.Command)
+            .Where(command => !string.IsNullOrWhiteSpace(command))
+            .Distinct(StringComparer.Ordinal)
+            .Take(10))
+        {
+            RecentCommands.Add(command);
+        }
+
+        OnPropertyChanged(nameof(HasRecentCommands));
+        OnPropertyChanged(nameof(HasNoRecentCommands));
     }
 
     private void RememberCommand(string command)
