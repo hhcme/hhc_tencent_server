@@ -504,6 +504,15 @@ enum RemoteFileTransferStatus: String, Equatable, Hashable, Sendable {
             false
         }
     }
+
+    var isTerminal: Bool {
+        switch self {
+        case .succeeded, .failed, .cancelled, .interrupted:
+            true
+        case .pending, .running:
+            false
+        }
+    }
 }
 
 struct RemoteFileTransferJob: Identifiable, Equatable, Hashable, Sendable {

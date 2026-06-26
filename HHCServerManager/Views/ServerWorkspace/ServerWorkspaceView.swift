@@ -2023,6 +2023,12 @@ struct ServerWorkspaceView: View {
                         clearPending: {
                             viewModel.cancelPendingRemoteFileTransfers()
                         },
+                        clearCompleted: {
+                            viewModel.clearCompletedRemoteFileTransferHistory(
+                                profile: profile,
+                                repository: appState.repository
+                            )
+                        },
                         pauseQueue: {
                             viewModel.pauseRemoteFileTransferQueue()
                         },
@@ -4927,6 +4933,7 @@ private struct RemoteTransferJobsView: View {
     let cancel: () -> Void
     let cancelJob: (RemoteFileTransferJob) -> Void
     let clearPending: () -> Void
+    let clearCompleted: () -> Void
     let pauseQueue: () -> Void
     let resumeQueue: () -> Void
     let retryAll: () -> Void
@@ -4957,6 +4964,14 @@ private struct RemoteTransferJobsView: View {
                         clearPending()
                     } label: {
                         Label("Clear Pending", systemImage: "minus.circle")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if jobs.contains(where: { $0.status.isTerminal }) {
+                    Button {
+                        clearCompleted()
+                    } label: {
+                        Label("Clear Finished", systemImage: "trash")
                     }
                     .buttonStyle(.bordered)
                 }

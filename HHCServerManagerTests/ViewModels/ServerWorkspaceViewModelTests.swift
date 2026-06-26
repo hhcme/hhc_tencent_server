@@ -1463,6 +1463,71 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.remoteFileErrorMessage)
     }
 
+    func testClearCompletedRemoteFileTransferHistoryKeepsActiveJobs() throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let pending = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .upload,
+            remotePath: "/var/www/pending.env",
+            localPath: "/tmp/pending.env",
+            status: .pending,
+            byteCount: nil,
+            progressFraction: nil,
+            message: nil,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_004),
+            finishedAt: nil
+        )
+        let running = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .download,
+            remotePath: "/var/www/running.env",
+            localPath: "/tmp/running.env",
+            status: .running,
+            byteCount: nil,
+            progressFraction: 0.5,
+            message: "Transferred 512 of 1024 bytes.",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_003),
+            finishedAt: nil
+        )
+        let succeeded = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .upload,
+            remotePath: "/var/www/done.env",
+            localPath: "/tmp/done.env",
+            status: .succeeded,
+            byteCount: 8,
+            progressFraction: 1,
+            message: "Uploaded done.env.",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_002),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_003)
+        )
+        let failed = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .download,
+            remotePath: "/var/www/failed.env",
+            localPath: "/tmp/failed.env",
+            status: .failed,
+            byteCount: nil,
+            progressFraction: 0.25,
+            message: "Network dropped.",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_001),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_002)
+        )
+        for job in [pending, running, succeeded, failed] {
+            try repository.upsertRemoteFileTransferJob(job, serverId: profile.id)
+        }
+        let viewModel = ServerWorkspaceViewModel()
+        viewModel.remoteFileTransferJobs = [pending, running, succeeded, failed]
+
+        viewModel.clearCompletedRemoteFileTransferHistory(profile: profile, repository: repository)
+
+        XCTAssertEqual(viewModel.remoteFileTransferJobs.map(\.id), [pending.id, running.id])
+        XCTAssertEqual(viewModel.remoteFileActionMessage, "Cleared 2 completed transfers.")
+        XCTAssertNil(viewModel.remoteFileErrorMessage)
+        XCTAssertEqual(try repository.fetchRemoteFileTransferJobs(serverId: profile.id).map(\.id), [pending.id, running.id])
+    }
+
     func testResumeRemoteFileTransferReusesFailedUploadJobHistory() async throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)

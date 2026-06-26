@@ -250,6 +250,32 @@ final class ServerRepositoryTests: XCTestCase {
         XCTAssertTrue(try repository.fetchRemoteFileTransferJobs(serverId: server.id).isEmpty)
     }
 
+    func testDeleteTerminalRemoteFileTransferJobsKeepsActiveJobs() throws {
+        let repository = try makeRepository()
+        let server = makeServer()
+        try repository.upsert(server)
+
+        let statuses: [RemoteFileTransferStatus] = [.pending, .running, .succeeded, .failed, .cancelled, .interrupted]
+        for (index, status) in statuses.enumerated() {
+            try repository.upsertRemoteFileTransferJob(RemoteFileTransferJob(
+                id: UUID(),
+                direction: .upload,
+                remotePath: "/var/www/file-\(index).env",
+                localPath: "/tmp/file-\(index).env",
+                status: status,
+                byteCount: nil,
+                progressFraction: status == .succeeded ? 1 : nil,
+                message: nil,
+                startedAt: Date(timeIntervalSince1970: 1_700_000_000 + TimeInterval(index)),
+                finishedAt: status.isTerminal ? Date(timeIntervalSince1970: 1_700_000_100 + TimeInterval(index)) : nil
+            ), serverId: server.id)
+        }
+
+        try repository.deleteTerminalRemoteFileTransferJobs(serverId: server.id)
+
+        XCTAssertEqual(try repository.fetchRemoteFileTransferJobs(serverId: server.id).map(\.status), [.running, .pending])
+    }
+
     func testOperationLogsPersistInReverseChronologicalOrder() throws {
         let repository = try makeRepository()
         try repository.saveOperationLog(OperationLogEntry(

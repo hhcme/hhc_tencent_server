@@ -1194,6 +1194,20 @@ final class ServerWorkspaceViewModel: ObservableObject {
         startNextRemoteFileTransferIfNeeded()
     }
 
+    func clearCompletedRemoteFileTransferHistory(profile: ServerProfile, repository: ServerRepository? = nil) {
+        let terminalCount = remoteFileTransferJobs.filter { $0.status.isTerminal }.count
+        guard terminalCount > 0 else { return }
+
+        do {
+            try repository?.deleteTerminalRemoteFileTransferJobs(serverId: profile.id)
+            remoteFileTransferJobs.removeAll { $0.status.isTerminal }
+            remoteFileActionMessage = "Cleared \(terminalCount) completed transfer\(terminalCount == 1 ? "" : "s")."
+            remoteFileErrorMessage = nil
+        } catch {
+            remoteFileErrorMessage = error.localizedDescription
+        }
+    }
+
     func loadSystemdUnits(
         profile: ServerProfile,
         sshClient: SSHClient,

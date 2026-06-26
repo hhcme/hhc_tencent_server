@@ -147,6 +147,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 增强传输队列按任务控制：工作台每条 pending/running 传输可单独取消；pending 任务取消后不会启动，running 任务取消只停止对应 Task，不影响其它运行中的传输，并继续持久化取消状态。
 - [x] 增加传输队列暂停/恢复调度：暂停后 running 任务继续执行，但 pending 任务不会因并发槽释放而自动启动；恢复后继续按并发上限调度。
 - [x] 增加批量恢复入口：工作台可一键恢复所有 failed/cancelled/interrupted 传输，已成功的历史任务不会重复入队。
+- [x] 增加终态传输历史清理：工作台可清理 succeeded/failed/cancelled/interrupted 历史记录，pending/running 任务保留并继续受队列控制。
 - [ ] 实现正式 SFTP 和 native 级可恢复传输队列。
 - [x] 实现重命名。
 - [x] 实现权限查看基础展示。
@@ -177,6 +178,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 按任务取消队列测试：`ServerWorkspaceViewModelTests.testCancelSinglePendingRemoteFileTransferDoesNotStartIt` 覆盖单个 pending 取消不启动且写入 cancelled，`testCancelSingleRunningRemoteFileTransferLeavesOtherRunning` 覆盖取消单个 running 不影响其它运行任务。
 - [x] 队列暂停/恢复调度测试：`ServerWorkspaceViewModelTests.testPauseRemoteFileTransferQueueStopsPendingDispatchUntilResumed` 覆盖暂停期间并发槽释放后 pending 不启动，恢复后 pending 进入 running 并持久化。
 - [x] 批量恢复测试：`ServerWorkspaceViewModelTests.testRetryAllRemoteFileTransfersOnlyQueuesRetryableJobs` 覆盖 failed upload 和 interrupted download 一键恢复，并确认 succeeded 历史不会重复执行。
+- [x] 终态传输历史清理测试：`ServerRepositoryTests.testDeleteTerminalRemoteFileTransferJobsKeepsActiveJobs` 和 `ServerWorkspaceViewModelTests.testClearCompletedRemoteFileTransferHistoryKeepsActiveJobs` 覆盖清理 succeeded/failed/cancelled/interrupted，保留 pending/running。
 - [x] rsync 进度输出解析和 `--append-verify` 参数测试。
 - [x] OpenSSH SFTP fallback partial 大小解析和续传门禁测试，覆盖 0 字节、完整 partial 和超长 partial 不使用 append resume。
 - [x] 可选真实 SFTP 集成测试：`SSHIntegrationTests.testRealSFTPTransferRoundTripWhenEnvironmentIsConfigured` 会禁用 rsync 和 scp fallback，强制走 OpenSSH `sftp -b`，在远端 `/tmp/hhc-transfer-*` 完成首传上传、内容校验、下载和清理。

@@ -268,6 +268,20 @@ final class ServerRepository: @unchecked Sendable {
         }
     }
 
+    func deleteTerminalRemoteFileTransferJobs(serverId: UUID) throws {
+        try database.execute("""
+            DELETE FROM remote_file_transfers
+            WHERE server_id = ?
+              AND status IN (?, ?, ?, ?)
+        """, bindings: [
+            .text(serverId.uuidString),
+            .text(RemoteFileTransferStatus.succeeded.rawValue),
+            .text(RemoteFileTransferStatus.failed.rawValue),
+            .text(RemoteFileTransferStatus.cancelled.rawValue),
+            .text(RemoteFileTransferStatus.interrupted.rawValue),
+        ])
+    }
+
     func saveOperationLog(_ entry: OperationLogEntry) throws {
         try database.execute("""
             INSERT INTO operation_logs (
