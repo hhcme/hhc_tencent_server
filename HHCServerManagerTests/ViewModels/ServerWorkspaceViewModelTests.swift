@@ -1342,6 +1342,80 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(persisted.first?.status, .succeeded)
     }
 
+    func testRetryAllRemoteFileTransfersOnlyQueuesRetryableJobs() async throws {
+        let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
+        let client = RemoteFileTransferMockSSHClient()
+        let viewModel = ServerWorkspaceViewModel()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+        let failedUpload = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .upload,
+            remotePath: "/var/www/failed.env",
+            localPath: "/tmp/failed.env",
+            status: .failed,
+            byteCount: nil,
+            progressFraction: 0.2,
+            message: "Network dropped.",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_001)
+        )
+        let interruptedDownload = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .download,
+            remotePath: "/var/www/interrupted.env",
+            localPath: "/tmp/interrupted.env",
+            status: .interrupted,
+            byteCount: 8,
+            progressFraction: 0.4,
+            message: "Transfer was interrupted before completion.",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_001)
+        )
+        let succeeded = RemoteFileTransferJob(
+            id: UUID(),
+            direction: .upload,
+            remotePath: "/var/www/done.env",
+            localPath: "/tmp/done.env",
+            status: .succeeded,
+            byteCount: 8,
+            progressFraction: 1,
+            message: "Uploaded done.env.",
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_001)
+        )
+        for job in [failedUpload, interruptedDownload, succeeded] {
+            try repository.upsertRemoteFileTransferJob(job, serverId: profile.id)
+        }
+        viewModel.remoteFileTransferJobs = [failedUpload, interruptedDownload, succeeded]
+
+        viewModel.retryAllRemoteFileTransfers(
+            profile: profile,
+            sshClient: client,
+            transferClient: client,
+            remoteFileService: service,
+            repository: repository
+        )
+
+        try await waitUntil {
+            let statuses = Dictionary(uniqueKeysWithValues: viewModel.remoteFileTransferJobs.map { ($0.id, $0.status) })
+            return statuses[failedUpload.id] == .succeeded &&
+                statuses[interruptedDownload.id] == .succeeded &&
+                statuses[succeeded.id] == .succeeded
+        }
+
+        XCTAssertEqual(client.uploads.map(\.remotePath), ["/var/www/failed.env"])
+        XCTAssertEqual(client.downloads.map(\.remotePath), ["/var/www/interrupted.env"])
+        XCTAssertFalse(client.uploads.contains { $0.remotePath == "/var/www/done.env" })
+        let persistedStatuses = Dictionary(
+            uniqueKeysWithValues: try repository.fetchRemoteFileTransferJobs(serverId: profile.id)
+                .map { ($0.id, $0.status) }
+        )
+        XCTAssertEqual(persistedStatuses[failedUpload.id], .succeeded)
+        XCTAssertEqual(persistedStatuses[interruptedDownload.id], .succeeded)
+        XCTAssertEqual(persistedStatuses[succeeded.id], .succeeded)
+    }
+
     func testRemoteFileTransferCancellationMarksRunningJobCancelled() async throws {
         let profile = makeProfile()
         let client = SlowRemoteFileTransferMockSSHClient()

@@ -884,14 +884,57 @@ final class ServerWorkspaceViewModel: ObservableObject {
         repository: ServerRepository? = nil
     ) {
         guard job.status.isRetryable else { return }
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = "Resuming \(Self.remoteFileTransferDisplayName(job))."
+        enqueueResumedRemoteFileTransfer(
+            job,
+            profile: profile,
+            sshClient: sshClient,
+            transferClient: transferClient,
+            remoteFileService: remoteFileService,
+            repository: repository
+        )
+        startNextRemoteFileTransferIfNeeded()
+    }
+
+    func retryAllRemoteFileTransfers(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
+    ) {
+        let retryableJobs = remoteFileTransferJobs.filter { $0.status.isRetryable }
+        guard !retryableJobs.isEmpty else { return }
+
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = "Resuming \(retryableJobs.count) transfer\(retryableJobs.count == 1 ? "" : "s")."
+        for job in retryableJobs {
+            enqueueResumedRemoteFileTransfer(
+                job,
+                profile: profile,
+                sshClient: sshClient,
+                transferClient: transferClient,
+                remoteFileService: remoteFileService,
+                repository: repository
+            )
+        }
+        startNextRemoteFileTransferIfNeeded()
+    }
+
+    private func enqueueResumedRemoteFileTransfer(
+        _ job: RemoteFileTransferJob,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        transferClient: RemoteFileTransferClient,
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
+    ) {
         let jobId = resumeRemoteFileTransferJob(
             job,
             profile: profile,
             repository: repository
         )
-        remoteFileErrorMessage = nil
-        remoteFileActionMessage = "Resuming \(Self.remoteFileTransferDisplayName(job))."
-
         switch job.direction {
         case .upload:
             transferQueue.append(.upload(
@@ -923,7 +966,6 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 repository: repository
             ))
         }
-        startNextRemoteFileTransferIfNeeded()
     }
 
     func cancelRemoteFileTransfer() {

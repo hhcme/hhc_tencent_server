@@ -1748,6 +1748,15 @@ struct ServerWorkspaceView: View {
                         resumeQueue: {
                             viewModel.resumeRemoteFileTransferQueue()
                         },
+                        retryAll: {
+                            viewModel.retryAllRemoteFileTransfers(
+                                profile: profile,
+                                sshClient: appState.sshClient,
+                                transferClient: appState.sshClient,
+                                remoteFileService: appState.remoteFileService,
+                                repository: appState.repository
+                            )
+                        },
                         retry: { job in
                             viewModel.retryRemoteFileTransfer(
                                 job,
@@ -4487,6 +4496,7 @@ private struct RemoteTransferJobsView: View {
     let clearPending: () -> Void
     let pauseQueue: () -> Void
     let resumeQueue: () -> Void
+    let retryAll: () -> Void
     let retry: (RemoteFileTransferJob) -> Void
 
     var body: some View {
@@ -4495,6 +4505,14 @@ private struct RemoteTransferJobsView: View {
                 Label("Transfers", systemImage: "arrow.up.arrow.down")
                     .font(.headline)
                 Spacer()
+                if jobs.contains(where: { $0.status.isRetryable }) {
+                    Button {
+                        retryAll()
+                    } label: {
+                        Label("Resume All", systemImage: "arrow.clockwise.circle")
+                    }
+                    .buttonStyle(.bordered)
+                }
                 if jobs.contains(where: { $0.status == .pending }) {
                     Button {
                         isQueuePaused ? resumeQueue() : pauseQueue()
