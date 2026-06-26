@@ -962,6 +962,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
 
     func testRemoteFileActionsRenameAndMoveToTrashThenRefreshListing() async throws {
         let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
         let client = RemoteFileActionMockSSHClient()
         let viewModel = ServerWorkspaceViewModel()
         let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
@@ -991,12 +992,21 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             renamed,
             profile: profile,
             sshClient: client,
-            remoteFileService: service
+            remoteFileService: service,
+            repository: repository
         )
         try await waitUntil { viewModel.remoteDirectoryListing?.entries.isEmpty == true }
         XCTAssertTrue(viewModel.remoteFileActionMessage?.contains("Moved home.html to ~/.hhc-server-manager-trash/") == true)
         XCTAssertTrue(client.commands.contains { $0.contains("mkdir -p -- '~/.hhc-server-manager-trash'") })
         XCTAssertNil(viewModel.remoteFileErrorMessage)
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        let log = try XCTUnwrap(logs.first { $0.action == "move_to_trash" })
+        XCTAssertEqual(log.targetType, "remote_file")
+        XCTAssertEqual(log.targetId, "/var/www/home.html")
+        XCTAssertEqual(log.status, "succeeded")
+        XCTAssertTrue(log.beforeSnapshot?.contains("permissions=-rw-r--r--") == true)
+        XCTAssertTrue(log.afterSnapshot?.contains("trashPath=~/.hhc-server-manager-trash/") == true)
     }
 
     func testRemoteTextFileOpenAndSaveRefreshesListingWithBackupMessage() async throws {
@@ -1079,6 +1089,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
 
     func testRemoteFilePermissionsChangeRefreshesListing() async throws {
         let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
         let client = RemoteTextFileMockSSHClient()
         let viewModel = ServerWorkspaceViewModel()
         let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
@@ -1097,12 +1108,21 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             mode: "640",
             profile: profile,
             sshClient: client,
-            remoteFileService: service
+            remoteFileService: service,
+            repository: repository
         )
         try await waitUntil { viewModel.remoteDirectoryListing?.entries.first?.permissions == "-rw-r-----" }
 
         XCTAssertEqual(viewModel.remoteFileActionMessage, "Changed permissions for app.env to 640.")
         XCTAssertNil(viewModel.remoteFileErrorMessage)
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        let log = try XCTUnwrap(logs.first { $0.action == "chmod" })
+        XCTAssertEqual(log.targetType, "remote_file")
+        XCTAssertEqual(log.targetId, "/var/www/app.env")
+        XCTAssertEqual(log.status, "succeeded")
+        XCTAssertTrue(log.beforeSnapshot?.contains("permissions=-rw-r--r--") == true)
+        XCTAssertEqual(log.afterSnapshot, "mode=640")
     }
 
     func testRemoteFileUploadAndDownloadUpdateTransferStateAndMessages() async throws {

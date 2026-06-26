@@ -149,13 +149,13 @@ CREATE TABLE environment_profiles (
 - [x] 防火墙后端探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作已有 mock/contract 测试覆盖，其中 nftables 仅写入已有兼容 chain 且只删除 HHC 标记规则；已加入受保护真实写入入口，真实服务器写入仍需在明确允许修改 firewall 的环境中启用验收。
 - [x] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，并通过受控临时 cron entry 验证 add/disable/enable/delete、原 crontab 恢复和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过；`/etc/cron.d` 系统任务只读发现已接入 contract 测试和受保护真实测试断言，真实系统条目是否存在取决于目标服务器。
 - [x] Environment 文件保存可备份并审计。当前真实服务器已通过受控临时 `.env` 验证保存、`.hhc-backup-*` 备份、远端内容变更和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过。
-- [ ] 所有写操作可在操作日志中查到。当前 systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`；systemd/Cron/Environment 真实服务器写操作审计已于 2026-06-26 用当前代码重新验收，Nginx/Firewall 真实服务器写操作和真实云账号验收仍需继续补齐。
+- [ ] 所有写操作可在操作日志中查到。当前 remote file、systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`；remote file 移动到回收目录和 chmod 已有 ViewModel 审计测试，systemd/Cron/Environment 真实服务器写操作审计已于 2026-06-26 用当前代码重新验收，Nginx/Firewall 真实服务器写操作和真实云账号验收仍需继续补齐。
 
 ## 8. 完成标志
 
 1. 云安全组读取、规则 diff/preview、实例精确安全组过滤和三家云单条规则写操作已可用；真实云账号写操作验收仍待继续补齐。
 2. systemd、Nginx、防火墙、Cron、环境变量能力基于探测启用。当前 systemd、Nginx、Cron、Environment 已有工作台基础，Cron 支持用户级可写和 `/etc/cron.d` 只读展示，Firewall 已支持只读探测和受限规则写操作。
-3. 所有远程写操作有确认和审计。当前 systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 已接入审计；现有危险确认已接入统一风险模型。
+3. 所有远程写操作有确认和审计。当前 remote file、systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 已接入审计；现有危险确认已接入统一风险模型。
 4. Nginx 等配置类操作有备份和回滚。当前 Nginx 已具备读取、编辑、保存前备份、保存后测试、失败回滚和 reload 前保护。
 5. 测试和手动验收通过。
 

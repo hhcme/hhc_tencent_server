@@ -548,7 +548,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         _ entry: RemoteFileEntry,
         profile: ServerProfile,
         sshClient: SSHClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
     ) {
         isMutatingRemoteFile = true
         remoteFileErrorMessage = nil
@@ -570,11 +571,33 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.remoteDirectoryListing = listing
                     self.remoteFilePath = listing.path
                     self.remoteFileActionMessage = "Moved \(entry.name) to \(trashPath)."
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: entry.path,
+                        action: "move_to_trash",
+                        beforeSnapshot: Self.remoteFileSnapshot(entry),
+                        afterSnapshot: "trashPath=\(trashPath)",
+                        status: "succeeded",
+                        message: self.remoteFileActionMessage
+                    )
                     self.isMutatingRemoteFile = false
                 }
             } catch {
                 await MainActor.run {
                     self.remoteFileErrorMessage = error.localizedDescription
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: entry.path,
+                        action: "move_to_trash",
+                        beforeSnapshot: Self.remoteFileSnapshot(entry),
+                        afterSnapshot: nil,
+                        status: "failed",
+                        message: error.localizedDescription
+                    )
                     self.isMutatingRemoteFile = false
                 }
             }
@@ -586,7 +609,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         mode: String,
         profile: ServerProfile,
         sshClient: SSHClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
     ) {
         isMutatingRemoteFile = true
         remoteFileErrorMessage = nil
@@ -609,11 +633,33 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.remoteDirectoryListing = listing
                     self.remoteFilePath = listing.path
                     self.remoteFileActionMessage = "Changed permissions for \(entry.name) to \(mode)."
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: entry.path,
+                        action: "chmod",
+                        beforeSnapshot: Self.remoteFileSnapshot(entry),
+                        afterSnapshot: "mode=\(mode.trimmingCharacters(in: .whitespacesAndNewlines))",
+                        status: "succeeded",
+                        message: self.remoteFileActionMessage
+                    )
                     self.isMutatingRemoteFile = false
                 }
             } catch {
                 await MainActor.run {
                     self.remoteFileErrorMessage = error.localizedDescription
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: entry.path,
+                        action: "chmod",
+                        beforeSnapshot: Self.remoteFileSnapshot(entry),
+                        afterSnapshot: nil,
+                        status: "failed",
+                        message: error.localizedDescription
+                    )
                     self.isMutatingRemoteFile = false
                 }
             }
@@ -2336,6 +2382,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
             "sub=\(unit.subState)",
             "description=\(unit.description)",
         ].joined(separator: "\n")
+    }
+
+    private static func remoteFileSnapshot(_ entry: RemoteFileEntry) -> String {
+        let lines: [String?] = [
+            "path=\(entry.path)",
+            "name=\(entry.name)",
+            "kind=\(entry.kind.rawValue)",
+            entry.size.map { "size=\($0)" },
+            entry.permissions.isEmpty ? nil : "permissions=\(entry.permissions)",
+        ]
+        return lines.compactMap { $0 }.joined(separator: "\n")
     }
 
     private static func securityGroupSnapshotText(_ snapshot: CloudSecurityGroupPolicySnapshot) -> String {

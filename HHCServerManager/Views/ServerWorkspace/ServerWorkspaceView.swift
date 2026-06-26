@@ -108,7 +108,8 @@ struct ServerWorkspaceView: View {
                         entry,
                         profile: profile,
                         sshClient: appState.sshClient,
-                        remoteFileService: appState.remoteFileService
+                        remoteFileService: appState.remoteFileService,
+                        repository: appState.repository
                     )
                 }
                 remoteFileTrashEntry = nil
@@ -307,7 +308,8 @@ struct ServerWorkspaceView: View {
                         mode: remoteFilePermissionsText,
                         profile: profile,
                         sshClient: appState.sshClient,
-                        remoteFileService: appState.remoteFileService
+                        remoteFileService: appState.remoteFileService,
+                        repository: appState.repository
                     )
                     remoteFilePermissionsEntry = nil
                 }

@@ -153,6 +153,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 删除前二次确认，优先移动到远端应用回收目录。
 - [x] 文本文件编辑保存前创建备份。
 - [x] 实现另存为和权限修改。
+- [x] 远程文件危险操作审计：移动到回收目录和 chmod 成功/失败都会写入 `remote_change_logs`，记录目标路径、原权限和结果快照。
 
 ### Task 7：测试
 
@@ -188,6 +189,7 @@ CREATE TABLE file_transfer_jobs (
 - [x] 文件列表能浏览目录。
 - [x] 小文件上传、下载、重命名成功。
 - [x] 删除会二次确认并进入可恢复路径：工作台删除入口会弹出风险确认，确认后移动到远端 `~/.hhc-server-manager-trash/`，并已有 ViewModel/Service 测试覆盖。
+- [x] 删除到回收目录和 chmod 会进入操作日志：`ServerWorkspaceViewModelTests` 覆盖 `move_to_trash` 和 `chmod` 的 `remote_change_logs` 记录。
 - [x] 文本文件编辑保存成功，失败时不破坏原文件。
 
 ## 8. 完成标志
