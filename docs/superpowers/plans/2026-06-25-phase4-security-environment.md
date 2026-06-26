@@ -149,7 +149,7 @@ CREATE TABLE environment_profiles (
 - [x] 防火墙后端探测：真实服务器已验证 firewalld 安装但未运行时可展示降级状态；规则写操作已有 mock/contract 测试覆盖，其中 nftables 仅写入已有兼容 chain 且只删除 HHC 标记规则；已加入受保护真实写入入口，真实服务器写入仍需在明确允许修改 firewall 的环境中启用验收。
 - [x] Cron 任务可禁用并恢复。当前真实服务器只读 crontab 已验收，并通过受控临时 cron entry 验证 add/disable/enable/delete、原 crontab 恢复和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过；`/etc/cron.d` 系统任务只读发现已接入 contract 测试和受保护真实测试断言，真实系统条目是否存在取决于目标服务器。
 - [x] Environment 文件保存可备份并审计。当前真实服务器已通过受控临时 `.env` 验证保存、`.hhc-backup-*` 备份、远端内容变更和 `remote_change_logs` 审计；2026-06-26 已重新用当前代码验证通过。
-- [ ] 所有写操作可在操作日志中查到。当前 remote file、systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`；remote file 移动到回收目录和 chmod 已有 ViewModel 审计测试，systemd/Cron/Environment 真实服务器写操作审计已于 2026-06-26 用当前代码重新验收，Nginx/Firewall 真实服务器写操作和真实云账号验收仍需继续补齐。
+- [ ] 所有写操作可在操作日志中查到。当前 remote file、systemd、Cron、Nginx、Environment、Firewall 和腾讯云 Security Groups 写操作已写入 `remote_change_logs`；remote file 重命名、文本保存、文本另存为、移动到回收目录和 chmod 已有 ViewModel 审计测试，文本保存审计只记录元数据不记录正文；systemd/Cron/Environment 真实服务器写操作审计已于 2026-06-26 用当前代码重新验收，Nginx/Firewall 真实服务器写操作和真实云账号验收仍需继续补齐。
 
 ## 8. 完成标志
 

@@ -515,7 +515,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         to newName: String,
         profile: ServerProfile,
         sshClient: SSHClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
     ) {
         isMutatingRemoteFile = true
         remoteFileErrorMessage = nil
@@ -524,6 +525,10 @@ final class ServerWorkspaceViewModel: ObservableObject {
         Task {
             do {
                 try await remoteFileService.rename(entry: entry, to: newName, profile: profile, sshClient: sshClient)
+                let renamedPath = RemoteFileService.joinedPath(
+                    basePath: RemoteFileService.parentPath(for: entry.path),
+                    name: newName.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
                 let listing = try await remoteFileService.listDirectory(
                     path: self.remoteFilePath,
                     profile: profile,
@@ -533,11 +538,33 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.remoteDirectoryListing = listing
                     self.remoteFilePath = listing.path
                     self.remoteFileActionMessage = "Renamed \(entry.name)."
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: entry.path,
+                        action: "rename",
+                        beforeSnapshot: Self.remoteFileSnapshot(entry),
+                        afterSnapshot: "newPath=\(renamedPath)",
+                        status: "succeeded",
+                        message: self.remoteFileActionMessage
+                    )
                     self.isMutatingRemoteFile = false
                 }
             } catch {
                 await MainActor.run {
                     self.remoteFileErrorMessage = error.localizedDescription
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: entry.path,
+                        action: "rename",
+                        beforeSnapshot: Self.remoteFileSnapshot(entry),
+                        afterSnapshot: nil,
+                        status: "failed",
+                        message: error.localizedDescription
+                    )
                     self.isMutatingRemoteFile = false
                 }
             }
@@ -700,7 +727,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     func saveRemoteTextFile(
         profile: ServerProfile,
         sshClient: SSHClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
     ) {
         guard let remoteTextFile else { return }
         isSavingRemoteText = true
@@ -730,11 +758,33 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.remoteTextFile = updatedFile
                     self.remoteDirectoryListing = listing
                     self.remoteFileActionMessage = self.remoteTextSaveMessage(result)
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: remoteTextFile.path,
+                        action: "save_text",
+                        beforeSnapshot: Self.remoteTextSnapshot(remoteTextFile),
+                        afterSnapshot: Self.remoteTextSaveSnapshot(result, byteCount: updatedFile.byteCount),
+                        status: "succeeded",
+                        message: self.remoteFileActionMessage
+                    )
                     self.isSavingRemoteText = false
                 }
             } catch {
                 await MainActor.run {
                     self.remoteFileErrorMessage = error.localizedDescription
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: remoteTextFile.path,
+                        action: "save_text",
+                        beforeSnapshot: Self.remoteTextSnapshot(remoteTextFile),
+                        afterSnapshot: nil,
+                        status: "failed",
+                        message: error.localizedDescription
+                    )
                     self.isSavingRemoteText = false
                 }
             }
@@ -745,7 +795,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         targetPath: String,
         profile: ServerProfile,
         sshClient: SSHClient,
-        remoteFileService: RemoteFileService
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
     ) {
         guard let remoteTextFile else { return }
         isSavingRemoteText = true
@@ -777,11 +828,33 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.remoteDirectoryListing = listing
                     self.remoteFilePath = listing.path
                     self.remoteFileActionMessage = self.remoteTextSaveMessage(result)
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: result.path,
+                        action: "save_text_as",
+                        beforeSnapshot: Self.remoteTextSnapshot(remoteTextFile),
+                        afterSnapshot: Self.remoteTextSaveSnapshot(result, byteCount: updatedFile.byteCount),
+                        status: "succeeded",
+                        message: self.remoteFileActionMessage
+                    )
                     self.isSavingRemoteText = false
                 }
             } catch {
                 await MainActor.run {
                     self.remoteFileErrorMessage = error.localizedDescription
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: targetPath,
+                        action: "save_text_as",
+                        beforeSnapshot: Self.remoteTextSnapshot(remoteTextFile),
+                        afterSnapshot: nil,
+                        status: "failed",
+                        message: error.localizedDescription
+                    )
                     self.isSavingRemoteText = false
                 }
             }
@@ -2391,6 +2464,22 @@ final class ServerWorkspaceViewModel: ObservableObject {
             "kind=\(entry.kind.rawValue)",
             entry.size.map { "size=\($0)" },
             entry.permissions.isEmpty ? nil : "permissions=\(entry.permissions)",
+        ]
+        return lines.compactMap { $0 }.joined(separator: "\n")
+    }
+
+    private static func remoteTextSnapshot(_ file: RemoteTextFile) -> String {
+        [
+            "path=\(file.path)",
+            "byteCount=\(file.byteCount)",
+        ].joined(separator: "\n")
+    }
+
+    private static func remoteTextSaveSnapshot(_ result: RemoteTextSaveResult, byteCount: Int) -> String {
+        let lines: [String?] = [
+            "path=\(result.path)",
+            "byteCount=\(byteCount)",
+            result.backupPath.map { "backupPath=\($0)" },
         ]
         return lines.compactMap { $0 }.joined(separator: "\n")
     }

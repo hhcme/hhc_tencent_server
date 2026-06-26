@@ -981,11 +981,20 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             to: "home.html",
             profile: profile,
             sshClient: client,
-            remoteFileService: service
+            remoteFileService: service,
+            repository: repository
         )
         try await waitUntil { viewModel.remoteDirectoryListing?.entries.map(\.name) == ["home.html"] }
         XCTAssertEqual(viewModel.remoteFileActionMessage, "Renamed index.html.")
         XCTAssertTrue(client.commands.contains("mv -n -- '/var/www/index.html' '/var/www/home.html'"))
+
+        var logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        var log = try XCTUnwrap(logs.first { $0.action == "rename" })
+        XCTAssertEqual(log.targetType, "remote_file")
+        XCTAssertEqual(log.targetId, "/var/www/index.html")
+        XCTAssertEqual(log.status, "succeeded")
+        XCTAssertTrue(log.beforeSnapshot?.contains("path=/var/www/index.html") == true)
+        XCTAssertEqual(log.afterSnapshot, "newPath=/var/www/home.html")
 
         let renamed = try XCTUnwrap(viewModel.remoteDirectoryListing?.entries.first)
         viewModel.moveRemoteFileToTrash(
@@ -1000,8 +1009,8 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("mkdir -p -- '~/.hhc-server-manager-trash'") })
         XCTAssertNil(viewModel.remoteFileErrorMessage)
 
-        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
-        let log = try XCTUnwrap(logs.first { $0.action == "move_to_trash" })
+        logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        log = try XCTUnwrap(logs.first { $0.action == "move_to_trash" })
         XCTAssertEqual(log.targetType, "remote_file")
         XCTAssertEqual(log.targetId, "/var/www/home.html")
         XCTAssertEqual(log.status, "succeeded")
@@ -1011,6 +1020,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
 
     func testRemoteTextFileOpenAndSaveRefreshesListingWithBackupMessage() async throws {
         let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
         let client = RemoteTextFileMockSSHClient()
         let viewModel = ServerWorkspaceViewModel()
         let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
@@ -1038,7 +1048,8 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         viewModel.saveRemoteTextFile(
             profile: profile,
             sshClient: client,
-            remoteFileService: service
+            remoteFileService: service,
+            repository: repository
         )
         try await waitUntil { viewModel.remoteFileActionMessage?.hasPrefix("Saved /var/www/app.env.") == true }
 
@@ -1047,10 +1058,20 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.remoteFileActionMessage?.contains("Backup: /var/www/app.env.hhc-backup-") == true)
         XCTAssertEqual(viewModel.remoteDirectoryListing?.entries.map(\.name), ["app.env"])
         XCTAssertNil(viewModel.remoteFileErrorMessage)
+
+        let log = try XCTUnwrap(try repository.fetchRemoteChangeLogs(serverId: profile.id).first { $0.action == "save_text" })
+        XCTAssertEqual(log.targetType, "remote_file")
+        XCTAssertEqual(log.targetId, "/var/www/app.env")
+        XCTAssertEqual(log.status, "succeeded")
+        XCTAssertEqual(log.beforeSnapshot, "path=/var/www/app.env\nbyteCount=6")
+        XCTAssertTrue(log.afterSnapshot?.contains("backupPath=/var/www/app.env.hhc-backup-") == true)
+        XCTAssertFalse(log.beforeSnapshot?.contains("hello") == true)
+        XCTAssertFalse(log.afterSnapshot?.contains("updated") == true)
     }
 
     func testRemoteTextFileSaveAsRefreshesTargetDirectoryWithoutBackupMessage() async throws {
         let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
         let client = RemoteTextFileMockSSHClient()
         let viewModel = ServerWorkspaceViewModel()
         let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
@@ -1077,7 +1098,8 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
             targetPath: "/var/www/copy.env",
             profile: profile,
             sshClient: client,
-            remoteFileService: service
+            remoteFileService: service,
+            repository: repository
         )
         try await waitUntil { viewModel.remoteFileActionMessage == "Saved /var/www/copy.env." }
 
@@ -1085,6 +1107,14 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.remoteTextFile?.content, "copy\n")
         XCTAssertEqual(viewModel.remoteDirectoryListing?.entries.map(\.name), ["app.env", "copy.env"])
         XCTAssertNil(viewModel.remoteFileErrorMessage)
+
+        let log = try XCTUnwrap(try repository.fetchRemoteChangeLogs(serverId: profile.id).first { $0.action == "save_text_as" })
+        XCTAssertEqual(log.targetType, "remote_file")
+        XCTAssertEqual(log.targetId, "/var/www/copy.env")
+        XCTAssertEqual(log.status, "succeeded")
+        XCTAssertEqual(log.beforeSnapshot, "path=/var/www/app.env\nbyteCount=6")
+        XCTAssertEqual(log.afterSnapshot, "path=/var/www/copy.env\nbyteCount=5")
+        XCTAssertFalse(log.afterSnapshot?.contains("copy\n") == true)
     }
 
     func testRemoteFilePermissionsChangeRefreshesListing() async throws {

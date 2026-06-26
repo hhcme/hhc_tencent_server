@@ -289,7 +289,8 @@ struct ServerWorkspaceView: View {
                         to: remoteFileRenameText,
                         profile: profile,
                         sshClient: appState.sshClient,
-                        remoteFileService: appState.remoteFileService
+                        remoteFileService: appState.remoteFileService,
+                        repository: appState.repository
                     )
                     remoteFileRenameEntry = nil
                 }
@@ -327,7 +328,8 @@ struct ServerWorkspaceView: View {
                     viewModel.saveRemoteTextFile(
                         profile: profile,
                         sshClient: appState.sshClient,
-                        remoteFileService: appState.remoteFileService
+                        remoteFileService: appState.remoteFileService,
+                        repository: appState.repository
                     )
                 },
                 saveAs: { targetPath in
@@ -335,7 +337,8 @@ struct ServerWorkspaceView: View {
                         targetPath: targetPath,
                         profile: profile,
                         sshClient: appState.sshClient,
-                        remoteFileService: appState.remoteFileService
+                        remoteFileService: appState.remoteFileService,
+                        repository: appState.repository
                     )
                 },
                 suggestedSaveAsPath: {
