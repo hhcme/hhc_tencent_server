@@ -607,6 +607,73 @@ final class CloudResourceCenterViewModel: ObservableObject {
         refreshLocalResources(appState: appState)
     }
 
+    func visibleResourcesReportMarkdown() -> String {
+        var lines: [String] = [
+            "# Cloud Resources Report",
+            "",
+            "- Scope: \(selectedAccountId.map(\.uuidString) ?? "all accounts")",
+            "- Region: \(selectedRegionId.nilIfBlank ?? "all loaded regions")",
+            "- Kind: \(kindFilter.title)",
+            "- Search: \(searchText.nilIfBlank ?? "none")",
+            "- Status: \(statusFilter.nilIfBlank ?? "any")",
+            "- Total: \(resourceSummary.totalCount)",
+            "- Needs attention: \(resourceSummary.attentionCount)",
+        ]
+        if let latestSyncAt = resourceSummary.latestSyncAt {
+            lines.append("- Latest sync: \(AppDatabase.string(from: latestSyncAt))")
+        }
+
+        lines.append("")
+        if !resourceSummary.kindCounts.isEmpty {
+            lines.append("## By Kind")
+            for item in resourceSummary.kindCounts {
+                lines.append("- \(item.kind.displayName): \(item.count)")
+            }
+            lines.append("")
+        }
+
+        if !resourceSummary.providerCounts.isEmpty {
+            lines.append("## By Provider")
+            for item in resourceSummary.providerCounts {
+                lines.append("- \(item.providerId.displayName): \(item.count)")
+            }
+            lines.append("")
+        }
+
+        lines.append("## Resources")
+        if resources.isEmpty {
+            lines.append("")
+            lines.append("No cached cloud resources match the current filters.")
+            return lines.joined(separator: "\n")
+        }
+
+        lines.append("")
+        lines.append("| Kind | Provider | Region | Name | Resource ID | Status | Primary | Details | Last Sync |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+        for resource in resources {
+            lines.append([
+                resource.kind.displayName,
+                resource.providerId.displayName,
+                resource.regionId ?? "",
+                resource.displayName,
+                resource.resourceId,
+                resource.status ?? "",
+                resource.primaryAddress ?? "",
+                resource.secondaryText ?? "",
+                resource.lastSyncedAt.map(AppDatabase.string(from:)) ?? "",
+            ].map(Self.markdownTableCell).joined(separator: " | ").withTableBounds)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func copyVisibleResourcesReportToPasteboard() {
+        let report = visibleResourcesReportMarkdown()
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(report, forType: .string)
+        statusMessage = "Copied \(resources.count) visible cloud resources as Markdown."
+    }
+
     private func selectedAccount(from accounts: [CloudProviderAccount]) -> CloudProviderAccount? {
         guard let selectedAccountId else { return nil }
         return accounts.first { $0.id == selectedAccountId }
@@ -741,6 +808,20 @@ final class CloudResourceCenterViewModel: ObservableObject {
         case .authenticationFailed, .adapterNotRegistered, .timeout, .rateLimited, .networkFailure, .cancelled:
             return nil
         }
+    }
+
+    private static func markdownTableCell(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "|", with: "\\|")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private extension String {
+    var withTableBounds: String {
+        "| \(self) |"
     }
 }
 

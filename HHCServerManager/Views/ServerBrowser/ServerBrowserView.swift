@@ -374,6 +374,12 @@ private struct CloudResourceCenterSheet: View {
 
             Section("Summary") {
                 CloudResourceSummaryView(summary: viewModel.resourceSummary)
+                Button {
+                    viewModel.copyVisibleResourcesReportToPasteboard()
+                } label: {
+                    Label("Copy Markdown Report", systemImage: "doc.on.doc")
+                }
+                .disabled(viewModel.isWorking)
             }
 
             Section("Capabilities") {

@@ -653,6 +653,63 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.resourceSummary.attentionCount, 1)
     }
 
+    func testCloudResourceCenterBuildsMarkdownReportForVisibleResources() throws {
+        let repository = ServerRepository(database: try AppDatabase.inMemory())
+        let keychain = KeychainService(serviceName: "me.hhc.HHCServerManagerTests.cloud-resource-report.\(UUID().uuidString)")
+        let appState = AppState(repository: repository, keychain: keychain)
+        let syncedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let account = CloudProviderAccount(
+            id: UUID(),
+            providerId: .tencentCloud,
+            displayName: "Tencent",
+            keychainRef: "cloud_test",
+            enabled: true,
+            createdAt: syncedAt,
+            updatedAt: syncedAt
+        )
+        try repository.upsertCloudProviderAccount(account)
+        try repository.upsertCloudDisk(CloudDisk(
+            id: UUID(),
+            accountId: account.id,
+            providerId: .tencentCloud,
+            regionId: "ap-guangzhou",
+            diskId: "disk-data",
+            instanceId: "ins-prod",
+            name: "data|disk",
+            diskType: "CLOUD_PREMIUM",
+            sizeGB: 100,
+            status: "ERROR",
+            billingType: "POSTPAID_BY_HOUR",
+            expiredTime: nil,
+            rawJSON: nil,
+            lastSyncedAt: syncedAt
+        ))
+        appState.reloadServers()
+
+        let viewModel = CloudResourceCenterViewModel()
+        viewModel.selectedAccountId = account.id
+        viewModel.selectedRegionId = "ap-guangzhou"
+        viewModel.kindFilter = .disk
+        viewModel.statusFilter = "ERROR"
+        viewModel.searchText = "data"
+        viewModel.refreshLocalResources(appState: appState)
+
+        let report = viewModel.visibleResourcesReportMarkdown()
+
+        XCTAssertTrue(report.contains("# Cloud Resources Report"))
+        XCTAssertTrue(report.contains("- Region: ap-guangzhou"))
+        XCTAssertTrue(report.contains("- Kind: Disks"))
+        XCTAssertTrue(report.contains("- Search: data"))
+        XCTAssertTrue(report.contains("- Status: ERROR"))
+        XCTAssertTrue(report.contains("- Total: 1"))
+        XCTAssertTrue(report.contains("- Needs attention: 1"))
+        XCTAssertTrue(report.contains("- Latest sync: \(AppDatabase.string(from: syncedAt))"))
+        XCTAssertTrue(report.contains("## By Kind"))
+        XCTAssertTrue(report.contains("- Disk: 1"))
+        XCTAssertTrue(report.contains("## Resources"))
+        XCTAssertTrue(report.contains("| Disk | Tencent Cloud | ap-guangzhou | data\\|disk | disk-data | ERROR | ins-prod | CLOUD_PREMIUM · 100 GB | \(AppDatabase.string(from: syncedAt)) |"))
+    }
+
     func testCloudResourceCenterRefreshesProviderStateAfterDiskAction() async throws {
         let recorder = ResourceCenterCloudActionRecorder()
         let registry = CloudProviderRegistry(adapters: [

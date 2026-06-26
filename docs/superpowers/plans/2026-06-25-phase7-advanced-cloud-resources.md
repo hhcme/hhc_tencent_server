@@ -116,6 +116,7 @@ CREATE TABLE cloud_billing_states (
 - 已为云资源中心加入运行时能力降级：当可选资源同步或危险云操作遇到权限不足、unauthorized/forbidden/denied 类 provider failure 或 adapter capability 缺失时，当前会话内对应 provider capability 会标记为 disabled，能力矩阵显示黄色警告，相关操作入口禁用并展示原因；非权限类 provider failure 不会误降级。
 - 已为云资源中心危险操作加入成功后的 best-effort provider 刷新：快照操作后刷新快照，云盘挂载/卸载后刷新云盘，实例电源操作后刷新实例；刷新失败不会推翻已成功提交的写操作，会保留本地过渡态并提示刷新失败。
 - 已为云资源中心加入基于当前筛选结果的资源摘要：展示可见资源总数、按资源类型/provider 聚合、需要关注的异常状态数量和最近同步时间。
+- 已为云资源中心加入当前筛选结果的 Markdown 报告复制：报告包含筛选条件、资源摘要、provider/type 聚合和转义后的资源表格，便于开源 issue、真实云账号验收和调试时共享精简上下文。
 - 已为三家云 HTTP 请求统一加入共享并发节流器；默认最多 4 个云 API 请求同时进入 provider transport，测试可注入独立 limiter 覆盖并发上限，并覆盖等待中请求取消后不泄漏并发槽。
 
 ## 6. UI 范围
@@ -205,6 +206,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 权限不足时运行时自动降级 provider capability，并在能力矩阵和资源详情操作区展示原因。
 - [x] 危险云操作成功提交后按资源类型尽力刷新 provider 状态，刷新失败时保留提交成功结果并提示。
 - [x] 当前筛选资源摘要：展示总数、类型/provider 分布、需要关注的状态数量和最近同步时间。
+- [x] 当前筛选资源 Markdown 报告：可复制筛选条件、摘要、聚合和资源表格，表格内容会转义 `|` 等 Markdown 特殊字符。
 
 ### Task 7：测试
 
@@ -221,6 +223,7 @@ CREATE TABLE cloud_billing_states (
 - [x] 云资源中心运行时权限降级 ViewModel 测试，覆盖 permission denied 降级和非权限错误不降级。
 - [x] 云资源中心本地筛选 ViewModel 测试，覆盖 account、region、kind、status、text filter 和过滤结果变化后的 selected resource 重置。
 - [x] 云资源中心摘要 ViewModel 测试，覆盖当前筛选结果的类型/provider 聚合、异常状态数量和最近同步时间。
+- [x] 云资源中心 Markdown 报告 ViewModel 测试，覆盖当前筛选条件、摘要、最近同步时间、资源表格和 Markdown 特殊字符转义。
 - [x] 云资源中心操作后刷新 ViewModel 测试，覆盖云盘挂载成功后从本地 `ATTACHING` 过渡态刷新为 provider 返回的 `ATTACHED` 状态。
 - [x] 真实多云只读同步 opt-in 集成测试入口：`CloudIntegrationTests` 默认跳过，启用 `HHC_TEST_CLOUD_REAL=1` 和对应云厂商只读凭据后会验证 credential、region/project、实例、云盘、快照、计费同步和统一资源作用域。
 
