@@ -12,8 +12,8 @@ struct ContentView: View {
                 ServerBrowserView()
             }
         }
-        .alert("Startup Error", isPresented: startupErrorBinding) {
-            Button("OK") {
+        .alert(L10n.string("Startup Error"), isPresented: startupErrorBinding) {
+            Button(L10n.string("OK")) {
                 appState.startupError = nil
             }
         } message: {

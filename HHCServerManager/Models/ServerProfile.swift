@@ -9,9 +9,9 @@ enum SSHAuthType: String, Codable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .password:
-            "Password"
+            L10n.string("Password")
         case .privateKey:
-            "Private Key"
+            L10n.string("Private Key")
         }
     }
 }

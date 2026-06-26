@@ -12,11 +12,11 @@ struct ServerBrowserView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $viewModel.sourceFilter) {
-                Label("All Servers", systemImage: "server.rack")
+                Label(L10n.string("All Servers"), systemImage: "server.rack")
                     .tag(ServerSourceFilter.all)
-                Label("Manual SSH", systemImage: "terminal")
+                Label(L10n.string("Manual SSH"), systemImage: "terminal")
                     .tag(ServerSourceFilter.manual)
-                Label("Cloud", systemImage: "cloud")
+                Label(L10n.string("Cloud"), systemImage: "cloud")
                     .tag(ServerSourceFilter.cloud)
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 190)
@@ -53,24 +53,24 @@ struct ServerBrowserView: View {
             }
         }
         .confirmationDialog(
-            "Delete server?",
+            L10n.string("Delete server?"),
             isPresented: deleteConfirmationBinding,
             presenting: serverPendingDeletion
         ) { profile in
-            Button("Delete", role: .destructive) {
+            Button(L10n.string("Delete"), role: .destructive) {
                 appState.delete(profile)
                 if viewModel.selectedServerId == profile.id {
                     viewModel.selectedServerId = nil
                 }
             }
         } message: { profile in
-            Text("This removes \(profile.name), its trusted host keys, and stored credentials.")
+            Text(L10n.format("This removes %@, its trusted host keys, and stored credentials.", profile.name))
         }
     }
 
     private var toolbar: some View {
         HStack(spacing: 10) {
-            TextField("Search servers", text: $viewModel.searchText)
+            TextField(L10n.string("Search servers"), text: $viewModel.searchText)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 320)
 
@@ -79,19 +79,19 @@ struct ServerBrowserView: View {
             Button {
                 showingCloudResourceCenter = true
             } label: {
-                Label("Resources", systemImage: "externaldrive.connected.to.line.below")
+                Label(L10n.string("Resources"), systemImage: "externaldrive.connected.to.line.below")
             }
 
             Button {
                 showingCloudImport = true
             } label: {
-                Label("Cloud", systemImage: "cloud")
+                Label(L10n.string("Cloud"), systemImage: "cloud")
             }
 
             Button {
                 showingAddServer = true
             } label: {
-                Label("Add", systemImage: "plus")
+                Label(L10n.string("Add"), systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
         }
@@ -116,13 +116,13 @@ struct ServerBrowserView: View {
                     )
                         .tag(profile.id)
                         .contextMenu {
-                            Button("Open") {
+                            Button(L10n.string("Open")) {
                                 appState.openWorkspace(for: profile)
                             }
-                            Button("Edit") {
+                            Button(L10n.string("Edit")) {
                                 serverPendingEdit = profile
                             }
-                            Button("Delete", role: .destructive) {
+                            Button(L10n.string("Delete"), role: .destructive) {
                                 serverPendingDeletion = profile
                             }
                         }
@@ -151,9 +151,9 @@ struct ServerBrowserView: View {
                 )
             } else {
                 ContentUnavailableView(
-                    "Select a Server",
+                    L10n.string("Select a Server"),
                     systemImage: "cursorarrow.click",
-                    description: Text("Choose a server to view its connection details.")
+                    description: Text(L10n.string("Choose a server to view its connection details."))
                 )
             }
         }
@@ -184,9 +184,9 @@ private struct CloudResourceCenterSheet: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Cloud Resources")
+                    Text(L10n.string("Cloud Resources"))
                         .font(.title2.weight(.semibold))
-                    Text("Search synced instances, disks, snapshots, billing states, and provider capabilities.")
+                    Text(L10n.string("Search synced instances, disks, snapshots, billing states, and provider capabilities."))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -198,7 +198,7 @@ private struct CloudResourceCenterSheet: View {
                 .buttonStyle(.plain)
                 .font(.title3)
                 .foregroundStyle(.secondary)
-                .help("Close")
+                .help(L10n.string("Close"))
             }
             .padding(22)
 

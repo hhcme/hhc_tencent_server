@@ -49,31 +49,31 @@ struct ServerWorkspaceView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedSection) {
-                Label("Overview", systemImage: "gauge.with.dots.needle.67percent")
+                Label(L10n.string("Overview"), systemImage: "gauge.with.dots.needle.67percent")
                     .tag("overview")
-                Label("Terminal", systemImage: "terminal")
+                Label(L10n.string("Terminal"), systemImage: "terminal")
                     .tag("terminal")
-                Label("Files", systemImage: "folder")
+                Label(L10n.string("Files"), systemImage: "folder")
                     .tag("files")
-                Label("Services", systemImage: "gearshape.2")
+                Label(L10n.string("Services"), systemImage: "gearshape.2")
                     .tag("services")
                 Label("Nginx", systemImage: "network")
                     .tag("nginx")
-                Label("Firewall", systemImage: "firewall")
+                Label(L10n.string("Firewall"), systemImage: "firewall")
                     .tag("firewall")
-                Label("Security Groups", systemImage: "lock.shield")
+                Label(L10n.string("Security Groups"), systemImage: "lock.shield")
                     .tag("securityGroups")
-                Label("Deployments", systemImage: "arrow.down.doc")
+                Label(L10n.string("Deployments"), systemImage: "arrow.down.doc")
                     .tag("deployments")
-                Label("Registries", systemImage: "shippingbox")
+                Label(L10n.string("Registries"), systemImage: "shippingbox")
                     .tag("registries")
-                Label("Audit", systemImage: "list.bullet.rectangle")
+                Label(L10n.string("Audit"), systemImage: "list.bullet.rectangle")
                     .tag("audit")
-                Label("Environment", systemImage: "slider.horizontal.3")
+                Label(L10n.string("Environment"), systemImage: "slider.horizontal.3")
                     .tag("environment")
                 Label("Cron", systemImage: "calendar.badge.clock")
                     .tag("cron")
-                Label("Cloud", systemImage: "cloud")
+                Label(L10n.string("Cloud"), systemImage: "cloud")
                     .tag("cloud")
                     .foregroundStyle(.secondary)
             }
@@ -96,8 +96,8 @@ struct ServerWorkspaceView: View {
                 }
             )
         }
-        .alert("SSH Error", isPresented: errorBinding) {
-            Button("OK") {
+        .alert(L10n.string("SSH Error"), isPresented: errorBinding) {
+            Button(L10n.string("OK")) {
                 viewModel.errorMessage = nil
             }
         } message: {

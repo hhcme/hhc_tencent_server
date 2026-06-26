@@ -26,25 +26,25 @@ final class AddServerViewModel: ObservableObject {
 
     var validationError: String? {
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Name is required."
+            return L10n.string("Name is required.")
         }
         if host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Host is required."
+            return L10n.string("Host is required.")
         }
         guard let portValue = Int(port), (1...65535).contains(portValue) else {
-            return "Port must be between 1 and 65535."
+            return L10n.string("Port must be between 1 and 65535.")
         }
         if username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Username is required."
+            return L10n.string("Username is required.")
         }
         switch authType {
         case .password:
             if password.isEmpty && editingProfile?.authType != .password {
-                return "Password is required."
+                return L10n.string("Password is required.")
             }
         case .privateKey:
             if privateKeyData == nil && editingProfile?.authType != .privateKey {
-                return "Private key is required."
+                return L10n.string("Private key is required.")
             }
         }
         return nil
@@ -64,7 +64,7 @@ final class AddServerViewModel: ObservableObject {
         authType = profile.authType
         password = ""
         privateKeyData = nil
-        privateKeyFileName = profile.authType == .privateKey ? "Existing private key" : ""
+        privateKeyFileName = profile.authType == .privateKey ? L10n.string("Existing private key") : ""
         passphrase = ""
         knownHostsFileName = ""
         knownHostsImportResult = nil
@@ -73,7 +73,7 @@ final class AddServerViewModel: ObservableObject {
 
     func choosePrivateKey() {
         let panel = NSOpenPanel()
-        panel.title = "Choose SSH Private Key"
+        panel.title = L10n.string("Choose SSH Private Key")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -91,7 +91,7 @@ final class AddServerViewModel: ObservableObject {
 
     func chooseKnownHostsFile() {
         let panel = NSOpenPanel()
-        panel.title = "Choose known_hosts File"
+        panel.title = L10n.string("Choose known_hosts File")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false

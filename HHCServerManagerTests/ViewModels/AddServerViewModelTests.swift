@@ -5,22 +5,22 @@ import XCTest
 final class AddServerViewModelTests: XCTestCase {
     func testValidationRequiresNameHostUserPortAndCredential() {
         let viewModel = AddServerViewModel()
-        XCTAssertEqual(viewModel.validationError, "Name is required.")
+        XCTAssertEqual(viewModel.validationError, L10n.string("Name is required."))
 
         viewModel.name = "Tencent"
-        XCTAssertEqual(viewModel.validationError, "Host is required.")
+        XCTAssertEqual(viewModel.validationError, L10n.string("Host is required."))
 
         viewModel.host = "example.internal"
         viewModel.port = "70000"
-        XCTAssertEqual(viewModel.validationError, "Port must be between 1 and 65535.")
+        XCTAssertEqual(viewModel.validationError, L10n.string("Port must be between 1 and 65535."))
 
         viewModel.port = "22"
         viewModel.username = ""
-        XCTAssertEqual(viewModel.validationError, "Username is required.")
+        XCTAssertEqual(viewModel.validationError, L10n.string("Username is required."))
 
         viewModel.username = "root"
         viewModel.authType = .privateKey
-        XCTAssertEqual(viewModel.validationError, "Private key is required.")
+        XCTAssertEqual(viewModel.validationError, L10n.string("Private key is required."))
 
         viewModel.privateKeyData = Data("key".utf8)
         XCTAssertNil(viewModel.validationError)
@@ -34,7 +34,7 @@ final class AddServerViewModelTests: XCTestCase {
         viewModel.username = "root"
         viewModel.authType = .password
 
-        XCTAssertEqual(viewModel.validationError, "Password is required.")
+        XCTAssertEqual(viewModel.validationError, L10n.string("Password is required."))
         viewModel.password = "secret"
         XCTAssertNil(viewModel.validationError)
     }
@@ -54,7 +54,7 @@ final class AddServerViewModelTests: XCTestCase {
         viewModel.configureForEditing(makeProfile(authType: .privateKey))
 
         XCTAssertNil(viewModel.validationError)
-        XCTAssertEqual(viewModel.privateKeyFileName, "Existing private key")
+        XCTAssertEqual(viewModel.privateKeyFileName, L10n.string("Existing private key"))
     }
 
     func testSaveImportsSelectedKnownHostsFileForNewServer() throws {
@@ -186,9 +186,9 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(
             viewModel.emptyState(for: [], links: []),
             ServerBrowserEmptyState(
-                title: "No Servers",
+                title: L10n.string("No Servers"),
                 systemImage: "server.rack",
-                description: "Add a server to start the SSH workflow."
+                description: L10n.string("Add a server to start the SSH workflow.")
             )
         )
 
@@ -197,9 +197,9 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(
             viewModel.emptyState(for: [manualServer], links: []),
             ServerBrowserEmptyState(
-                title: "No Matching Servers",
+                title: L10n.string("No Matching Servers"),
                 systemImage: "magnifyingglass",
-                description: "Adjust the search text or choose another source."
+                description: L10n.string("Adjust the search text or choose another source.")
             )
         )
 
@@ -208,9 +208,9 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(
             viewModel.emptyState(for: [manualServer], links: []),
             ServerBrowserEmptyState(
-                title: "No Cloud Servers",
+                title: L10n.string("No Cloud Servers"),
                 systemImage: "cloud",
-                description: "Add a cloud account, sync instances, then import one as an SSH server."
+                description: L10n.string("Add a cloud account, sync instances, then import one as an SSH server.")
             )
         )
 
@@ -220,9 +220,9 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(
             viewModel.emptyState(for: [cloudServer], links: [cloudLink]),
             ServerBrowserEmptyState(
-                title: "No Manual SSH Servers",
+                title: L10n.string("No Manual SSH Servers"),
                 systemImage: "terminal",
-                description: "Add a manual SSH server or switch to all sources."
+                description: L10n.string("Add a manual SSH server or switch to all sources.")
             )
         )
     }

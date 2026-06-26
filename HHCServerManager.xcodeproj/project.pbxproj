@@ -24,6 +24,8 @@
 		100000000000000000000115 /* ServerWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000015 /* ServerWorkspaceView.swift */; };
 		100000000000000000000116 /* SSHClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000019 /* SSHClient.swift */; };
 		100000000000000000000117 /* HostKeyTrustStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000020 /* HostKeyTrustStore.swift */; };
+		100000000000000000000118 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000021 /* Localization.swift */; };
+		100000000000000000000119 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000024 /* Localizable.strings */; };
 		900000000000000000000101 /* ServerRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000001 /* ServerRepositoryTests.swift */; };
 		900000000000000000000102 /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000002 /* KeychainServiceTests.swift */; };
 		900000000000000000000103 /* ServerManagementServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 900000000000000000000003 /* ServerManagementServiceTests.swift */; };
@@ -66,6 +68,9 @@
 		100000000000000000000018 /* HHCServerManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HHCServerManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000019 /* SSHClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHClient.swift; sourceTree = "<group>"; };
 		100000000000000000000020 /* HostKeyTrustStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostKeyTrustStore.swift; sourceTree = "<group>"; };
+		100000000000000000000021 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		100000000000000000000022 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		100000000000000000000023 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = "en.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		900000000000000000000001 /* ServerRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRepositoryTests.swift; sourceTree = "<group>"; };
 		900000000000000000000002 /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
 		900000000000000000000003 /* ServerManagementServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementServiceTests.swift; sourceTree = "<group>"; };
@@ -77,6 +82,18 @@
 		900000000000000000000009 /* OpenSSHClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSSHClientTests.swift; sourceTree = "<group>"; };
 		900000000000000000000010 /* CloudIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudIntegrationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXVariantGroup section */
+		100000000000000000000024 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				100000000000000000000022 /* zh-Hans */,
+				100000000000000000000023 /* en */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		100000000000000000000201 /* Frameworks */ = {
@@ -180,6 +197,8 @@
 			children = (
 				100000000000000000000016 /* Info.plist */,
 				100000000000000000000017 /* HHCServerManager.entitlements */,
+				100000000000000000000021 /* Localization.swift */,
+				100000000000000000000024 /* Localizable.strings */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -335,11 +354,12 @@
 			};
 			buildConfigurationList = 100000000000000000000702 /* Build configuration list for PBXProject "HHCServerManager" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = en;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
+				"zh-Hans",
 				Base,
+				en,
 			);
 			mainGroup = 100000000000000000000301;
 			productRefGroup = 100000000000000000000303 /* Products */;
@@ -357,6 +377,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				100000000000000000000119 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -384,6 +405,7 @@
 				100000000000000000000108 /* OpenSSHClient.swift in Sources */,
 				100000000000000000000116 /* SSHClient.swift in Sources */,
 				100000000000000000000117 /* HostKeyTrustStore.swift in Sources */,
+				100000000000000000000118 /* Localization.swift in Sources */,
 				100000000000000000000109 /* AddServerViewModel.swift in Sources */,
 				100000000000000000000110 /* ServerBrowserViewModel.swift in Sources */,
 				100000000000000000000111 /* ServerWorkspaceViewModel.swift in Sources */,

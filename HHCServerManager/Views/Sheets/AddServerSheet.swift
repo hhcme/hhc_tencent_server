@@ -15,7 +15,7 @@ struct AddServerSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(profile == nil ? "Add Server" : "Edit Server")
+            Text(profile == nil ? L10n.string("Add Server") : L10n.string("Edit Server"))
                 .font(.title2.weight(.semibold))
                 .padding([.horizontal, .top], 22)
 
@@ -39,7 +39,7 @@ struct AddServerSheet: View {
                         SecureField(profile == nil ? "Password" : "New Password", text: $viewModel.password)
                     } else {
                         HStack {
-                            Text(viewModel.privateKeyFileName.isEmpty ? "No private key selected" : viewModel.privateKeyFileName)
+                            Text(viewModel.privateKeyFileName.isEmpty ? L10n.string("No private key selected") : viewModel.privateKeyFileName)
                                 .foregroundStyle(viewModel.privateKeyFileName.isEmpty ? .secondary : .primary)
                             Spacer()
                             Button {
@@ -54,7 +54,7 @@ struct AddServerSheet: View {
 
                 Section("Host Key Trust") {
                     HStack {
-                        Text(viewModel.knownHostsFileName.isEmpty ? "No known_hosts file selected" : viewModel.knownHostsFileName)
+                        Text(viewModel.knownHostsFileName.isEmpty ? L10n.string("No known_hosts file selected") : viewModel.knownHostsFileName)
                             .foregroundStyle(viewModel.knownHostsFileName.isEmpty ? .secondary : .primary)
                         Spacer()
                         if !viewModel.knownHostsFileName.isEmpty {

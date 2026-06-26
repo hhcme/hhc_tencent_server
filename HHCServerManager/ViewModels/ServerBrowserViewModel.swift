@@ -50,39 +50,39 @@ final class ServerBrowserViewModel: ObservableObject {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if servers.isEmpty {
             return ServerBrowserEmptyState(
-                title: "No Servers",
+                title: L10n.string("No Servers"),
                 systemImage: "server.rack",
-                description: "Add a server to start the SSH workflow."
+                description: L10n.string("Add a server to start the SSH workflow.")
             )
         }
         if !query.isEmpty {
             return ServerBrowserEmptyState(
-                title: "No Matching Servers",
+                title: L10n.string("No Matching Servers"),
                 systemImage: "magnifyingglass",
-                description: "Adjust the search text or choose another source."
+                description: L10n.string("Adjust the search text or choose another source.")
             )
         }
         switch sourceFilter {
         case .all:
             return ServerBrowserEmptyState(
-                title: "No Servers",
+                title: L10n.string("No Servers"),
                 systemImage: "server.rack",
-                description: "Add a server to start the SSH workflow."
+                description: L10n.string("Add a server to start the SSH workflow.")
             )
         case .manual:
             return ServerBrowserEmptyState(
-                title: "No Manual SSH Servers",
+                title: L10n.string("No Manual SSH Servers"),
                 systemImage: "terminal",
-                description: "Add a manual SSH server or switch to all sources."
+                description: L10n.string("Add a manual SSH server or switch to all sources.")
             )
         case .cloud:
             let hasCloudLinks = !links.isEmpty
             return ServerBrowserEmptyState(
-                title: "No Cloud Servers",
+                title: L10n.string("No Cloud Servers"),
                 systemImage: "cloud",
                 description: hasCloudLinks
-                    ? "Import a synced cloud instance as an SSH server or switch to all sources."
-                    : "Add a cloud account, sync instances, then import one as an SSH server."
+                    ? L10n.string("Import a synced cloud instance as an SSH server or switch to all sources.")
+                    : L10n.string("Add a cloud account, sync instances, then import one as an SSH server.")
             )
         }
     }
