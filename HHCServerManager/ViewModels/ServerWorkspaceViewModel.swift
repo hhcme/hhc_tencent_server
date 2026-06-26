@@ -2196,6 +2196,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    private func verdaccioUserAuditLabel(_ action: VerdaccioUserMutationAction) -> String {
+        switch action {
+        case .create:
+            "create"
+        case .updatePassword:
+            "update-password"
+        case .delete:
+            "delete"
+        }
+    }
+
     private func saveDeploymentRemoteChangeLog(
         repository: ServerRepository,
         profile: ServerProfile,
@@ -2439,6 +2450,18 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     sshClient: sshClient,
                     repository: repository
                 )
+                let sizeText = result.sizeBytes.map(String.init) ?? "unknown"
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: registryDraft.installPath,
+                    action: "verdaccio-backup",
+                    beforeSnapshot: nil,
+                    afterSnapshot: "backup=\(result.backupPath)\nsizeBytes=\(sizeText)",
+                    status: "success",
+                    message: "Created Verdaccio backup at \(result.backupPath)."
+                )
                 await MainActor.run {
                     self.verdaccioBackupResult = result
                     self.verdaccioRestorePathDraft = result.backupPath
@@ -2446,6 +2469,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.isCreatingVerdaccioBackup = false
                 }
             } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: registryDraft.installPath,
+                    action: "verdaccio-backup",
+                    beforeSnapshot: nil,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isCreatingVerdaccioBackup = false
@@ -2481,6 +2515,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     profile: profile,
                     sshClient: sshClient
                 )
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: result.backupPath,
+                    action: "verdaccio-restore",
+                    beforeSnapshot: "backup=\(result.backupPath)\nrollbackBackup=\(result.rollbackBackupPath)",
+                    afterSnapshot: "healthCheckURL=\(result.healthCheckURL)\nhealthCheckOutput=\(result.healthCheckOutput)",
+                    status: "success",
+                    message: "Restored Verdaccio backup from \(result.backupPath)."
+                )
                 await MainActor.run {
                     self.verdaccioRestoreResult = result
                     if let snapshot {
@@ -2490,6 +2535,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.isRestoringVerdaccioBackup = false
                 }
             } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry",
+                    targetId: backupPath.trimmingCharacters(in: .whitespacesAndNewlines),
+                    action: "verdaccio-restore",
+                    beforeSnapshot: "backup=\(backupPath.trimmingCharacters(in: .whitespacesAndNewlines))",
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isRestoringVerdaccioBackup = false
@@ -2766,13 +2822,16 @@ final class ServerWorkspaceViewModel: ObservableObject {
     func createVerdaccioUser(
         profile: ServerProfile,
         sshClient: SSHClient,
-        verdaccioManager: VerdaccioManager
+        verdaccioManager: VerdaccioManager,
+        repository: ServerRepository
     ) {
         mutateVerdaccioUser(
             profile: profile,
             sshClient: sshClient,
             verdaccioManager: verdaccioManager,
+            repository: repository,
             actionName: "Created",
+            auditAction: "verdaccio-create-user",
             mutation: { draft, username, password, profile, sshClient in
                 try await verdaccioManager.createUser(
                     draft: draft,
@@ -2788,13 +2847,16 @@ final class ServerWorkspaceViewModel: ObservableObject {
     func updateVerdaccioUserPassword(
         profile: ServerProfile,
         sshClient: SSHClient,
-        verdaccioManager: VerdaccioManager
+        verdaccioManager: VerdaccioManager,
+        repository: ServerRepository
     ) {
         mutateVerdaccioUser(
             profile: profile,
             sshClient: sshClient,
             verdaccioManager: verdaccioManager,
+            repository: repository,
             actionName: "Updated",
+            auditAction: "verdaccio-update-password-user",
             mutation: { draft, username, password, profile, sshClient in
                 try await verdaccioManager.updateUserPassword(
                     draft: draft,
@@ -2810,7 +2872,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     func deleteVerdaccioUser(
         profile: ServerProfile,
         sshClient: SSHClient,
-        verdaccioManager: VerdaccioManager
+        verdaccioManager: VerdaccioManager,
+        repository: ServerRepository
     ) {
         guard !isMutatingVerdaccioUser else { return }
         isMutatingVerdaccioUser = true
@@ -2826,12 +2889,34 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     profile: profile,
                     sshClient: sshClient
                 )
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry_user",
+                    targetId: result.username,
+                    action: "verdaccio-\(self.verdaccioUserAuditLabel(result.action))-user",
+                    beforeSnapshot: "backup=\(result.backupPath)",
+                    afterSnapshot: "htpasswd=\(result.htpasswdPath)",
+                    status: "success",
+                    message: "Deleted Verdaccio user \(result.username)."
+                )
                 await MainActor.run {
                     self.verdaccioUserMutationResult = result
                     self.registryActionMessage = "Deleted Verdaccio user \(result.username). Backup: \(result.backupPath)."
                     self.isMutatingVerdaccioUser = false
                 }
             } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry_user",
+                    targetId: username.trimmingCharacters(in: .whitespacesAndNewlines),
+                    action: "verdaccio-delete-user",
+                    beforeSnapshot: nil,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isMutatingVerdaccioUser = false
@@ -2844,7 +2929,9 @@ final class ServerWorkspaceViewModel: ObservableObject {
         profile: ServerProfile,
         sshClient: SSHClient,
         verdaccioManager: VerdaccioManager,
+        repository: ServerRepository,
         actionName: String,
+        auditAction: String,
         mutation: @escaping @Sendable (
             VerdaccioInstallDraft,
             String,
@@ -2863,6 +2950,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
         Task {
             do {
                 let result = try await mutation(registryDraft, username, password, profile, sshClient)
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry_user",
+                    targetId: result.username,
+                    action: "verdaccio-\(self.verdaccioUserAuditLabel(result.action))-user",
+                    beforeSnapshot: "backup=\(result.backupPath)",
+                    afterSnapshot: "htpasswd=\(result.htpasswdPath)",
+                    status: "success",
+                    message: "\(actionName) Verdaccio user \(result.username)."
+                )
                 await MainActor.run {
                     self.verdaccioUserMutationResult = result
                     self.verdaccioPasswordDraft = ""
@@ -2870,6 +2968,17 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.isMutatingVerdaccioUser = false
                 }
             } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "registry_user",
+                    targetId: username.trimmingCharacters(in: .whitespacesAndNewlines),
+                    action: auditAction,
+                    beforeSnapshot: nil,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isMutatingVerdaccioUser = false

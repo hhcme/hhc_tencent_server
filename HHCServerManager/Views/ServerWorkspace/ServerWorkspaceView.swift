@@ -242,7 +242,8 @@ struct ServerWorkspaceView: View {
                 viewModel.deleteVerdaccioUser(
                     profile: profile,
                     sshClient: appState.sshClient,
-                    verdaccioManager: appState.verdaccioManager
+                    verdaccioManager: appState.verdaccioManager,
+                    repository: appState.repository
                 )
             }
         } message: {
@@ -1224,7 +1225,8 @@ struct ServerWorkspaceView: View {
                     viewModel.createVerdaccioUser(
                         profile: profile,
                         sshClient: appState.sshClient,
-                        verdaccioManager: appState.verdaccioManager
+                        verdaccioManager: appState.verdaccioManager,
+                        repository: appState.repository
                     )
                 } label: {
                     if viewModel.isMutatingVerdaccioUser {
@@ -1239,7 +1241,8 @@ struct ServerWorkspaceView: View {
                     viewModel.updateVerdaccioUserPassword(
                         profile: profile,
                         sshClient: appState.sshClient,
-                        verdaccioManager: appState.verdaccioManager
+                        verdaccioManager: appState.verdaccioManager,
+                        repository: appState.repository
                     )
                 } label: {
                     Label("Update Password", systemImage: "key")

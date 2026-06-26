@@ -2251,6 +2251,14 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("tar -xzf \"$archive_path\" -C \"$restore_dir\"") })
         XCTAssertTrue(client.commands.contains { $0.contains("systemctl stop \"$service\"") })
         XCTAssertTrue(client.commands.contains { $0.contains("__HHC_VERDACCIO_ACTIVE_STATE__") })
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.map(\.action), ["verdaccio-restore", "verdaccio-backup"])
+        XCTAssertEqual(logs.map(\.targetType), ["registry", "registry"])
+        XCTAssertTrue(logs.allSatisfy { $0.status == "success" })
+        XCTAssertTrue(logs.first?.beforeSnapshot?.contains("rollbackBackup=/srv/verdaccio/backups/restore-rollback-") == true)
+        XCTAssertTrue(logs.first?.afterSnapshot?.contains("healthCheckURL=http://127.0.0.1:4873/-/ping") == true)
+        XCTAssertTrue(logs.last?.afterSnapshot?.contains("sizeBytes=2048") == true)
     }
 
     func testPrivateRegistriesWorkspaceInstallsVerdaccioAndRefreshesStatus() async throws {
@@ -2321,13 +2329,19 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
 
     func testPrivateRegistriesWorkspaceManagesVerdaccioUsers() async throws {
         let profile = makeProfile()
+        let repository = try makeRepository(with: profile)
         let viewModel = ServerWorkspaceViewModel()
         let client = RegistryViewModelMockSSHClient()
         let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
 
         viewModel.verdaccioUsernameDraft = "team.dev"
         viewModel.verdaccioPasswordDraft = "Correct-Horse-Secret-123"
-        viewModel.createVerdaccioUser(profile: profile, sshClient: client, verdaccioManager: manager)
+        viewModel.createVerdaccioUser(
+            profile: profile,
+            sshClient: client,
+            verdaccioManager: manager,
+            repository: repository
+        )
         try await waitUntil { viewModel.isMutatingVerdaccioUser == false && viewModel.verdaccioUserMutationResult?.action == .create }
 
         XCTAssertEqual(viewModel.verdaccioUserMutationResult?.username, "team.dev")
@@ -2335,10 +2349,20 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.registryActionMessage?.contains("Created Verdaccio user team.dev") == true)
 
         viewModel.verdaccioPasswordDraft = "Correct-Horse-Secret-456"
-        viewModel.updateVerdaccioUserPassword(profile: profile, sshClient: client, verdaccioManager: manager)
+        viewModel.updateVerdaccioUserPassword(
+            profile: profile,
+            sshClient: client,
+            verdaccioManager: manager,
+            repository: repository
+        )
         try await waitUntil { viewModel.isMutatingVerdaccioUser == false && viewModel.verdaccioUserMutationResult?.action == .updatePassword }
 
-        viewModel.deleteVerdaccioUser(profile: profile, sshClient: client, verdaccioManager: manager)
+        viewModel.deleteVerdaccioUser(
+            profile: profile,
+            sshClient: client,
+            verdaccioManager: manager,
+            repository: repository
+        )
         try await waitUntil { viewModel.isMutatingVerdaccioUser == false && viewModel.verdaccioUserMutationResult?.action == .delete }
 
         XCTAssertTrue(viewModel.registryActionMessage?.contains("Deleted Verdaccio user team.dev") == true)
@@ -2346,6 +2370,17 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(client.commands.contains { $0.contains("htpasswd -B -i") && $0.contains("'update'") })
         XCTAssertTrue(client.commands.contains { $0.contains("htpasswd -D") })
         XCTAssertFalse(client.commands.joined(separator: "\n").contains("Correct-Horse-Secret"))
+
+        let logs = try repository.fetchRemoteChangeLogs(serverId: profile.id)
+        XCTAssertEqual(logs.map(\.action), [
+            "verdaccio-delete-user",
+            "verdaccio-update-password-user",
+            "verdaccio-create-user"
+        ])
+        XCTAssertTrue(logs.allSatisfy { $0.targetType == "registry_user" })
+        XCTAssertTrue(logs.allSatisfy { $0.targetId == "team.dev" })
+        XCTAssertTrue(logs.allSatisfy { $0.status == "success" })
+        XCTAssertTrue(logs.allSatisfy { $0.afterSnapshot?.contains("htpasswd=/srv/verdaccio/htpasswd") == true })
     }
 
     func testPrivateRegistriesWorkspaceRunsNpmSmokeTest() async throws {
