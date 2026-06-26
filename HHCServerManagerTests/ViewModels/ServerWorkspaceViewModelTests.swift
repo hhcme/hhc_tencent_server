@@ -569,6 +569,66 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.deploymentCommandPlan?.allowedRoot, "/srv")
     }
 
+    func testDeploymentRunMarkdownReportRedactsLogsAndEscapesRows() throws {
+        let profile = makeProfile()
+        let viewModel = ServerWorkspaceViewModel()
+        let project = DeploymentProject(
+            id: UUID(),
+            serverId: profile.id,
+            name: "API|Prod",
+            repositoryURL: "https://gitlab.com/hhc/api.git",
+            branch: "release/2026.06",
+            deployPath: "/srv/api",
+            buildCommand: "npm ci && npm run build",
+            restartCommand: "systemctl restart api.service",
+            healthCheckCommand: "curl -f http://127.0.0.1/health",
+            webhookEnabled: true,
+            webhookSecretRef: "deployment_webhook_secret_ref",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_001)
+        )
+        let run = DeploymentRun(
+            id: UUID(),
+            projectId: project.id,
+            triggerType: .manual,
+            requestedRef: "main",
+            previousCommit: "abc1234",
+            targetCommit: "def5678",
+            status: .failed,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_100),
+            finishedAt: Date(timeIntervalSince1970: 1_700_000_130),
+            summary: "build failed|needs review"
+        )
+        let logs = [
+            DeploymentLogEntry(
+                id: UUID(),
+                runId: run.id,
+                stepName: "build|npm",
+                stream: .stderr,
+                message: "token=super-secret\nAuthorization: Bearer abc.def\ndownload https://user:pass@example.com/pkg.tgz",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_120)
+            )
+        ]
+
+        let report = viewModel.deploymentRunReportMarkdown(
+            profile: profile,
+            project: project,
+            run: run,
+            logs: logs
+        )
+
+        XCTAssertTrue(report.contains("# Deployment Run Report"))
+        XCTAssertTrue(report.contains("- Project: API|Prod"))
+        XCTAssertTrue(report.contains("- Status: failed"))
+        XCTAssertTrue(report.contains("- Previous commit: abc1234"))
+        XCTAssertTrue(report.contains("- Target commit: def5678"))
+        XCTAssertTrue(report.contains("- Summary: build failed|needs review"))
+        XCTAssertTrue(report.contains("| \(AppDatabase.string(from: Date(timeIntervalSince1970: 1_700_000_120))) | build\\|npm | stderr | token=<redacted> Authorization=<redacted> download https://<redacted>@example.com/pkg.tgz |"))
+        XCTAssertFalse(report.contains("super-secret"))
+        XCTAssertFalse(report.contains("abc.def"))
+        XCTAssertFalse(report.contains("user:pass"))
+    }
+
     func testDeploymentProjectRejectsPathOutsideAllowlist() throws {
         let profile = makeProfile()
         let repository = try makeRepository(with: profile)

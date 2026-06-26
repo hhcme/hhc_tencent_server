@@ -2207,6 +2207,67 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    func selectedDeploymentRunReportMarkdown(profile: ServerProfile) -> String? {
+        guard let project = selectedDeploymentProject, let run = selectedDeploymentRun else { return nil }
+        return deploymentRunReportMarkdown(profile: profile, project: project, run: run, logs: deploymentLogs)
+    }
+
+    func deploymentRunReportMarkdown(
+        profile: ServerProfile,
+        project: DeploymentProject,
+        run: DeploymentRun,
+        logs: [DeploymentLogEntry]
+    ) -> String {
+        var lines: [String] = [
+            "# Deployment Run Report",
+            "",
+            "- Server: \(Self.markdownInline(profile.name))",
+            "- Endpoint: \(Self.markdownInline(profile.endpoint))",
+            "- Project: \(Self.markdownInline(project.name))",
+            "- Repository: \(Self.markdownInline(project.repositoryURL))",
+            "- Branch: \(Self.markdownInline(project.branch))",
+            "- Deploy path: \(Self.markdownInline(project.deployPath))",
+            "- Trigger: \(run.triggerType.rawValue)",
+            "- Status: \(run.status.rawValue)",
+            "- Started: \(AppDatabase.string(from: run.startedAt))",
+            "- Finished: \(run.finishedAt.map(AppDatabase.string(from:)) ?? "running")",
+            "- Requested ref: \(Self.markdownInline(run.requestedRef ?? "none"))",
+            "- Previous commit: \(Self.markdownInline(run.previousCommit ?? "unknown"))",
+            "- Target commit: \(Self.markdownInline(run.targetCommit ?? "unknown"))",
+            "- Summary: \(Self.markdownInline(run.summary ?? "none"))",
+            "",
+            "## Logs",
+        ]
+
+        if logs.isEmpty {
+            lines.append("")
+            lines.append("No logs are loaded for this deployment run.")
+            return lines.joined(separator: "\n")
+        }
+
+        lines.append("")
+        lines.append("| Time | Step | Stream | Message |")
+        lines.append("| --- | --- | --- | --- |")
+        for entry in logs {
+            lines.append([
+                AppDatabase.string(from: entry.createdAt),
+                entry.stepName,
+                entry.stream.rawValue,
+                DeploymentLogRedactor.redact(entry.message),
+            ].map(Self.markdownTableCell).joined(separator: " | ").withTableBounds)
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    func copySelectedDeploymentRunReportToPasteboard(profile: ServerProfile) {
+        guard let report = selectedDeploymentRunReportMarkdown(profile: profile) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(report, forType: .string)
+        deploymentActionMessage = "Copied deployment run report as Markdown."
+    }
+
     func refreshDeploymentPlan() {
         do {
             deploymentCommandPlan = try DeploymentCommandBuilder.buildPlan(for: draftDeploymentProject())

@@ -88,7 +88,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - 工作台新增“部署”页。
 - 部署项目列表、添加、编辑、删除。（已完成基础 UI）
 - 手动部署按钮和部署前预览。（已完成基础 UI 和统一风险确认）
-- 部署运行详情：步骤、状态、日志、耗时、失败原因。（已完成基础 UI 和运行中日志自动刷新）
+- 部署运行详情：步骤、状态、日志、耗时、失败原因。（已完成基础 UI、运行中日志自动刷新和 Markdown 运行报告复制）
 - 回滚按钮：展示 previous commit，先展示统一风险确认，再触发受控 rollback。（已完成基础 UI 和风险确认）
 - webhook 设置：启用开关、secret、允许分支、本地 listener 启停和监听地址。（已完成配置、核心校验、listener 基础和 UI 接入）
 
@@ -123,6 +123,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] 健康检查命令失败时标记部署失败。
 - [x] 支持用户复制日志：当前 UI 日志和命令预览支持文本选择复制。
 - [x] 运行中自动刷新部署 run/log，日志区域显示 Live 状态。
+- [x] 部署 run Markdown 报告复制：包含服务器、项目、repo、branch、部署路径、run 状态、commit 摘要和脱敏日志表，表格内容会转义换行和 `|`。
 - [x] 手动部署前复用统一风险确认，展示部署目录、完整命令预览、影响和审计说明。
 - [x] 手动部署写入远程变更审计：部署结束后记录 `remote_change_logs`，包含 project target、deploy action、状态、摘要，以及 previous/target commit 快照；失败状态同样记录。
 
@@ -160,6 +161,7 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 - [x] GitLab webhook HTTP listener 测试：已覆盖 HTTP 请求解析、header/body 保留和响应格式。
 - [x] webhook 操作日志测试：已覆盖 started/succeeded 状态和 project target id。
 - [x] 日志脱敏测试：已覆盖 token、password、Authorization/Bearer、URL credentials。
+- [x] 部署 run Markdown 报告测试：已覆盖项目名/步骤名表格转义，以及 token、Authorization/Bearer、URL credentials 不进入复制内容。
 - [x] 真实 SSH 临时部署集成测试：已覆盖远端 `/tmp/hhc-deploy-*` 临时 Git 仓库、existing checkout、fetch/reset、build、health check、commit 捕获和日志落库；默认通过环境变量启用，2026-06-26 已重新用当前代码运行 `testRealDeploymentRunnerDeploysTemporaryRepositoryWhenEnvironmentIsConfigured` 并在真实服务器验证通过。
 
 ### Task 8：手动验收
@@ -178,8 +180,9 @@ webhook secret 存入 Keychain，SQLite 只保存 `webhook_secret_ref`。
 2. 部署日志可审计且不泄露敏感信息。
 3. 回滚闭环可用。
 4. webhook 可选启用并正确校验 secret。
-5. 所有危险命令受目录白名单约束。
-6. 测试和手动验收通过。
+5. 单次部署运行可复制脱敏 Markdown 报告用于 issue、PR 或人工交接。
+6. 所有危险命令受目录白名单约束。
+7. 测试和手动验收通过。
 
 ## 9. 后续 Phase 边界
 

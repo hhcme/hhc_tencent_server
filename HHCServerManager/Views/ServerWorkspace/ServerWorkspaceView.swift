@@ -1859,6 +1859,15 @@ struct ServerWorkspaceView: View {
                 .frame(maxWidth: 420, alignment: .leading)
 
                 if let run = viewModel.selectedDeploymentRun {
+                    HStack {
+                        Spacer()
+                        Button {
+                            viewModel.copySelectedDeploymentRunReportToPasteboard(profile: profile)
+                        } label: {
+                            Label("Copy Run Report", systemImage: "doc.on.doc")
+                        }
+                    }
+
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                         GridRow {
                             Text("Status").foregroundStyle(.secondary)
