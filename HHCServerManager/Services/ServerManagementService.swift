@@ -24,6 +24,7 @@ final class ServerManagementService: @unchecked Sendable {
         username: String,
         groupName: String?,
         authType: SSHAuthType,
+        serverKind: ServerKind = .manualSSH,
         credential: CredentialInput
     ) throws -> ServerProfile {
         let now = Date()
@@ -45,6 +46,7 @@ final class ServerManagementService: @unchecked Sendable {
                 port: port,
                 username: username,
                 authType: authType,
+                serverKind: serverKind,
                 keychainRef: keychainRef,
                 groupName: groupName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 createdAt: now,
@@ -71,6 +73,7 @@ final class ServerManagementService: @unchecked Sendable {
         username: String,
         groupName: String?,
         authType: SSHAuthType,
+        serverKind: ServerKind? = nil,
         credentialUpdate: CredentialUpdate
     ) throws -> ServerProfile {
         let originalCredential = try existingCredential(for: existing)
@@ -86,6 +89,7 @@ final class ServerManagementService: @unchecked Sendable {
             port: port,
             username: username,
             authType: authType,
+            serverKind: serverKind ?? existing.serverKind,
             keychainRef: existing.keychainRef,
             groupName: groupName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             createdAt: existing.createdAt,
@@ -689,6 +693,7 @@ final class CloudInstanceSyncService: @unchecked Sendable {
             username: username.trimmingCharacters(in: .whitespacesAndNewlines),
             groupName: link.providerId.displayName,
             authType: authType,
+            serverKind: link.inferredServerKind,
             credential: credential
         )
         _ = try linkInstance(link, to: profile)
@@ -2269,6 +2274,2754 @@ final class GiteaInstaller: @unchecked Sendable {
     }
 }
 
+protocol GitServiceHTTPTransport: Sendable {
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse)
+}
+
+final class URLSessionGitServiceHTTPTransport: GitServiceHTTPTransport, @unchecked Sendable {
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GitServiceAPIError.invalidResponse
+        }
+        return (data, httpResponse)
+    }
+}
+
+enum GitServiceAPIError: LocalizedError, Equatable {
+    case invalidBaseURL
+    case invalidToken
+    case invalidRepositoryDraft(String)
+    case invalidResponse
+    case httpStatus(Int, String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidBaseURL:
+            "Service URL must be an http or https URL without embedded credentials."
+        case .invalidToken:
+            "Paste a non-empty administrator API token before loading native management data."
+        case let .invalidRepositoryDraft(message):
+            message
+        case .invalidResponse:
+            "The Git service returned an invalid HTTP response."
+        case let .httpStatus(status, body):
+            body.isEmpty ? "Git service API request failed with HTTP \(status)." : "Git service API request failed with HTTP \(status): \(body)"
+        }
+    }
+}
+
+final class GiteaAPIClient: @unchecked Sendable {
+    private let transport: GitServiceHTTPTransport
+    private let now: @Sendable () -> Date
+
+    init(
+        transport: GitServiceHTTPTransport = URLSessionGitServiceHTTPTransport(),
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.transport = transport
+        self.now = now
+    }
+
+    func loadSnapshot(baseURL: String, token: String) async throws -> GiteaNativeSnapshot {
+        let token = try Self.validatedToken(token)
+        async let repositories: [GiteaRepositorySummary] = get(
+            baseURL: baseURL,
+            path: "/api/v1/user/repos",
+            queryItems: [URLQueryItem(name: "limit", value: "50")],
+            token: token
+        )
+        async let users: [GiteaUserSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v1/admin/users",
+            queryItems: [URLQueryItem(name: "limit", value: "50")],
+            token: token
+        )
+        async let keys: [GiteaKeySummary] = get(
+            baseURL: baseURL,
+            path: "/api/v1/user/keys",
+            queryItems: [URLQueryItem(name: "limit", value: "50")],
+            token: token
+        )
+        async let currentUser: GiteaUserSummary = get(
+            baseURL: baseURL,
+            path: "/api/v1/user",
+            queryItems: [],
+            token: token
+        )
+        async let organizations: [GiteaOrganizationSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v1/user/orgs",
+            queryItems: [URLQueryItem(name: "limit", value: "50")],
+            token: token
+        )
+        async let issues: [GiteaIssueSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v1/repos/issues/search",
+            queryItems: [
+                URLQueryItem(name: "state", value: "all"),
+                URLQueryItem(name: "limit", value: "50"),
+            ],
+            token: token
+        )
+        async let pullRequests: [GiteaPullRequestSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v1/repos/issues/search",
+            queryItems: [
+                URLQueryItem(name: "state", value: "all"),
+                URLQueryItem(name: "type", value: "pulls"),
+                URLQueryItem(name: "limit", value: "50"),
+            ],
+            token: token
+        )
+        async let serverVersion: GiteaServerVersionResponse = get(
+            baseURL: baseURL,
+            path: "/api/v1/version",
+            queryItems: [],
+            token: token
+        )
+        async let cronTasks: [GiteaCronTaskSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v1/admin/cron",
+            queryItems: [URLQueryItem(name: "limit", value: "50")],
+            token: token
+        )
+
+        let loadedOrganizations = try await organizations
+        var teams: [GiteaTeamSummary] = []
+        for organization in loadedOrganizations.prefix(5) {
+            let organizationTeams: [GiteaTeamSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v1/orgs/\(Self.urlPathSegment(organization.username))/teams",
+                queryItems: [URLQueryItem(name: "limit", value: "50")],
+                token: token
+            )
+            teams.append(contentsOf: organizationTeams.map { $0.withOrganization(organization.username) })
+        }
+
+        var teamMembers: [GiteaTeamMemberSummary] = []
+        var teamRepositories: [GiteaTeamRepositorySummary] = []
+        for team in teams.prefix(10) {
+            let members: [GiteaTeamMemberSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v1/teams/\(team.id)/members",
+                queryItems: [URLQueryItem(name: "limit", value: "50")],
+                token: token
+            )
+            teamMembers.append(contentsOf: members.map { $0.withTeamId(team.id) })
+            let repositories: [GiteaRepositorySummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v1/teams/\(team.id)/repos",
+                queryItems: [URLQueryItem(name: "limit", value: "50")],
+                token: token
+            )
+            teamRepositories.append(contentsOf: repositories.map { GiteaTeamRepositorySummary(teamId: team.id, repository: $0) })
+        }
+
+        let loadedCurrentUser = try await currentUser
+        let tokenOwner = loadedCurrentUser.username
+        let loadedAccessTokens: [GiteaAccessTokenSummary] = try await get(
+            baseURL: baseURL,
+            path: "/api/v1/users/\(Self.urlPathSegment(tokenOwner))/tokens",
+            queryItems: [URLQueryItem(name: "limit", value: "50")],
+            token: token
+        )
+        let accessTokens = loadedAccessTokens.map { $0.withUsername(tokenOwner) }
+        var packages: [GiteaPackageSummary] = []
+        let packageOwners = Array(NSOrderedSet(array: [tokenOwner] + loadedOrganizations.prefix(5).map(\.username)).array)
+            .compactMap { $0 as? String }
+        for owner in packageOwners {
+            let ownerPackages: [GiteaPackageSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v1/packages/\(Self.urlPathSegment(owner))",
+                queryItems: [URLQueryItem(name: "limit", value: "50")],
+                token: token
+            )
+            packages.append(contentsOf: ownerPackages.map { $0.withOwner(owner) })
+        }
+        let loadedServerVersion = try await serverVersion
+        let loadedCronTasks = try await cronTasks
+
+        return try await GiteaNativeSnapshot(
+            repositories: repositories,
+            users: users,
+            organizations: loadedOrganizations,
+            teams: teams,
+            teamMembers: teamMembers,
+            teamRepositories: teamRepositories,
+            keys: keys,
+            tokens: accessTokens,
+            packages: packages,
+            adminOverview: GiteaAdminOverviewSummary(
+                version: loadedServerVersion.version,
+                cronTasks: loadedCronTasks
+            ),
+            issues: issues,
+            pullRequests: pullRequests,
+            capturedAt: now()
+        )
+    }
+
+    func createRepository(
+        baseURL: String,
+        token: String,
+        draft: GitNativeRepositoryDraft
+    ) async throws -> GiteaRepositorySummary {
+        let draft = try Self.validatedRepositoryDraft(draft)
+        let body = GiteaCreateRepositoryRequest(
+            name: draft.trimmedName,
+            description: draft.trimmedDescription.nilIfEmpty,
+            isPrivate: draft.isPrivate,
+            autoInit: draft.autoInitialize
+        )
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v1/user/repos",
+            method: "POST",
+            token: token,
+            body: body
+        )
+    }
+
+    func deleteRepository(baseURL: String, token: String, fullName: String) async throws {
+        let parts = fullName
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count == 2,
+              parts.allSatisfy({ Self.isValidPathSegment($0) })
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea repository must be selected as owner/name before deletion.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/repos/\(Self.urlPathSegment(parts[0]))/\(Self.urlPathSegment(parts[1]))",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func updateRepository(
+        baseURL: String,
+        token: String,
+        draft: GiteaRepositorySettingsDraft
+    ) async throws -> GiteaRepositorySummary {
+        let draft = try Self.validatedRepositorySettingsDraft(draft)
+        let parts = try Self.repositoryPathParts(draft.trimmedFullName)
+        let body = GiteaUpdateRepositoryRequest(
+            description: draft.trimmedDescription.nilIfEmpty,
+            isPrivate: draft.isPrivate,
+            defaultBranch: draft.trimmedDefaultBranch.nilIfEmpty,
+            hasIssues: draft.hasIssues,
+            hasWiki: draft.hasWiki,
+            hasPullRequests: draft.hasPullRequests,
+            hasPackages: draft.hasPackages,
+            archived: draft.archived
+        )
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v1/repos/\(Self.urlPathSegment(parts.owner))/\(Self.urlPathSegment(parts.repository))",
+            method: "PATCH",
+            token: token,
+            body: body
+        )
+    }
+
+    func createUser(baseURL: String, token: String, draft: GiteaUserDraft) async throws -> GiteaUserSummary {
+        let draft = try Self.validatedUserDraft(draft, requirePassword: true)
+        let body = GiteaCreateUserRequest(
+            username: draft.trimmedUsername,
+            email: draft.trimmedEmail,
+            password: draft.trimmedPassword,
+            fullName: draft.trimmedFullName.nilIfEmpty,
+            mustChangePassword: draft.mustChangePassword,
+            admin: draft.isAdmin,
+            restricted: draft.restricted
+        )
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v1/admin/users",
+            method: "POST",
+            token: token,
+            body: body
+        )
+    }
+
+    func updateUser(baseURL: String, token: String, draft: GiteaUserDraft) async throws -> GiteaUserSummary {
+        let draft = try Self.validatedUserDraft(draft, requireExistingUser: true)
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v1/admin/users/\(Self.urlPathSegment(draft.trimmedOriginalUsername))",
+            method: "PATCH",
+            token: token,
+            body: GiteaEditUserRequest(draft: draft)
+        )
+    }
+
+    func deleteUser(baseURL: String, token: String, username: String) async throws {
+        let username = try Self.validatedUsername(username)
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/admin/users/\(Self.urlPathSegment(username))",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func createOrganization(baseURL: String, token: String, draft: GiteaOrganizationDraft) async throws -> GiteaOrganizationSummary {
+        let draft = try Self.validatedOrganizationDraft(draft)
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v1/orgs",
+            method: "POST",
+            token: token,
+            body: GiteaOrganizationRequest(draft: draft, includeUsername: true)
+        )
+    }
+
+    func updateOrganization(baseURL: String, token: String, draft: GiteaOrganizationDraft) async throws -> GiteaOrganizationSummary {
+        let draft = try Self.validatedOrganizationDraft(draft, requireExistingOrganization: true)
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v1/orgs/\(Self.urlPathSegment(draft.trimmedOriginalUsername))",
+            method: "PATCH",
+            token: token,
+            body: GiteaOrganizationRequest(draft: draft, includeUsername: false)
+        )
+    }
+
+    func deleteOrganization(baseURL: String, token: String, username: String) async throws {
+        let username = try Self.validatedUsername(username)
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/orgs/\(Self.urlPathSegment(username))",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func createTeam(baseURL: String, token: String, draft: GiteaTeamDraft) async throws -> GiteaTeamSummary {
+        let draft = try Self.validatedTeamDraft(draft)
+        let team: GiteaTeamSummary = try await send(
+            baseURL: baseURL,
+            path: "/api/v1/orgs/\(Self.urlPathSegment(draft.trimmedOrganization))/teams",
+            method: "POST",
+            token: token,
+            body: GiteaTeamRequest(draft: draft)
+        )
+        return team.withOrganization(team.organization.nilIfEmpty ?? draft.trimmedOrganization)
+    }
+
+    func updateTeam(baseURL: String, token: String, draft: GiteaTeamDraft) async throws -> GiteaTeamSummary {
+        let draft = try Self.validatedTeamDraft(draft, requireExistingTeam: true)
+        let team: GiteaTeamSummary = try await send(
+            baseURL: baseURL,
+            path: "/api/v1/teams/\(draft.teamId)",
+            method: "PATCH",
+            token: token,
+            body: GiteaTeamRequest(draft: draft)
+        )
+        return team.withOrganization(team.organization.nilIfEmpty ?? draft.trimmedOrganization)
+    }
+
+    func deleteTeam(baseURL: String, token: String, teamId: Int64) async throws {
+        guard teamId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea team must be selected before deletion.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/teams/\(teamId)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func updateIssueState(
+        baseURL: String,
+        token: String,
+        repositoryFullName: String,
+        issueNumber: Int,
+        action: GitNativeIssueStateAction
+    ) async throws -> GiteaIssueSummary {
+        let parts = try Self.repositoryPathParts(repositoryFullName)
+        guard issueNumber > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea issue number is invalid.")
+        }
+        let body = GiteaUpdateIssueRequest(state: action == .close ? "closed" : "open")
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v1/repos/\(Self.urlPathSegment(parts.owner))/\(Self.urlPathSegment(parts.repository))/issues/\(issueNumber)",
+            method: "PATCH",
+            token: token,
+            body: body
+        )
+    }
+
+    func createKey(baseURL: String, token: String, draft: GiteaKeyDraft) async throws -> GiteaKeySummary {
+        let draft = try Self.validatedKeyDraft(draft)
+        let body = GiteaCreateKeyRequest(
+            title: draft.trimmedTitle,
+            key: draft.trimmedKey,
+            readOnly: draft.isReadOnly
+        )
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v1/user/keys",
+            method: "POST",
+            token: token,
+            body: body
+        )
+    }
+
+    func deleteKey(baseURL: String, token: String, keyId: Int64) async throws {
+        guard keyId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea SSH key must be selected before deletion.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/user/keys/\(keyId)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func createAccessToken(
+        baseURL: String,
+        token: String,
+        draft: GiteaAccessTokenDraft
+    ) async throws -> GiteaAccessTokenCreationResult {
+        let draft = try Self.validatedAccessTokenDraft(draft)
+        let accessToken: GiteaAccessTokenSummary = try await send(
+            baseURL: baseURL,
+            path: "/api/v1/users/\(Self.urlPathSegment(draft.trimmedUsername))/tokens",
+            method: "POST",
+            token: token,
+            body: GiteaCreateAccessTokenRequest(draft: draft)
+        )
+        guard let secret = accessToken.sha1?.nilIfEmpty else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea did not return the one-time access token secret.")
+        }
+        return GiteaAccessTokenCreationResult(token: accessToken.withUsername(draft.trimmedUsername), secret: secret)
+    }
+
+    func deleteAccessToken(baseURL: String, token: String, username: String, tokenId: Int64) async throws {
+        let username = try Self.validatedUsername(username)
+        guard tokenId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea access token must be selected before deletion.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/users/\(Self.urlPathSegment(username))/tokens/\(tokenId)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func packageDetail(
+        baseURL: String,
+        token: String,
+        owner: String,
+        type: String,
+        name: String,
+        version: String?
+    ) async throws -> GiteaPackageDetail {
+        let package = try Self.validatedPackageReference(owner: owner, type: type, name: name, version: version)
+        let basePath = "/api/v1/packages/\(Self.urlPathSegment(package.owner))/\(Self.urlPathSegment(package.type))/\(Self.urlPathSegment(package.name))"
+        let versions: [GiteaPackageSummary] = try await get(
+            baseURL: baseURL,
+            path: basePath,
+            queryItems: [URLQueryItem(name: "limit", value: "50")],
+            token: token
+        )
+        let normalizedVersions = versions.map { $0.withOwner(package.owner) }
+        let selectedVersion = package.version ?? normalizedVersions.first?.version
+        let selectedPackage: GiteaPackageSummary?
+        let files: [GiteaPackageFileSummary]
+        if let selectedVersion {
+            let versionPath = "\(basePath)/\(Self.urlPathSegment(selectedVersion))"
+            let loadedPackage: GiteaPackageSummary = try await get(
+                baseURL: baseURL,
+                path: versionPath,
+                queryItems: [],
+                token: token
+            )
+            selectedPackage = loadedPackage.withOwner(package.owner)
+            files = try await get(
+                baseURL: baseURL,
+                path: "\(versionPath)/files",
+                queryItems: [],
+                token: token
+            )
+        } else {
+            selectedPackage = nil
+            files = []
+        }
+
+        return GiteaPackageDetail(
+            owner: package.owner,
+            type: package.type,
+            name: package.name,
+            selectedVersion: selectedVersion,
+            package: selectedPackage,
+            versions: normalizedVersions,
+            files: files,
+            capturedAt: now()
+        )
+    }
+
+    func deletePackage(
+        baseURL: String,
+        token: String,
+        owner: String,
+        type: String,
+        name: String,
+        version: String?
+    ) async throws {
+        let package = try Self.validatedPackageReference(owner: owner, type: type, name: name, version: version)
+        let basePath = "/api/v1/packages/\(Self.urlPathSegment(package.owner))/\(Self.urlPathSegment(package.type))/\(Self.urlPathSegment(package.name))"
+        let path = package.version.map { "\(basePath)/\(Self.urlPathSegment($0))" } ?? basePath
+        try await sendNoContent(baseURL: baseURL, path: path, method: "DELETE", token: token)
+    }
+
+    func addTeamMember(baseURL: String, token: String, draft: GiteaTeamMemberDraft) async throws {
+        let draft = try Self.validatedTeamMemberDraft(draft)
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/teams/\(draft.teamId)/members/\(Self.urlPathSegment(draft.trimmedUsername))",
+            method: "PUT",
+            token: token
+        )
+    }
+
+    func removeTeamMember(baseURL: String, token: String, teamId: Int64, username: String) async throws {
+        let draft = try Self.validatedTeamMemberDraft(GiteaTeamMemberDraft(teamId: teamId, username: username))
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/teams/\(draft.teamId)/members/\(Self.urlPathSegment(draft.trimmedUsername))",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func addTeamRepository(baseURL: String, token: String, draft: GiteaTeamRepositoryDraft) async throws {
+        let draft = try Self.validatedTeamRepositoryDraft(draft)
+        let parts = try Self.repositoryPathParts(draft.trimmedRepositoryFullName)
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/teams/\(draft.teamId)/repos/\(Self.urlPathSegment(parts.owner))/\(Self.urlPathSegment(parts.repository))",
+            method: "PUT",
+            token: token
+        )
+    }
+
+    func removeTeamRepository(baseURL: String, token: String, teamId: Int64, repositoryFullName: String) async throws {
+        let draft = try Self.validatedTeamRepositoryDraft(GiteaTeamRepositoryDraft(teamId: teamId, repositoryFullName: repositoryFullName))
+        let parts = try Self.repositoryPathParts(draft.trimmedRepositoryFullName)
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v1/teams/\(draft.teamId)/repos/\(Self.urlPathSegment(parts.owner))/\(Self.urlPathSegment(parts.repository))",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    private func get<T: Decodable>(
+        baseURL: String,
+        path: String,
+        queryItems: [URLQueryItem],
+        token: String
+    ) async throws -> T {
+        let request = try Self.request(baseURL: baseURL, path: path, queryItems: queryItems, token: token)
+        return try await decode(request)
+    }
+
+    private func send<T: Decodable, Body: Encodable>(
+        baseURL: String,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        method: String,
+        token: String,
+        body: Body
+    ) async throws -> T {
+        let request = try Self.request(
+            baseURL: baseURL,
+            path: path,
+            queryItems: queryItems,
+            method: method,
+            token: token,
+            body: try Self.encoder.encode(body)
+        )
+        return try await decode(request)
+    }
+
+    private func sendNoContent(
+        baseURL: String,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        method: String,
+        token: String
+    ) async throws {
+        let request = try Self.request(baseURL: baseURL, path: path, queryItems: queryItems, method: method, token: token)
+        let (data, response) = try await transport.data(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw GitServiceAPIError.httpStatus(response.statusCode, Self.errorBody(from: data))
+        }
+    }
+
+    private func decode<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, response) = try await transport.data(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw GitServiceAPIError.httpStatus(response.statusCode, Self.errorBody(from: data))
+        }
+        return try Self.decoder.decode(T.self, from: data)
+    }
+
+    static func request(
+        baseURL: String,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        method: String = "GET",
+        token: String,
+        body: Data? = nil
+    ) throws -> URLRequest {
+        let base = try normalizedBaseURL(baseURL)
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw GitServiceAPIError.invalidBaseURL
+        }
+        components.path = apiPath(basePath: components.path, endpointPath: path)
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else { throw GitServiceAPIError.invalidBaseURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("token \(try validatedToken(token))", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        return request
+    }
+
+    private static var encoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return encoder
+    }
+
+    private static var decoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    private struct GiteaCreateRepositoryRequest: Encodable {
+        var name: String
+        var description: String?
+        var isPrivate: Bool
+        var autoInit: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case name
+            case description
+            case isPrivate = "private"
+            case autoInit = "auto_init"
+        }
+    }
+
+    private struct GiteaServerVersionResponse: Decodable {
+        var version: String?
+    }
+
+    private struct GiteaCreateUserRequest: Encodable {
+        var username: String
+        var email: String
+        var password: String
+        var fullName: String?
+        var mustChangePassword: Bool
+        var admin: Bool
+        var restricted: Bool
+    }
+
+    private struct GiteaEditUserRequest: Encodable {
+        var sourceId: Int64 = 0
+        var loginName: String
+        var email: String
+        var fullName: String?
+        var password: String?
+        var mustChangePassword: Bool
+        var active: Bool
+        var admin: Bool
+        var prohibitLogin: Bool
+        var restricted: Bool
+
+        init(draft: GiteaUserDraft) {
+            loginName = draft.trimmedUsername
+            email = draft.trimmedEmail
+            fullName = draft.trimmedFullName.nilIfEmpty
+            password = draft.trimmedPassword.nilIfEmpty
+            mustChangePassword = draft.mustChangePassword
+            active = draft.isActive
+            admin = draft.isAdmin
+            prohibitLogin = draft.prohibitLogin
+            restricted = draft.restricted
+        }
+    }
+
+    private struct GiteaOrganizationRequest: Encodable {
+        var username: String?
+        var fullName: String?
+        var description: String?
+        var website: String?
+        var visibility: String
+
+        init(draft: GiteaOrganizationDraft, includeUsername: Bool) {
+            username = includeUsername ? draft.trimmedUsername : nil
+            fullName = draft.trimmedFullName.nilIfEmpty
+            description = draft.trimmedDescription.nilIfEmpty
+            website = draft.trimmedWebsite.nilIfEmpty
+            visibility = draft.visibility
+        }
+    }
+
+    private struct GiteaTeamRequest: Encodable {
+        var name: String
+        var description: String?
+        var permission: String
+        var includesAllRepositories: Bool
+        var canCreateOrgRepo: Bool
+        var units: [String]
+
+        init(draft: GiteaTeamDraft) {
+            name = draft.trimmedName
+            description = draft.trimmedDescription.nilIfEmpty
+            permission = draft.permission
+            includesAllRepositories = draft.includesAllRepositories
+            canCreateOrgRepo = draft.canCreateOrgRepo
+            units = draft.units
+        }
+    }
+
+    private struct GiteaUpdateRepositoryRequest: Encodable {
+        var description: String?
+        var isPrivate: Bool
+        var defaultBranch: String?
+        var hasIssues: Bool
+        var hasWiki: Bool
+        var hasPullRequests: Bool
+        var hasPackages: Bool
+        var archived: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case description
+            case isPrivate = "private"
+            case defaultBranch = "default_branch"
+            case hasIssues = "has_issues"
+            case hasWiki = "has_wiki"
+            case hasPullRequests = "has_pull_requests"
+            case hasPackages = "has_packages"
+            case archived
+        }
+    }
+
+    private struct GiteaUpdateIssueRequest: Encodable {
+        var state: String
+    }
+
+    private struct GiteaCreateKeyRequest: Encodable {
+        var title: String
+        var key: String
+        var readOnly: Bool
+    }
+
+    private struct GiteaCreateAccessTokenRequest: Encodable {
+        var name: String
+        var scopes: [String]
+
+        init(draft: GiteaAccessTokenDraft) {
+            name = draft.trimmedName
+            scopes = draft.scopes
+        }
+    }
+
+    private static func normalizedBaseURL(_ value: String) throws -> URL {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: trimmed),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+              components.host?.nilIfEmpty != nil,
+              components.user == nil,
+              components.password == nil,
+              let url = components.url
+        else {
+            throw GitServiceAPIError.invalidBaseURL
+        }
+        return url
+    }
+
+    private static func validatedToken(_ value: String) throws -> String {
+        let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty, token.rangeOfCharacter(from: .newlines) == nil else {
+            throw GitServiceAPIError.invalidToken
+        }
+        return token
+    }
+
+    private static func validatedRepositoryDraft(_ draft: GitNativeRepositoryDraft) throws -> GitNativeRepositoryDraft {
+        guard isValidPathSegment(draft.trimmedName), draft.trimmedName.count <= 100 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Repository name must be 1-100 characters and cannot contain slashes.")
+        }
+        return GitNativeRepositoryDraft(
+            name: draft.trimmedName,
+            description: draft.trimmedDescription,
+            isPrivate: draft.isPrivate,
+            autoInitialize: draft.autoInitialize
+        )
+    }
+
+    private static func repositoryPathParts(_ fullName: String) throws -> (owner: String, repository: String) {
+        let parts = fullName
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count == 2,
+              parts.allSatisfy(isValidPathSegment)
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea repository must be selected as owner/name.")
+        }
+        return (parts[0], parts[1])
+    }
+
+    private static func validatedRepositorySettingsDraft(
+        _ draft: GiteaRepositorySettingsDraft
+    ) throws -> GiteaRepositorySettingsDraft {
+        _ = try repositoryPathParts(draft.trimmedFullName)
+        guard draft.trimmedDescription.count <= 1024, draft.trimmedDescription.rangeOfCharacter(from: .newlines) == nil else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea repository description must be single-line and at most 1024 characters.")
+        }
+        guard draft.trimmedDefaultBranch.isEmpty ||
+            (draft.trimmedDefaultBranch.rangeOfCharacter(from: .newlines) == nil &&
+                draft.trimmedDefaultBranch.rangeOfCharacter(from: CharacterSet(charactersIn: "?#")) == nil)
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea default branch must be a single-line branch name without query characters.")
+        }
+        return GiteaRepositorySettingsDraft(
+            fullName: draft.trimmedFullName,
+            description: draft.trimmedDescription,
+            isPrivate: draft.isPrivate,
+            defaultBranch: draft.trimmedDefaultBranch,
+            hasIssues: draft.hasIssues,
+            hasWiki: draft.hasWiki,
+            hasPullRequests: draft.hasPullRequests,
+            hasPackages: draft.hasPackages,
+            archived: draft.archived
+        )
+    }
+
+    private static func validatedUserDraft(
+        _ draft: GiteaUserDraft,
+        requirePassword: Bool = false,
+        requireExistingUser: Bool = false
+    ) throws -> GiteaUserDraft {
+        let username = try validatedUsername(draft.trimmedUsername)
+        let originalUsername: String
+        if requireExistingUser {
+            originalUsername = try validatedUsername(draft.trimmedOriginalUsername)
+        } else {
+            originalUsername = draft.trimmedOriginalUsername
+        }
+        guard draft.trimmedEmail.contains("@"), draft.trimmedEmail.rangeOfCharacter(from: .newlines) == nil else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea user email must be a single-line email address.")
+        }
+        if requirePassword || !draft.trimmedPassword.isEmpty {
+            guard draft.trimmedPassword.count >= 8, draft.trimmedPassword.rangeOfCharacter(from: .newlines) == nil else {
+                throw GitServiceAPIError.invalidRepositoryDraft("Gitea user password must be at least 8 characters and single-line.")
+            }
+        }
+        guard draft.trimmedFullName.count <= 255, draft.trimmedFullName.rangeOfCharacter(from: .newlines) == nil else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea full name must be single-line and at most 255 characters.")
+        }
+        return GiteaUserDraft(
+            originalUsername: originalUsername,
+            username: username,
+            email: draft.trimmedEmail,
+            password: draft.trimmedPassword,
+            fullName: draft.trimmedFullName,
+            mustChangePassword: draft.mustChangePassword,
+            isActive: draft.isActive,
+            isAdmin: draft.isAdmin,
+            prohibitLogin: draft.prohibitLogin,
+            restricted: draft.restricted
+        )
+    }
+
+    private static func validatedOrganizationDraft(
+        _ draft: GiteaOrganizationDraft,
+        requireExistingOrganization: Bool = false
+    ) throws -> GiteaOrganizationDraft {
+        let username = try validatedUsername(draft.trimmedUsername)
+        let originalUsername: String
+        if requireExistingOrganization {
+            originalUsername = try validatedUsername(draft.trimmedOriginalUsername)
+        } else {
+            originalUsername = draft.trimmedOriginalUsername
+        }
+        guard draft.trimmedFullName.count <= 255, draft.trimmedFullName.rangeOfCharacter(from: .newlines) == nil else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea organization full name must be single-line and at most 255 characters.")
+        }
+        guard draft.trimmedDescription.count <= 1024, draft.trimmedDescription.rangeOfCharacter(from: .newlines) == nil else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea organization description must be single-line and at most 1024 characters.")
+        }
+        guard draft.trimmedWebsite.rangeOfCharacter(from: .newlines) == nil, draft.trimmedWebsite.count <= 255 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea organization website must be single-line and at most 255 characters.")
+        }
+        guard ["public", "limited", "private"].contains(draft.visibility) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea organization visibility must be public, limited, or private.")
+        }
+        return GiteaOrganizationDraft(
+            originalUsername: originalUsername,
+            username: username,
+            fullName: draft.trimmedFullName,
+            description: draft.trimmedDescription,
+            website: draft.trimmedWebsite,
+            visibility: draft.visibility
+        )
+    }
+
+    private static func validatedTeamDraft(
+        _ draft: GiteaTeamDraft,
+        requireExistingTeam: Bool = false
+    ) throws -> GiteaTeamDraft {
+        let organization = draft.trimmedOrganization.isEmpty ? "" : try validatedUsername(draft.trimmedOrganization)
+        let teamId = draft.teamId
+        if requireExistingTeam, teamId <= 0 {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea team must be selected before saving.")
+        }
+        if !requireExistingTeam, organization.isEmpty {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea organization must be selected before creating a team.")
+        }
+        guard !draft.trimmedName.isEmpty,
+              draft.trimmedName.count <= 100,
+              draft.trimmedName.rangeOfCharacter(from: CharacterSet(charactersIn: "/\n\r")) == nil
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea team name must be 1-100 characters and cannot contain slashes.")
+        }
+        guard draft.trimmedDescription.count <= 1024,
+              draft.trimmedDescription.rangeOfCharacter(from: .newlines) == nil
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea team description must be single-line and at most 1024 characters.")
+        }
+        guard ["read", "write", "admin"].contains(draft.permission) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea team permission must be read, write, or admin.")
+        }
+        let allowedUnits = Set([
+            "repo.actions",
+            "repo.code",
+            "repo.issues",
+            "repo.ext_issues",
+            "repo.wiki",
+            "repo.ext_wiki",
+            "repo.pulls",
+            "repo.releases",
+            "repo.projects",
+            "repo.packages"
+        ])
+        let units = Array(NSOrderedSet(array: draft.units.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }).array)
+            .compactMap { $0 as? String }
+            .filter { !$0.isEmpty }
+        guard !units.isEmpty, units.allSatisfy({ allowedUnits.contains($0) }) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea team units contain unsupported permissions.")
+        }
+        return GiteaTeamDraft(
+            teamId: teamId,
+            organization: organization,
+            name: draft.trimmedName,
+            description: draft.trimmedDescription,
+            permission: draft.permission,
+            includesAllRepositories: draft.includesAllRepositories,
+            canCreateOrgRepo: draft.canCreateOrgRepo,
+            units: units
+        )
+    }
+
+    private static func validatedUsername(_ value: String) throws -> String {
+        let username = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isValidPathSegment(username), username.count <= 100 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea username must be 1-100 characters and cannot contain slashes.")
+        }
+        return username
+    }
+
+    private static func validatedTeamMemberDraft(_ draft: GiteaTeamMemberDraft) throws -> GiteaTeamMemberDraft {
+        guard draft.teamId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea team must be selected before changing members.")
+        }
+        return try GiteaTeamMemberDraft(teamId: draft.teamId, username: validatedUsername(draft.trimmedUsername))
+    }
+
+    private static func validatedTeamRepositoryDraft(_ draft: GiteaTeamRepositoryDraft) throws -> GiteaTeamRepositoryDraft {
+        guard draft.teamId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea team must be selected before changing repositories.")
+        }
+        _ = try repositoryPathParts(draft.trimmedRepositoryFullName)
+        return GiteaTeamRepositoryDraft(teamId: draft.teamId, repositoryFullName: draft.trimmedRepositoryFullName)
+    }
+
+    private static func validatedKeyDraft(_ draft: GiteaKeyDraft) throws -> GiteaKeyDraft {
+        guard !draft.trimmedTitle.isEmpty, draft.trimmedTitle.count <= 100 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea SSH key title must be 1-100 characters.")
+        }
+        guard draft.trimmedKey.hasPrefix("ssh-"), draft.trimmedKey.rangeOfCharacter(from: .newlines) == nil else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea SSH public key must be a single-line OpenSSH public key.")
+        }
+        return GiteaKeyDraft(title: draft.trimmedTitle, key: draft.trimmedKey, isReadOnly: draft.isReadOnly)
+    }
+
+    private static func validatedAccessTokenDraft(_ draft: GiteaAccessTokenDraft) throws -> GiteaAccessTokenDraft {
+        let username = try validatedUsername(draft.trimmedUsername)
+        guard !draft.trimmedName.isEmpty,
+              draft.trimmedName.count <= 100,
+              draft.trimmedName.rangeOfCharacter(from: .newlines) == nil
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea access token name must be a single line with 1-100 characters.")
+        }
+        let allowedScopes = Set([
+            "all",
+            "read:activitypub",
+            "write:activitypub",
+            "read:admin",
+            "write:admin",
+            "read:issue",
+            "write:issue",
+            "read:misc",
+            "write:misc",
+            "read:notification",
+            "write:notification",
+            "read:organization",
+            "write:organization",
+            "read:package",
+            "write:package",
+            "read:repository",
+            "write:repository",
+            "read:user",
+            "write:user"
+        ])
+        let scopes = Array(NSOrderedSet(array: draft.scopes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }).array)
+            .compactMap { $0 as? String }
+            .filter { !$0.isEmpty }
+        guard !scopes.isEmpty, scopes.allSatisfy({ allowedScopes.contains($0) }) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea access token scopes contain unsupported values.")
+        }
+        return GiteaAccessTokenDraft(username: username, name: draft.trimmedName, scopes: scopes)
+    }
+
+    private static func validatedPackageReference(
+        owner: String,
+        type: String,
+        name: String,
+        version: String?
+    ) throws -> (owner: String, type: String, name: String, version: String?) {
+        let owner = try validatedUsername(owner)
+        let type = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let allowedTypes = Set([
+            "alpine", "cargo", "chef", "composer", "conan", "conda", "container", "cran",
+            "debian", "generic", "go", "helm", "maven", "npm", "nuget", "pub", "pypi",
+            "rpm", "rubygems", "swift", "terraform", "vagrant"
+        ])
+        guard allowedTypes.contains(type) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea package type is not supported.")
+        }
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty,
+              name.count <= 255,
+              name.rangeOfCharacter(from: .newlines) == nil,
+              name.rangeOfCharacter(from: CharacterSet(charactersIn: "?#")) == nil
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Gitea package name is invalid.")
+        }
+        let version = version?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let version {
+            guard !version.isEmpty,
+                  version.count <= 255,
+                  version.rangeOfCharacter(from: CharacterSet(charactersIn: "/?#\n\r")) == nil
+            else {
+                throw GitServiceAPIError.invalidRepositoryDraft("Gitea package version is invalid.")
+            }
+        }
+        return (owner, type, name, version?.nilIfEmpty)
+    }
+
+    private static func apiPath(basePath: String, endpointPath: String) -> String {
+        let base = basePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let endpoint = endpointPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return "/" + [base, endpoint].filter { !$0.isEmpty }.joined(separator: "/")
+    }
+
+    private static func isValidPathSegment(_ value: String) -> Bool {
+        !value.isEmpty && value.rangeOfCharacter(from: CharacterSet(charactersIn: "/?#")) == nil
+    }
+
+    private static func urlPathSegment(_ value: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private static func errorBody(from data: Data) -> String {
+        String(data: data, encoding: .utf8)
+            .map(DeploymentLogRedactor.redact)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+}
+
+private extension GiteaTeamSummary {
+    func withOrganization(_ organization: String) -> GiteaTeamSummary {
+        GiteaTeamSummary(
+            id: id,
+            organization: self.organization.nilIfEmpty ?? organization,
+            name: name,
+            description: description,
+            permission: permission,
+            includesAllRepositories: includesAllRepositories,
+            canCreateOrgRepo: canCreateOrgRepo,
+            units: units
+        )
+    }
+}
+
+private extension GiteaAccessTokenSummary {
+    func withUsername(_ username: String) -> GiteaAccessTokenSummary {
+        GiteaAccessTokenSummary(
+            id: id,
+            username: self.username.nilIfEmpty ?? username,
+            name: name,
+            scopes: scopes,
+            sha1: sha1,
+            tokenLastEight: tokenLastEight,
+            createdAt: createdAt,
+            lastUsedAt: lastUsedAt
+        )
+    }
+}
+
+private extension GiteaPackageSummary {
+    func withOwner(_ owner: String) -> GiteaPackageSummary {
+        GiteaPackageSummary(
+            id: id,
+            owner: self.owner.nilIfEmpty ?? owner,
+            name: name,
+            type: type,
+            version: version,
+            repository: repository,
+            htmlURL: htmlURL,
+            createdAt: createdAt
+        )
+    }
+}
+
+private extension GiteaTeamRepositorySummary {
+    init(teamId: Int64, repository: GiteaRepositorySummary) {
+        self.init(
+            teamId: teamId,
+            repositoryId: repository.id,
+            fullName: repository.fullName,
+            owner: repository.owner,
+            name: repository.name,
+            isPrivate: repository.isPrivate,
+            defaultBranch: repository.defaultBranch,
+            updatedAt: repository.updatedAt
+        )
+    }
+}
+
+private extension GiteaTeamMemberSummary {
+    func withTeamId(_ teamId: Int64) -> GiteaTeamMemberSummary {
+        GiteaTeamMemberSummary(
+            teamId: teamId,
+            username: username,
+            fullName: fullName,
+            email: email,
+            isAdmin: isAdmin,
+            isActive: isActive,
+            lastLogin: lastLogin
+        )
+    }
+}
+
+final class GitLabAPIClient: @unchecked Sendable {
+    private let transport: GitServiceHTTPTransport
+    private let now: @Sendable () -> Date
+
+    init(
+        transport: GitServiceHTTPTransport = URLSessionGitServiceHTTPTransport(),
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.transport = transport
+        self.now = now
+    }
+
+    func loadSnapshot(baseURL: String, token: String) async throws -> GitLabNativeSnapshot {
+        let token = try Self.validatedToken(token)
+        async let projects: [GitLabProjectSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v4/projects",
+            queryItems: [
+                URLQueryItem(name: "simple", value: "true"),
+                URLQueryItem(name: "per_page", value: "50"),
+                URLQueryItem(name: "order_by", value: "last_activity_at"),
+                URLQueryItem(name: "sort", value: "desc"),
+            ],
+            token: token
+        )
+        async let groups: [GitLabGroupSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v4/groups",
+            queryItems: [URLQueryItem(name: "per_page", value: "50")],
+            token: token
+        )
+        async let users: [GitLabUserSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v4/users",
+            queryItems: [URLQueryItem(name: "per_page", value: "50")],
+            token: token
+        )
+        async let issues: [GitLabIssueSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v4/issues",
+            queryItems: [
+                URLQueryItem(name: "scope", value: "all"),
+                URLQueryItem(name: "per_page", value: "50"),
+            ],
+            token: token
+        )
+        async let mergeRequests: [GitLabMergeRequestSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v4/merge_requests",
+            queryItems: [
+                URLQueryItem(name: "scope", value: "all"),
+                URLQueryItem(name: "per_page", value: "50"),
+            ],
+            token: token
+        )
+        async let runners: [GitLabRunnerSummary] = get(
+            baseURL: baseURL,
+            path: "/api/v4/runners/all",
+            queryItems: [URLQueryItem(name: "per_page", value: "50")],
+            token: token
+        )
+
+        let loadedProjects = try await projects
+        let loadedGroups = try await groups
+        var pipelines: [GitLabPipelineSummary] = []
+        var jobs: [GitLabJobSummary] = []
+        var packages: [GitLabPackageSummary] = []
+        var variables: [GitLabVariableSummary] = []
+        var deployKeys: [GitLabDeployKeySummary] = []
+        var deployTokens: [GitLabDeployTokenSummary] = []
+        var branches: [GitLabBranchSummary] = []
+        var tags: [GitLabTagSummary] = []
+        var members: [GitLabMemberSummary] = []
+        for project in loadedProjects.prefix(5) {
+            let encodedID = String(project.id)
+            let projectMembers: [GitLabMemberSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/projects/\(encodedID)/members/all",
+                queryItems: [URLQueryItem(name: "per_page", value: "50")],
+                token: token
+            )
+            members.append(contentsOf: projectMembers.map { member in
+                member.withScope(.project, targetId: project.id)
+            })
+
+            let projectPipelines: [GitLabPipelineSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/projects/\(encodedID)/pipelines",
+                queryItems: [URLQueryItem(name: "per_page", value: "20")],
+                token: token
+            )
+            pipelines.append(contentsOf: projectPipelines.map { pipeline in
+                GitLabPipelineSummary(
+                    id: pipeline.id,
+                    projectId: pipeline.projectId == 0 ? project.id : pipeline.projectId,
+                    ref: pipeline.ref,
+                    sha: pipeline.sha,
+                    status: pipeline.status,
+                    webURL: pipeline.webURL,
+                    updatedAt: pipeline.updatedAt
+                )
+            })
+
+            let projectJobs: [GitLabJobSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/projects/\(encodedID)/jobs",
+                queryItems: [URLQueryItem(name: "per_page", value: "30")],
+                token: token
+            )
+            jobs.append(contentsOf: projectJobs.map { job in
+                job.withProjectId(project.id)
+            })
+
+            let projectPackages: [GitLabPackageSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/projects/\(encodedID)/packages",
+                queryItems: [
+                    URLQueryItem(name: "per_page", value: "50"),
+                    URLQueryItem(name: "order_by", value: "created_at"),
+                    URLQueryItem(name: "sort", value: "desc"),
+                ],
+                token: token
+            )
+            packages.append(contentsOf: projectPackages.map { package in
+                package.withProjectId(project.id)
+            })
+
+            let projectVariables: [GitLabVariableSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/projects/\(encodedID)/variables",
+                queryItems: [URLQueryItem(name: "per_page", value: "50")],
+                token: token
+            )
+            variables.append(contentsOf: projectVariables.map { variable in
+                GitLabVariableSummary(
+                    projectId: variable.projectId == 0 ? project.id : variable.projectId,
+                    key: variable.key,
+                    variableType: variable.variableType,
+                    environmentScope: variable.environmentScope,
+                    protected: variable.protected,
+                    masked: variable.masked,
+                    raw: variable.raw,
+                    description: variable.description
+                )
+            })
+
+            let projectDeployKeys: [GitLabDeployKeySummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/projects/\(encodedID)/deploy_keys",
+                queryItems: [URLQueryItem(name: "per_page", value: "50")],
+                token: token
+            )
+            deployKeys.append(contentsOf: projectDeployKeys.map { key in
+                key.withProjectId(project.id)
+            })
+
+            let projectDeployTokens: [GitLabDeployTokenSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/projects/\(encodedID)/deploy_tokens",
+                queryItems: [URLQueryItem(name: "per_page", value: "50")],
+                token: token
+            )
+            deployTokens.append(contentsOf: projectDeployTokens.map { deployToken in
+                deployToken.withProjectId(project.id)
+            })
+
+            let projectBranches: [GitLabBranchSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/projects/\(encodedID)/repository/branches",
+                queryItems: [URLQueryItem(name: "per_page", value: "50")],
+                token: token
+            )
+            branches.append(contentsOf: projectBranches.map { branch in
+                branch.withProjectId(project.id)
+            })
+
+            let projectTags: [GitLabTagSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/projects/\(encodedID)/repository/tags",
+                queryItems: [URLQueryItem(name: "per_page", value: "50")],
+                token: token
+            )
+            tags.append(contentsOf: projectTags.map { tag in
+                tag.withProjectId(project.id)
+            })
+        }
+        for group in loadedGroups.prefix(5) {
+            let encodedID = String(group.id)
+            let groupMembers: [GitLabMemberSummary] = try await get(
+                baseURL: baseURL,
+                path: "/api/v4/groups/\(encodedID)/members/all",
+                queryItems: [URLQueryItem(name: "per_page", value: "50")],
+                token: token
+            )
+            members.append(contentsOf: groupMembers.map { member in
+                member.withScope(.group, targetId: group.id)
+            })
+        }
+
+        let loadedUsers = try await users
+        let loadedIssues = try await issues
+        let loadedMergeRequests = try await mergeRequests
+        let loadedRunners = try await runners
+        let adminOverview = await loadAdminOverview(
+            baseURL: baseURL,
+            token: token,
+            fallbackUserCount: loadedUsers.count,
+            fallbackProjectCount: loadedProjects.count,
+            fallbackGroupCount: loadedGroups.count,
+            fallbackIssueCount: loadedIssues.count,
+            fallbackMergeRequestCount: loadedMergeRequests.count,
+            fallbackRunnerCount: loadedRunners.count
+        )
+
+        return GitLabNativeSnapshot(
+            projects: loadedProjects,
+            groups: loadedGroups,
+            users: loadedUsers,
+            members: members,
+            branches: branches,
+            tags: tags,
+            issues: loadedIssues,
+            mergeRequests: loadedMergeRequests,
+            pipelines: pipelines,
+            jobs: jobs,
+            packages: packages,
+            runners: loadedRunners,
+            variables: variables,
+            deployKeys: deployKeys,
+            deployTokens: deployTokens,
+            adminOverview: adminOverview,
+            capturedAt: now()
+        )
+    }
+
+    func createProject(
+        baseURL: String,
+        token: String,
+        draft: GitNativeRepositoryDraft
+    ) async throws -> GitLabProjectSummary {
+        let draft = try Self.validatedProjectDraft(draft)
+        let body = GitLabCreateProjectRequest(
+            name: draft.trimmedName,
+            description: draft.trimmedDescription.nilIfEmpty,
+            visibility: draft.isPrivate ? "private" : "internal",
+            initializeWithReadme: draft.autoInitialize
+        )
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects",
+            method: "POST",
+            token: token,
+            body: body
+        )
+    }
+
+    func deleteProject(baseURL: String, token: String, projectId: Int64) async throws {
+        guard projectId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab project id is invalid.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func updateProject(
+        baseURL: String,
+        token: String,
+        draft: GitLabProjectSettingsDraft
+    ) async throws -> GitLabProjectSummary {
+        let draft = try Self.validatedProjectSettingsDraft(draft)
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(draft.projectId)",
+            method: "PUT",
+            token: token,
+            body: GitLabProjectUpdateRequest(draft: draft)
+        )
+    }
+
+    func createGroup(
+        baseURL: String,
+        token: String,
+        draft: GitLabGroupDraft
+    ) async throws -> GitLabGroupSummary {
+        let draft = try Self.validatedGroupDraft(draft)
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v4/groups",
+            method: "POST",
+            token: token,
+            body: GitLabGroupRequest(draft: draft)
+        )
+    }
+
+    func updateGroup(
+        baseURL: String,
+        token: String,
+        draft: GitLabGroupDraft
+    ) async throws -> GitLabGroupSummary {
+        let draft = try Self.validatedGroupDraft(draft, requireExistingGroup: true)
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v4/groups/\(draft.groupId)",
+            method: "PUT",
+            token: token,
+            body: GitLabGroupUpdateRequest(draft: draft)
+        )
+    }
+
+    func deleteGroup(baseURL: String, token: String, groupId: Int64) async throws {
+        guard groupId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab group id is invalid.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v4/groups/\(groupId)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func deletePackage(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        packageId: Int64
+    ) async throws {
+        guard projectId > 0, packageId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab package project id or package id is invalid.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/packages/\(packageId)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func addMember(
+        baseURL: String,
+        token: String,
+        draft: GitLabMemberDraft
+    ) async throws -> GitLabMemberSummary {
+        let draft = try Self.validatedMemberDraft(draft)
+        let member: GitLabMemberSummary = try await send(
+            baseURL: baseURL,
+            path: Self.memberCollectionPath(scope: draft.scope, targetId: draft.targetId),
+            method: "POST",
+            token: token,
+            body: GitLabMemberRequest(draft: draft)
+        )
+        return member.withScope(draft.scope, targetId: draft.targetId)
+    }
+
+    func updateMember(
+        baseURL: String,
+        token: String,
+        draft: GitLabMemberDraft
+    ) async throws -> GitLabMemberSummary {
+        let draft = try Self.validatedMemberDraft(draft)
+        let member: GitLabMemberSummary = try await send(
+            baseURL: baseURL,
+            path: "\(Self.memberCollectionPath(scope: draft.scope, targetId: draft.targetId))/\(draft.userId)",
+            method: "PUT",
+            token: token,
+            body: GitLabMemberRequest(draft: draft)
+        )
+        return member.withScope(draft.scope, targetId: draft.targetId)
+    }
+
+    func deleteMember(
+        baseURL: String,
+        token: String,
+        scope: GitLabMemberScope,
+        targetId: Int64,
+        userId: Int64
+    ) async throws {
+        guard targetId > 0, userId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab member target id or user id is invalid.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "\(Self.memberCollectionPath(scope: scope, targetId: targetId))/\(userId)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func createVariable(
+        baseURL: String,
+        token: String,
+        draft: GitLabVariableDraft
+    ) async throws -> GitLabVariableSummary {
+        let draft = try Self.validatedVariableDraft(draft)
+        let variable: GitLabVariableSummary = try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(draft.projectId)/variables",
+            method: "POST",
+            token: token,
+            body: GitLabVariableRequest(draft: draft)
+        )
+        return variable.withProjectId(draft.projectId)
+    }
+
+    func updateVariable(
+        baseURL: String,
+        token: String,
+        draft: GitLabVariableDraft
+    ) async throws -> GitLabVariableSummary {
+        let draft = try Self.validatedVariableDraft(draft)
+        let variable: GitLabVariableSummary = try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(draft.projectId)/variables/\(Self.urlPathSegment(draft.trimmedKey))",
+            queryItems: [URLQueryItem(name: "filter[environment_scope]", value: draft.trimmedEnvironmentScope)],
+            method: "PUT",
+            token: token,
+            body: GitLabVariableRequest(draft: draft)
+        )
+        return variable.withProjectId(draft.projectId)
+    }
+
+    func deleteVariable(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        key: String,
+        environmentScope: String
+    ) async throws {
+        guard projectId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab variable project id is invalid.")
+        }
+        let key = try Self.validatedVariableKey(key)
+        let environmentScope = Self.validatedEnvironmentScope(environmentScope)
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/variables/\(Self.urlPathSegment(key))",
+            queryItems: [URLQueryItem(name: "filter[environment_scope]", value: environmentScope)],
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func createDeployKey(
+        baseURL: String,
+        token: String,
+        draft: GitLabDeployKeyDraft
+    ) async throws -> GitLabDeployKeySummary {
+        let draft = try Self.validatedDeployKeyDraft(draft)
+        let deployKey: GitLabDeployKeySummary = try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(draft.projectId)/deploy_keys",
+            method: "POST",
+            token: token,
+            body: GitLabDeployKeyRequest(draft: draft)
+        )
+        return deployKey.withProjectId(draft.projectId)
+    }
+
+    func deleteDeployKey(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        keyId: Int64
+    ) async throws {
+        guard projectId > 0, keyId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy key project id or key id is invalid.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/deploy_keys/\(keyId)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func createDeployToken(
+        baseURL: String,
+        token: String,
+        draft: GitLabDeployTokenDraft
+    ) async throws -> GitLabDeployTokenCreationResult {
+        let draft = try Self.validatedDeployTokenDraft(draft)
+        let response: GitLabDeployTokenCreateResponse = try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(draft.projectId)/deploy_tokens",
+            method: "POST",
+            token: token,
+            body: GitLabDeployTokenRequest(draft: draft)
+        )
+        guard let secret = response.token?.nilIfEmpty else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab did not return the one-time deploy token secret.")
+        }
+        return GitLabDeployTokenCreationResult(
+            deployToken: response.summary.withProjectId(draft.projectId),
+            token: secret
+        )
+    }
+
+    func deleteDeployToken(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        tokenId: Int64
+    ) async throws {
+        guard projectId > 0, tokenId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy token project id or token id is invalid.")
+        }
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/deploy_tokens/\(tokenId)",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func createTag(
+        baseURL: String,
+        token: String,
+        draft: GitLabTagDraft
+    ) async throws -> GitLabTagSummary {
+        let draft = try Self.validatedTagDraft(draft)
+        let tag: GitLabTagSummary = try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(draft.projectId)/repository/tags",
+            method: "POST",
+            token: token,
+            body: GitLabTagRequest(draft: draft)
+        )
+        return tag.withProjectId(draft.projectId)
+    }
+
+    func deleteTag(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        tagName: String
+    ) async throws {
+        guard projectId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab tag project id is invalid.")
+        }
+        let tagName = try Self.validatedTagName(tagName)
+        try await sendNoContent(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/repository/tags/\(Self.urlPathSegment(tagName))",
+            method: "DELETE",
+            token: token
+        )
+    }
+
+    func updateIssueState(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        issueIid: Int,
+        action: GitNativeIssueStateAction
+    ) async throws -> GitLabIssueSummary {
+        guard projectId > 0, issueIid > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab issue project id or iid is invalid.")
+        }
+        let body = GitLabUpdateStateRequest(stateEvent: action == .close ? "close" : "reopen")
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/issues/\(issueIid)",
+            method: "PUT",
+            token: token,
+            body: body
+        )
+    }
+
+    func updateMergeRequestState(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        mergeRequestIid: Int,
+        action: GitNativeIssueStateAction
+    ) async throws -> GitLabMergeRequestSummary {
+        guard projectId > 0, mergeRequestIid > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab merge request project id or iid is invalid.")
+        }
+        let body = GitLabUpdateStateRequest(stateEvent: action == .close ? "close" : "reopen")
+        return try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/merge_requests/\(mergeRequestIid)",
+            method: "PUT",
+            token: token,
+            body: body
+        )
+    }
+
+    func retryPipeline(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        pipelineId: Int64
+    ) async throws -> GitLabPipelineSummary {
+        try await performPipelineAction(
+            baseURL: baseURL,
+            token: token,
+            projectId: projectId,
+            pipelineId: pipelineId,
+            actionPath: "retry"
+        )
+    }
+
+    func cancelPipeline(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        pipelineId: Int64
+    ) async throws -> GitLabPipelineSummary {
+        try await performPipelineAction(
+            baseURL: baseURL,
+            token: token,
+            projectId: projectId,
+            pipelineId: pipelineId,
+            actionPath: "cancel"
+        )
+    }
+
+    private func performPipelineAction(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        pipelineId: Int64,
+        actionPath: String
+    ) async throws -> GitLabPipelineSummary {
+        guard projectId > 0, pipelineId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab pipeline project id or pipeline id is invalid.")
+        }
+        let pipeline: GitLabPipelineSummary = try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/pipelines/\(pipelineId)/\(actionPath)",
+            method: "POST",
+            token: token
+        )
+        if pipeline.projectId == 0 {
+            return GitLabPipelineSummary(
+                id: pipeline.id,
+                projectId: projectId,
+                ref: pipeline.ref,
+                sha: pipeline.sha,
+                status: pipeline.status,
+                webURL: pipeline.webURL,
+                updatedAt: pipeline.updatedAt
+            )
+        }
+        return pipeline
+    }
+
+    func retryJob(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        jobId: Int64
+    ) async throws -> GitLabJobSummary {
+        try await performJobAction(
+            baseURL: baseURL,
+            token: token,
+            projectId: projectId,
+            jobId: jobId,
+            actionPath: "retry"
+        )
+    }
+
+    func cancelJob(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        jobId: Int64
+    ) async throws -> GitLabJobSummary {
+        try await performJobAction(
+            baseURL: baseURL,
+            token: token,
+            projectId: projectId,
+            jobId: jobId,
+            actionPath: "cancel"
+        )
+    }
+
+    func playJob(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        jobId: Int64
+    ) async throws -> GitLabJobSummary {
+        try await performJobAction(
+            baseURL: baseURL,
+            token: token,
+            projectId: projectId,
+            jobId: jobId,
+            actionPath: "play"
+        )
+    }
+
+    func jobTrace(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        jobId: Int64
+    ) async throws -> GitLabJobTrace {
+        guard projectId > 0, jobId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab job project id or job id is invalid.")
+        }
+        let request = try Self.request(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/jobs/\(jobId)/trace",
+            token: token
+        )
+        let (data, response) = try await transport.data(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw GitServiceAPIError.httpStatus(response.statusCode, Self.errorBody(from: data))
+        }
+        let text = String(decoding: data, as: UTF8.self)
+        return GitLabJobTrace(
+            projectId: projectId,
+            jobId: jobId,
+            text: String(text.prefix(60_000)),
+            capturedAt: now()
+        )
+    }
+
+    private func performJobAction(
+        baseURL: String,
+        token: String,
+        projectId: Int64,
+        jobId: Int64,
+        actionPath: String
+    ) async throws -> GitLabJobSummary {
+        guard projectId > 0, jobId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab job project id or job id is invalid.")
+        }
+        let job: GitLabJobSummary = try await send(
+            baseURL: baseURL,
+            path: "/api/v4/projects/\(projectId)/jobs/\(jobId)/\(actionPath)",
+            method: "POST",
+            token: token
+        )
+        return job.withProjectId(projectId)
+    }
+
+    private func get<T: Decodable>(
+        baseURL: String,
+        path: String,
+        queryItems: [URLQueryItem],
+        token: String
+    ) async throws -> T {
+        let request = try Self.request(baseURL: baseURL, path: path, queryItems: queryItems, token: token)
+        return try await decode(request)
+    }
+
+    private func getOptional<T: Decodable & Sendable>(
+        baseURL: String,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        token: String,
+        label: String
+    ) async -> GitLabOptionalAPIResult<T> {
+        do {
+            let value: T = try await get(baseURL: baseURL, path: path, queryItems: queryItems, token: token)
+            return GitLabOptionalAPIResult(value: value, unavailableReason: nil)
+        } catch {
+            return GitLabOptionalAPIResult(value: nil, unavailableReason: "\(label): \(error.localizedDescription)")
+        }
+    }
+
+    private func getPlainStatusOptional(
+        baseURL: String,
+        path: String,
+        token: String,
+        label: String
+    ) async -> GitLabOptionalAPIResult<String> {
+        do {
+            let request = try Self.request(baseURL: baseURL, path: path, token: token)
+            let (data, response) = try await transport.data(for: request)
+            guard (200..<300).contains(response.statusCode) else {
+                return GitLabOptionalAPIResult(
+                    value: nil,
+                    unavailableReason: "\(label): HTTP \(response.statusCode)"
+                )
+            }
+            let body = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            return GitLabOptionalAPIResult(value: body.isEmpty || body == "[]" ? "healthy" : body, unavailableReason: nil)
+        } catch {
+            return GitLabOptionalAPIResult(value: nil, unavailableReason: "\(label): \(error.localizedDescription)")
+        }
+    }
+
+    private func loadAdminOverview(
+        baseURL: String,
+        token: String,
+        fallbackUserCount: Int,
+        fallbackProjectCount: Int,
+        fallbackGroupCount: Int,
+        fallbackIssueCount: Int,
+        fallbackMergeRequestCount: Int,
+        fallbackRunnerCount: Int
+    ) async -> GitLabAdminOverviewSummary {
+        async let metadataResult: GitLabOptionalAPIResult<GitLabMetadataResponse> = getOptional(
+            baseURL: baseURL,
+            path: "/api/v4/metadata",
+            token: token,
+            label: "Metadata API"
+        )
+        async let statisticsResult: GitLabOptionalAPIResult<GitLabApplicationStatisticsResponse> = getOptional(
+            baseURL: baseURL,
+            path: "/api/v4/application/statistics",
+            token: token,
+            label: "Application Statistics API"
+        )
+        async let licenseResult: GitLabOptionalAPIResult<GitLabLicenseResponse> = getOptional(
+            baseURL: baseURL,
+            path: "/api/v4/license",
+            token: token,
+            label: "License API"
+        )
+        async let healthResult = getPlainStatusOptional(baseURL: baseURL, path: "/-/health", token: token, label: "Health check")
+        async let readinessResult = getPlainStatusOptional(baseURL: baseURL, path: "/-/readiness", token: token, label: "Readiness check")
+        async let livenessResult = getPlainStatusOptional(baseURL: baseURL, path: "/-/liveness", token: token, label: "Liveness check")
+
+        let metadata = await metadataResult
+        let statistics = await statisticsResult
+        let license = await licenseResult
+        let health = await healthResult
+        let readiness = await readinessResult
+        let liveness = await livenessResult
+        let unavailableReasons = [
+            metadata.unavailableReason,
+            statistics.unavailableReason,
+            license.unavailableReason,
+            health.unavailableReason,
+            readiness.unavailableReason,
+            liveness.unavailableReason,
+        ].compactMap { $0 }
+
+        return GitLabAdminOverviewSummary(
+            version: metadata.value?.version,
+            revision: metadata.value?.revision,
+            enterprise: metadata.value?.enterprise,
+            licensePlan: license.value?.plan,
+            licenseStartsAt: license.value?.startsAt,
+            licenseExpiresAt: license.value?.expiresAt,
+            licenseExpired: license.value?.expired,
+            userLimit: license.value?.userLimit,
+            activeUserCount: statistics.value?.activeUsers ?? license.value?.activeUsers,
+            userCount: statistics.value?.users ?? fallbackUserCount,
+            projectCount: statistics.value?.projects ?? fallbackProjectCount,
+            groupCount: statistics.value?.groups ?? fallbackGroupCount,
+            issueCount: statistics.value?.issues ?? fallbackIssueCount,
+            mergeRequestCount: statistics.value?.mergeRequests ?? fallbackMergeRequestCount,
+            runnerCount: fallbackRunnerCount,
+            healthStatus: health.value,
+            readinessStatus: readiness.value,
+            livenessStatus: liveness.value,
+            unavailableReasons: unavailableReasons
+        )
+    }
+
+    private func send<T: Decodable>(
+        baseURL: String,
+        path: String,
+        method: String,
+        token: String
+    ) async throws -> T {
+        let request = try Self.request(baseURL: baseURL, path: path, method: method, token: token)
+        return try await decode(request)
+    }
+
+    private func send<T: Decodable, Body: Encodable>(
+        baseURL: String,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        method: String,
+        token: String,
+        body: Body
+    ) async throws -> T {
+        let request = try Self.request(
+            baseURL: baseURL,
+            path: path,
+            queryItems: queryItems,
+            method: method,
+            token: token,
+            body: try Self.encoder.encode(body)
+        )
+        return try await decode(request)
+    }
+
+    private func sendNoContent(
+        baseURL: String,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        method: String,
+        token: String
+    ) async throws {
+        let request = try Self.request(baseURL: baseURL, path: path, queryItems: queryItems, method: method, token: token)
+        let (data, response) = try await transport.data(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw GitServiceAPIError.httpStatus(response.statusCode, Self.errorBody(from: data))
+        }
+    }
+
+    private func decode<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, response) = try await transport.data(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw GitServiceAPIError.httpStatus(response.statusCode, Self.errorBody(from: data))
+        }
+        return try Self.decoder.decode(T.self, from: data)
+    }
+
+    static func request(
+        baseURL: String,
+        path: String,
+        queryItems: [URLQueryItem] = [],
+        method: String = "GET",
+        token: String,
+        body: Data? = nil
+    ) throws -> URLRequest {
+        let base = try normalizedBaseURL(baseURL)
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw GitServiceAPIError.invalidBaseURL
+        }
+        components.path = apiPath(basePath: components.path, endpointPath: path)
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else { throw GitServiceAPIError.invalidBaseURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue(try validatedToken(token), forHTTPHeaderField: "PRIVATE-TOKEN")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        return request
+    }
+
+    private static var encoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return encoder
+    }
+
+    private static var decoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    private struct GitLabOptionalAPIResult<Value: Sendable>: Sendable {
+        var value: Value?
+        var unavailableReason: String?
+    }
+
+    private struct GitLabMetadataResponse: Decodable, Sendable {
+        var version: String?
+        var revision: String?
+        var enterprise: Bool?
+    }
+
+    private struct GitLabApplicationStatisticsResponse: Decodable, Sendable {
+        var users: Int?
+        var activeUsers: Int?
+        var projects: Int?
+        var groups: Int?
+        var issues: Int?
+        var mergeRequests: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case users
+            case activeUsers = "active_users"
+            case projects
+            case groups
+            case issues
+            case mergeRequests = "merge_requests"
+        }
+    }
+
+    private struct GitLabLicenseResponse: Decodable, Sendable {
+        var plan: String?
+        var startsAt: String?
+        var expiresAt: String?
+        var expired: Bool?
+        var userLimit: Int?
+        var activeUsers: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case plan
+            case startsAt = "starts_at"
+            case expiresAt = "expires_at"
+            case expired
+            case userLimit = "user_limit"
+            case activeUsers = "active_users"
+        }
+    }
+
+    private struct GitLabCreateProjectRequest: Encodable {
+        var name: String
+        var description: String?
+        var visibility: String
+        var initializeWithReadme: Bool
+    }
+
+    private struct GitLabProjectUpdateRequest: Encodable {
+        var description: String?
+        var visibility: String
+        var defaultBranch: String?
+        var archived: Bool
+
+        init(draft: GitLabProjectSettingsDraft) {
+            description = draft.trimmedDescription.nilIfEmpty
+            visibility = draft.visibility
+            defaultBranch = draft.trimmedDefaultBranch.nilIfEmpty
+            archived = draft.archived
+        }
+    }
+
+    private struct GitLabGroupRequest: Encodable {
+        var name: String
+        var path: String
+        var description: String?
+        var visibility: String
+        var parentId: Int64?
+
+        init(draft: GitLabGroupDraft) {
+            name = draft.trimmedName
+            path = draft.trimmedPath
+            description = draft.trimmedDescription.nilIfEmpty
+            visibility = draft.visibility
+            parentId = draft.parentId > 0 ? draft.parentId : nil
+        }
+    }
+
+    private struct GitLabGroupUpdateRequest: Encodable {
+        var name: String
+        var path: String
+        var description: String?
+        var visibility: String
+
+        init(draft: GitLabGroupDraft) {
+            name = draft.trimmedName
+            path = draft.trimmedPath
+            description = draft.trimmedDescription.nilIfEmpty
+            visibility = draft.visibility
+        }
+    }
+
+    private struct GitLabUpdateStateRequest: Encodable {
+        var stateEvent: String
+    }
+
+    private struct GitLabMemberRequest: Encodable {
+        var userId: Int64
+        var accessLevel: Int
+        var expiresAt: String?
+
+        init(draft: GitLabMemberDraft) {
+            userId = draft.userId
+            accessLevel = draft.accessLevel
+            expiresAt = draft.trimmedExpiresAt.nilIfEmpty
+        }
+    }
+
+    private struct GitLabVariableRequest: Encodable {
+        var key: String
+        var value: String
+        var variableType: String
+        var environmentScope: String
+        var protected: Bool
+        var masked: Bool
+        var raw: Bool
+
+        init(draft: GitLabVariableDraft) {
+            key = draft.trimmedKey
+            value = draft.trimmedValue
+            variableType = draft.variableType
+            environmentScope = draft.trimmedEnvironmentScope
+            protected = draft.protected
+            masked = draft.masked
+            raw = draft.raw
+        }
+    }
+
+    private struct GitLabDeployKeyRequest: Encodable {
+        var title: String
+        var key: String
+        var canPush: Bool
+
+        init(draft: GitLabDeployKeyDraft) {
+            title = draft.trimmedTitle
+            key = draft.trimmedKey
+            canPush = draft.canPush
+        }
+    }
+
+    private struct GitLabDeployTokenRequest: Encodable {
+        var name: String
+        var username: String?
+        var expiresAt: String?
+        var scopes: [String]
+
+        init(draft: GitLabDeployTokenDraft) {
+            name = draft.trimmedName
+            username = draft.trimmedUsername.nilIfEmpty
+            expiresAt = draft.trimmedExpiresAt.nilIfEmpty
+            scopes = draft.selectedScopes
+        }
+    }
+
+    private struct GitLabDeployTokenCreateResponse: Decodable {
+        var id: Int64
+        var name: String
+        var username: String?
+        var token: String?
+        var scopes: [String]?
+        var revoked: Bool?
+        var expired: Bool?
+        var active: Bool?
+        var createdAt: Date?
+        var expiresAt: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case name
+            case username
+            case token
+            case scopes
+            case revoked
+            case expired
+            case active
+            case createdAt = "created_at"
+            case expiresAt = "expires_at"
+        }
+
+        var summary: GitLabDeployTokenSummary {
+            GitLabDeployTokenSummary(
+                id: id,
+                projectId: 0,
+                name: name,
+                username: username,
+                scopes: scopes ?? [],
+                revoked: revoked ?? false,
+                expired: expired ?? false,
+                active: active,
+                createdAt: createdAt,
+                expiresAt: expiresAt
+            )
+        }
+    }
+
+    private struct GitLabTagRequest: Encodable {
+        var tagName: String
+        var ref: String
+        var message: String?
+
+        init(draft: GitLabTagDraft) {
+            tagName = draft.trimmedName
+            ref = draft.trimmedRef
+            message = draft.trimmedMessage.nilIfEmpty
+        }
+    }
+
+    private static func normalizedBaseURL(_ value: String) throws -> URL {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: trimmed),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+              components.host?.nilIfEmpty != nil,
+              components.user == nil,
+              components.password == nil,
+              let url = components.url
+        else {
+            throw GitServiceAPIError.invalidBaseURL
+        }
+        return url
+    }
+
+    private static func validatedToken(_ value: String) throws -> String {
+        let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty, token.rangeOfCharacter(from: .newlines) == nil else {
+            throw GitServiceAPIError.invalidToken
+        }
+        return token
+    }
+
+    private static func validatedProjectDraft(_ draft: GitNativeRepositoryDraft) throws -> GitNativeRepositoryDraft {
+        guard isValidPathSegment(draft.trimmedName), draft.trimmedName.count <= 100 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("Project name must be 1-100 characters and cannot contain slashes.")
+        }
+        return GitNativeRepositoryDraft(
+            name: draft.trimmedName,
+            description: draft.trimmedDescription,
+            isPrivate: draft.isPrivate,
+            autoInitialize: draft.autoInitialize
+        )
+    }
+
+    private static func validatedProjectSettingsDraft(_ draft: GitLabProjectSettingsDraft) throws -> GitLabProjectSettingsDraft {
+        guard draft.projectId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab project id is invalid.")
+        }
+        guard !draft.trimmedPathWithNamespace.isEmpty else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab project path is required.")
+        }
+        guard draft.trimmedDescription.rangeOfCharacter(from: .newlines) == nil,
+              draft.trimmedDescription.count <= 2048
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab project description must be a single line up to 2048 characters.")
+        }
+        guard ["private", "internal", "public"].contains(draft.visibility) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab project visibility must be private, internal, or public.")
+        }
+        guard draft.trimmedDefaultBranch.rangeOfCharacter(from: .newlines) == nil,
+              draft.trimmedDefaultBranch.count <= 255
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab default branch must be a single line up to 255 characters.")
+        }
+        return GitLabProjectSettingsDraft(
+            projectId: draft.projectId,
+            pathWithNamespace: draft.trimmedPathWithNamespace,
+            description: draft.trimmedDescription,
+            visibility: draft.visibility,
+            defaultBranch: draft.trimmedDefaultBranch,
+            archived: draft.archived
+        )
+    }
+
+    private static func validatedGroupDraft(_ draft: GitLabGroupDraft, requireExistingGroup: Bool = false) throws -> GitLabGroupDraft {
+        if requireExistingGroup, draft.groupId <= 0 {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab group id is invalid.")
+        }
+        guard !draft.trimmedName.isEmpty,
+              draft.trimmedName.count <= 255,
+              draft.trimmedName.rangeOfCharacter(from: .newlines) == nil
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab group name must be a single line with 1-255 characters.")
+        }
+        guard isValidPathSegment(draft.trimmedPath), draft.trimmedPath.count <= 255 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab group path must be 1-255 characters and cannot contain slashes.")
+        }
+        guard draft.trimmedDescription.rangeOfCharacter(from: .newlines) == nil, draft.trimmedDescription.count <= 2048 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab group description must be a single line up to 2048 characters.")
+        }
+        guard ["private", "internal", "public"].contains(draft.visibility) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab group visibility must be private, internal, or public.")
+        }
+        guard draft.parentId >= 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab parent group id is invalid.")
+        }
+        return GitLabGroupDraft(
+            groupId: draft.groupId,
+            name: draft.trimmedName,
+            path: draft.trimmedPath,
+            description: draft.trimmedDescription,
+            visibility: draft.visibility,
+            parentId: draft.parentId
+        )
+    }
+
+    private static func validatedMemberDraft(_ draft: GitLabMemberDraft) throws -> GitLabMemberDraft {
+        guard draft.targetId > 0, draft.userId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab member target id and user id are required.")
+        }
+        guard [10, 20, 30, 40, 50].contains(draft.accessLevel) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab member access level must be Guest, Reporter, Developer, Maintainer, or Owner.")
+        }
+        if !draft.trimmedExpiresAt.isEmpty {
+            let pattern = #"^\d{4}-\d{2}-\d{2}$"#
+            guard draft.trimmedExpiresAt.range(of: pattern, options: .regularExpression) != nil else {
+                throw GitServiceAPIError.invalidRepositoryDraft("GitLab member expiration date must use YYYY-MM-DD.")
+            }
+        }
+        return GitLabMemberDraft(
+            scope: draft.scope,
+            targetId: draft.targetId,
+            userId: draft.userId,
+            accessLevel: draft.accessLevel,
+            expiresAt: draft.trimmedExpiresAt
+        )
+    }
+
+    private static func validatedVariableDraft(_ draft: GitLabVariableDraft) throws -> GitLabVariableDraft {
+        guard draft.projectId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab variable project id is invalid.")
+        }
+        let key = try validatedVariableKey(draft.trimmedKey)
+        guard !draft.trimmedValue.isEmpty else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab variable value cannot be empty.")
+        }
+        let environmentScope = validatedEnvironmentScope(draft.trimmedEnvironmentScope)
+        guard ["env_var", "file"].contains(draft.variableType) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab variable type must be env_var or file.")
+        }
+        return GitLabVariableDraft(
+            projectId: draft.projectId,
+            key: key,
+            value: draft.trimmedValue,
+            environmentScope: environmentScope,
+            variableType: draft.variableType,
+            protected: draft.protected,
+            masked: draft.masked,
+            raw: draft.raw
+        )
+    }
+
+    private static func validatedDeployKeyDraft(_ draft: GitLabDeployKeyDraft) throws -> GitLabDeployKeyDraft {
+        guard draft.projectId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy key project id is invalid.")
+        }
+        guard !draft.trimmedTitle.isEmpty, draft.trimmedTitle.count <= 100 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy key title must be 1-100 characters.")
+        }
+        guard draft.trimmedKey.hasPrefix("ssh-"), draft.trimmedKey.rangeOfCharacter(from: .newlines) == nil else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy key must be a single-line OpenSSH public key.")
+        }
+        return GitLabDeployKeyDraft(
+            projectId: draft.projectId,
+            title: draft.trimmedTitle,
+            key: draft.trimmedKey,
+            canPush: draft.canPush
+        )
+    }
+
+    private static func validatedDeployTokenDraft(_ draft: GitLabDeployTokenDraft) throws -> GitLabDeployTokenDraft {
+        guard draft.projectId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy token project id is invalid.")
+        }
+        guard !draft.trimmedName.isEmpty,
+              draft.trimmedName.count <= 100,
+              draft.trimmedName.rangeOfCharacter(from: .newlines) == nil
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy token name must be a single line with 1-100 characters.")
+        }
+        guard draft.trimmedUsername.count <= 255,
+              draft.trimmedUsername.rangeOfCharacter(from: .newlines) == nil
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy token username must be a single line up to 255 characters.")
+        }
+        if !draft.trimmedExpiresAt.isEmpty {
+            let pattern = #"^\d{4}-\d{2}-\d{2}$"#
+            guard draft.trimmedExpiresAt.range(of: pattern, options: .regularExpression) != nil else {
+                throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy token expiration date must use YYYY-MM-DD.")
+            }
+        }
+        guard !draft.selectedScopes.isEmpty else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy token must include at least one scope.")
+        }
+        let allowedScopes: Set<String> = [
+            "read_repository",
+            "read_registry",
+            "write_registry",
+            "read_package_registry",
+            "write_package_registry",
+        ]
+        guard draft.selectedScopes.allSatisfy({ allowedScopes.contains($0) }) else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab deploy token scope is invalid.")
+        }
+        return GitLabDeployTokenDraft(
+            projectId: draft.projectId,
+            name: draft.trimmedName,
+            username: draft.trimmedUsername,
+            expiresAt: draft.trimmedExpiresAt,
+            readRepository: draft.readRepository,
+            readRegistry: draft.readRegistry,
+            writeRegistry: draft.writeRegistry,
+            readPackageRegistry: draft.readPackageRegistry,
+            writePackageRegistry: draft.writePackageRegistry
+        )
+    }
+
+    private static func validatedTagDraft(_ draft: GitLabTagDraft) throws -> GitLabTagDraft {
+        guard draft.projectId > 0 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab tag project id is invalid.")
+        }
+        let name = try validatedTagName(draft.trimmedName)
+        let ref = draft.trimmedRef
+        guard !ref.isEmpty, ref.rangeOfCharacter(from: .newlines) == nil, ref.count <= 255 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab tag ref must be a branch, tag, or commit SHA.")
+        }
+        guard draft.trimmedMessage.rangeOfCharacter(from: .newlines) == nil, draft.trimmedMessage.count <= 255 else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab tag message must be a single line up to 255 characters.")
+        }
+        return GitLabTagDraft(
+            projectId: draft.projectId,
+            name: name,
+            ref: ref,
+            message: draft.trimmedMessage
+        )
+    }
+
+    private static func validatedTagName(_ value: String) throws -> String {
+        let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty,
+              name.count <= 255,
+              name.rangeOfCharacter(from: .newlines) == nil,
+              name.rangeOfCharacter(from: CharacterSet(charactersIn: " ?#")) == nil
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab tag name must be 1-255 characters without spaces, ?, or #.")
+        }
+        return name
+    }
+
+    private static func validatedVariableKey(_ value: String) throws -> String {
+        let key = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_"))
+        guard !key.isEmpty,
+              key.count <= 255,
+              key.unicodeScalars.allSatisfy({ allowed.contains($0) })
+        else {
+            throw GitServiceAPIError.invalidRepositoryDraft("GitLab variable key must be 1-255 letters, numbers, or underscores.")
+        }
+        return key
+    }
+
+    private static func validatedEnvironmentScope(_ value: String) -> String {
+        let scope = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return scope.isEmpty ? "*" : scope
+    }
+
+    private static func memberCollectionPath(scope: GitLabMemberScope, targetId: Int64) -> String {
+        switch scope {
+        case .project:
+            "/api/v4/projects/\(targetId)/members"
+        case .group:
+            "/api/v4/groups/\(targetId)/members"
+        }
+    }
+
+    private static func apiPath(basePath: String, endpointPath: String) -> String {
+        let base = basePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let endpoint = endpointPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return "/" + [base, endpoint].filter { !$0.isEmpty }.joined(separator: "/")
+    }
+
+    private static func isValidPathSegment(_ value: String) -> Bool {
+        !value.isEmpty && value.rangeOfCharacter(from: CharacterSet(charactersIn: "/?#")) == nil
+    }
+
+    private static func urlPathSegment(_ value: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private static func errorBody(from data: Data) -> String {
+        String(data: data, encoding: .utf8)
+            .map(DeploymentLogRedactor.redact)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+}
+
+private extension GitLabVariableSummary {
+    func withProjectId(_ projectId: Int64) -> GitLabVariableSummary {
+        GitLabVariableSummary(
+            projectId: self.projectId == 0 ? projectId : self.projectId,
+            key: key,
+            variableType: variableType,
+            environmentScope: environmentScope,
+            protected: protected,
+            masked: masked,
+            raw: raw,
+            description: description
+        )
+    }
+}
+
+private extension GitLabDeployKeySummary {
+    func withProjectId(_ projectId: Int64) -> GitLabDeployKeySummary {
+        GitLabDeployKeySummary(
+            id: id,
+            projectId: self.projectId == 0 ? projectId : self.projectId,
+            title: title,
+            key: key,
+            fingerprint: fingerprint,
+            canPush: canPush,
+            createdAt: createdAt,
+            expiresAt: expiresAt
+        )
+    }
+}
+
+private extension GitLabDeployTokenSummary {
+    func withProjectId(_ projectId: Int64) -> GitLabDeployTokenSummary {
+        GitLabDeployTokenSummary(
+            id: id,
+            projectId: self.projectId == 0 ? projectId : self.projectId,
+            name: name,
+            username: username,
+            scopes: scopes,
+            revoked: revoked,
+            expired: expired,
+            active: active,
+            createdAt: createdAt,
+            expiresAt: expiresAt
+        )
+    }
+}
+
+private extension GitLabBranchSummary {
+    func withProjectId(_ projectId: Int64) -> GitLabBranchSummary {
+        GitLabBranchSummary(
+            projectId: self.projectId == 0 ? projectId : self.projectId,
+            name: name,
+            merged: merged,
+            protected: protected,
+            isDefault: isDefault,
+            canPush: canPush,
+            webURL: webURL,
+            commitShortID: commitShortID,
+            commitTitle: commitTitle,
+            committedDate: committedDate
+        )
+    }
+}
+
+private extension GitLabJobSummary {
+    func withProjectId(_ projectId: Int64) -> GitLabJobSummary {
+        GitLabJobSummary(
+            id: id,
+            projectId: self.projectId == 0 ? projectId : self.projectId,
+            name: name,
+            stage: stage,
+            ref: ref,
+            status: status,
+            webURL: webURL,
+            duration: duration,
+            startedAt: startedAt,
+            finishedAt: finishedAt
+        )
+    }
+}
+
+private extension GitLabPackageSummary {
+    func withProjectId(_ projectId: Int64) -> GitLabPackageSummary {
+        GitLabPackageSummary(
+            id: id,
+            projectId: self.projectId == 0 ? projectId : self.projectId,
+            name: name,
+            version: version,
+            packageType: packageType,
+            status: status,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+}
+
+private extension GitLabTagSummary {
+    func withProjectId(_ projectId: Int64) -> GitLabTagSummary {
+        GitLabTagSummary(
+            projectId: self.projectId == 0 ? projectId : self.projectId,
+            name: name,
+            message: message,
+            target: target,
+            protected: protected,
+            commitShortID: commitShortID,
+            commitTitle: commitTitle,
+            createdAt: createdAt
+        )
+    }
+}
+
+private extension GitLabMemberSummary {
+    func withScope(_ scope: GitLabMemberScope, targetId: Int64) -> GitLabMemberSummary {
+        GitLabMemberSummary(
+            scope: scope,
+            targetId: targetId,
+            userId: userId,
+            username: username,
+            name: name,
+            state: state,
+            webURL: webURL,
+            accessLevel: accessLevel,
+            expiresAt: expiresAt,
+            createdAt: createdAt
+        )
+    }
+}
+
 enum RegistryKind: String, Equatable, Sendable {
     case verdaccio
 }
@@ -2642,6 +5395,34 @@ struct VerdaccioPackageSummary: Identifiable, Equatable, Sendable {
     var modifiedAt: Date?
 }
 
+struct VerdaccioPackageVersionDetail: Identifiable, Equatable, Sendable {
+    var id: String { version }
+    var version: String
+    var description: String?
+    var dependencies: [String: String]
+    var distTarball: String?
+    var sizeBytes: Int64?
+    var publishedAt: Date?
+}
+
+struct VerdaccioPackageDetail: Identifiable, Equatable, Sendable {
+    var id: String { name }
+    var name: String
+    var latestVersion: String?
+    var distTags: [String: String]
+    var versions: [VerdaccioPackageVersionDetail]
+    var readme: String?
+    var installCommand: String
+    var capturedAt: Date
+}
+
+struct VerdaccioPackageDeletionResult: Equatable, Sendable {
+    var packageName: String
+    var backupPath: String
+    var healthCheckOutput: String
+    var capturedAt: Date
+}
+
 struct VerdaccioRegistryBackupResult: Equatable, Sendable {
     var backupPath: String
     var sizeBytes: Int64?
@@ -2958,6 +5739,98 @@ enum VerdaccioConfigurationBuilder {
     }
 }
 
+enum NginxReverseProxyConfigurationError: LocalizedError, Equatable {
+    case invalidServerName
+    case invalidUpstreamURL
+    case invalidBodySize
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidServerName:
+            "Nginx server_name must be a domain, wildcard domain, IP address, or underscore without unsafe characters."
+        case .invalidUpstreamURL:
+            "Reverse proxy upstream must be an http(s) URL without credentials, query, fragment, or unsafe characters."
+        case .invalidBodySize:
+            "Nginx client_max_body_size must be a positive number followed by k, m, or g."
+        }
+    }
+}
+
+enum NginxReverseProxyConfigurationBuilder {
+    static func config(for draft: NginxReverseProxyDraft) throws -> String {
+        try validate(draft)
+        let websocketLines = draft.enableWebSocket ? """
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+        """ : """
+                proxy_set_header Connection "";
+        """
+        return """
+        # Generated by HHC Server Manager.
+        # HTTPS is intentionally not managed here. Add TLS certificates in your existing Nginx/ACME workflow.
+        server {
+            listen 80;
+            server_name \(draft.serverName.trimmed);
+
+            client_max_body_size \(draft.clientMaxBodySize.trimmed.lowercased());
+
+            location / {
+                proxy_pass \(draft.upstreamURL.trimmed);
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+        \(websocketLines)
+            }
+        }
+        """
+    }
+
+    static func configFile(for draft: NginxReverseProxyDraft) throws -> NginxConfigFile {
+        let path = try NginxConfigManager.validatedConfigPath(draft.configPath)
+        try validate(draft)
+        return NginxConfigFile(path: path, size: nil, modifiedAt: nil)
+    }
+
+    static func validate(_ draft: NginxReverseProxyDraft) throws {
+        let serverName = draft.serverName.trimmed
+        guard serverName.range(
+            of: #"^(_|(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*|([0-9]{1,3}\.){3}[0-9]{1,3})$"#,
+            options: .regularExpression
+        ) != nil,
+            !serverName.contains("\n"),
+            !serverName.contains("\r"),
+            !serverName.contains("\0")
+        else {
+            throw NginxReverseProxyConfigurationError.invalidServerName
+        }
+
+        let upstreamURL = draft.upstreamURL.trimmed
+        guard !upstreamURL.isEmpty,
+              !upstreamURL.contains("\n"),
+              !upstreamURL.contains("\r"),
+              !upstreamURL.contains("\0"),
+              let components = URLComponents(string: upstreamURL),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              components.host?.nilIfEmpty != nil,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil
+        else {
+            throw NginxReverseProxyConfigurationError.invalidUpstreamURL
+        }
+
+        let bodySize = draft.clientMaxBodySize.trimmed.lowercased()
+        guard bodySize.range(of: #"^[1-9][0-9]*[kmg]$"#, options: .regularExpression) != nil else {
+            throw NginxReverseProxyConfigurationError.invalidBodySize
+        }
+        _ = try NginxConfigManager.validatedConfigPath(draft.configPath)
+    }
+}
+
 final class VerdaccioInstaller: @unchecked Sendable {
     func install(
         draft: VerdaccioInstallDraft,
@@ -3246,6 +6119,66 @@ final class VerdaccioManager: @unchecked Sendable {
             throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not list Verdaccio packages."))
         }
         return Self.parsePackageList(result.stdout)
+    }
+
+    func packageDetail(
+        draft: VerdaccioInstallDraft,
+        packageName: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioPackageDetail {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let packageName = try Self.validatedPackageName(packageName)
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(Self.packageDetailCommand(for: draft, packageName: packageName), profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not read Verdaccio package detail."))
+        }
+        let encoded = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = Data(base64Encoded: encoded) else {
+            throw SSHClientError.processFailed("Could not decode Verdaccio package metadata.")
+        }
+        return try Self.parsePackageDetail(
+            data,
+            fallbackName: packageName,
+            registryURL: Self.registryURL(for: draft),
+            capturedAt: now()
+        )
+    }
+
+    func deletePackage(
+        draft: VerdaccioInstallDraft,
+        packageName: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> VerdaccioPackageDeletionResult {
+        try VerdaccioConfigurationBuilder.validate(draft)
+        let packageName = try Self.validatedPackageName(packageName)
+        let backupPath = "\(draft.installPath.trimmed)/backups/verdaccio-package-\(Self.packageBackupName(packageName))-\(Self.timestamp(for: now())).tar.gz"
+        let result = try await CloudProviderRequestRunner.withTimeout(30) {
+            try await sshClient.execute(
+                Self.deletePackageCommand(for: draft, packageName: packageName, backupPath: backupPath),
+                profile: profile
+            )
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Could not delete Verdaccio package."))
+        }
+
+        let healthResult = try await CloudProviderRequestRunner.withTimeout(45) {
+            try await sshClient.execute(Self.healthCheckCommand(url: Self.healthCheckURL(for: draft)), profile: profile)
+        }
+        guard healthResult.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: healthResult, fallback: "Verdaccio health check failed after deleting package. Package backup: \(backupPath)."))
+        }
+
+        return VerdaccioPackageDeletionResult(
+            packageName: packageName,
+            backupPath: backupPath,
+            healthCheckOutput: DeploymentLogRedactor.redact(healthResult.stdout.trimmed.nilIfEmpty ?? "ok"),
+            capturedAt: now()
+        )
     }
 
     func runNpmSmokeTest(
@@ -3645,6 +6578,50 @@ final class VerdaccioManager: @unchecked Sendable {
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
+    static func parsePackageDetail(
+        _ data: Data,
+        fallbackName: String,
+        registryURL: String,
+        capturedAt: Date = Date()
+    ) throws -> VerdaccioPackageDetail {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw SSHClientError.processFailed("Verdaccio package metadata is not a JSON object.")
+        }
+        let name = (root["name"] as? String)?.nilIfEmpty ?? fallbackName
+        let distTags = (root["dist-tags"] as? [String: String]) ?? [:]
+        let timeMap = root["time"] as? [String: String] ?? [:]
+        let attachments = root["_attachments"] as? [String: Any] ?? [:]
+        let versionObjects = root["versions"] as? [String: Any] ?? [:]
+        let versions = versionObjects.compactMap { version, rawValue -> VerdaccioPackageVersionDetail? in
+            guard let object = rawValue as? [String: Any] else { return nil }
+            let dist = object["dist"] as? [String: Any]
+            let attachment = attachmentObject(in: attachments, packageName: name, version: version)
+            return VerdaccioPackageVersionDetail(
+                version: version,
+                description: object["description"] as? String,
+                dependencies: (object["dependencies"] as? [String: String]) ?? [:],
+                distTarball: dist?["tarball"] as? String,
+                sizeBytes: (attachment?["length"] as? NSNumber)?.int64Value,
+                publishedAt: parsePackageDate(timeMap[version])
+            )
+        }
+        .sorted { lhs, rhs in
+            rhs.version.localizedStandardCompare(lhs.version) == .orderedAscending
+        }
+
+        let latestVersion = distTags["latest"] ?? versions.first?.version
+        let readme = ((root["readme"] as? String)?.nilIfEmpty).map { String($0.prefix(16_000)) }
+        return VerdaccioPackageDetail(
+            name: name,
+            latestVersion: latestVersion,
+            distTags: distTags,
+            versions: versions,
+            readme: readme,
+            installCommand: installCommand(packageName: name, version: latestVersion, registryURL: registryURL),
+            capturedAt: capturedAt
+        )
+    }
+
     static func htpasswdPath(for draft: VerdaccioInstallDraft) -> String {
         "\(draft.installPath.trimmed)/htpasswd"
     }
@@ -3738,6 +6715,37 @@ final class VerdaccioManager: @unchecked Sendable {
           modified=$(stat -c %Y "$package_dir" 2>/dev/null || echo 0); \
           printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$rel" "$versions" "$latest" "$size" "$modified"; \
         done
+        """
+    }
+
+    static func packageDetailCommand(for draft: VerdaccioInstallDraft, packageName: String) throws -> String {
+        let packageName = try validatedPackageName(packageName)
+        let dataPath = shellQuote(draft.dataPath.trimmed)
+        let relativePath = shellQuote(packageMetadataRelativePath(packageName))
+        return """
+        data_path=\(dataPath); relative_path=\(relativePath); package_json="$data_path/$relative_path"; \
+        test -f "$package_json" || { echo "Verdaccio package metadata not found: $relative_path" >&2; exit 44; }; \
+        base64 < "$package_json" | tr -d '\\n'
+        """
+    }
+
+    static func deletePackageCommand(for draft: VerdaccioInstallDraft, packageName: String, backupPath: String) throws -> String {
+        let packageName = try validatedPackageName(packageName)
+        let dataPath = shellQuote(draft.dataPath.trimmed)
+        let relativePath = shellQuote(packageName)
+        let backupPath = shellQuote(backupPath)
+        let service = shellQuote("\(draft.serviceName.trimmed).service")
+        return """
+        set -e; \
+        data_path=\(dataPath); relative_path=\(relativePath); backup_path=\(backupPath); service=\(service); \
+        package_dir="$data_path/$relative_path"; \
+        test -d "$package_dir" || { echo "Verdaccio package storage not found: $relative_path" >&2; exit 44; }; \
+        test -f "$package_dir/package.json" || { echo "Verdaccio package metadata not found: $relative_path/package.json" >&2; exit 44; }; \
+        backup_dir=$(dirname -- "$backup_path"); install -d -m 0750 "$backup_dir"; \
+        tar -czf "$backup_path" -C "$data_path" "$relative_path"; \
+        rm -rf -- "$package_dir"; \
+        systemctl restart "$service"; \
+        printf '__HHC_VERDACCIO_PACKAGE_BACKUP__%s\\n' "$backup_path"
         """
     }
 
@@ -3980,6 +6988,59 @@ final class VerdaccioManager: @unchecked Sendable {
         return "http://\(host):\(draft.listenPort)"
     }
 
+    private static func installCommand(packageName: String, version: String?, registryURL: String) -> String {
+        let packageReference = version?.nilIfEmpty.map { "\(packageName)@\($0)" } ?? packageName
+        return "npm install \(packageReference) --registry \(registryURL)"
+    }
+
+    private static func packageMetadataRelativePath(_ packageName: String) -> String {
+        "\(packageName)/package.json"
+    }
+
+    private static func packageBackupName(_ packageName: String) -> String {
+        packageName
+            .replacingOccurrences(of: "@", with: "")
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+            .replacingOccurrences(of: "_", with: "-")
+    }
+
+    private static func validatedPackageName(_ value: String) throws -> String {
+        let packageName = value.trimmed
+        let unscoped = #"^[a-z0-9][a-z0-9._~-]{0,213}$"#
+        let scoped = #"^@[a-z0-9][a-z0-9._~-]{0,213}/[a-z0-9][a-z0-9._~-]{0,213}$"#
+        guard packageName.range(of: unscoped, options: .regularExpression) != nil ||
+            packageName.range(of: scoped, options: .regularExpression) != nil
+        else {
+            throw RegistryConfigurationError.invalidRegistryUsername
+        }
+        return packageName
+    }
+
+    private static func parsePackageDate(_ value: String?) -> Date? {
+        guard let value = value?.nilIfEmpty else { return nil }
+        if let date = ISO8601DateFormatter().date(from: value) {
+            return date
+        }
+        if let seconds = TimeInterval(value) {
+            return Date(timeIntervalSince1970: seconds)
+        }
+        return nil
+    }
+
+    private static func attachmentObject(
+        in attachments: [String: Any],
+        packageName: String,
+        version: String
+    ) -> [String: Any]? {
+        if let exact = attachments["\(packageName)-\(version).tgz"] as? [String: Any] {
+            return exact
+        }
+        return attachments.first { key, _ in
+            key.hasSuffix("-\(version).tgz")
+        }?.value as? [String: Any]
+    }
+
     private static func parseMarkers(_ output: String) -> [String: String] {
         var markers: [String: String] = [:]
         for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -4145,6 +7206,7 @@ final class DashboardService: @unchecked Sendable {
         async let cpu = runOptionalDashboardCommand("CPU Cores", command: "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0", profile: profile, sshClient: sshClient)
         async let network = runOptionalDashboardCommand("Network", command: "cat /proc/net/dev 2>/dev/null || true", profile: profile, sshClient: sshClient)
         async let processes = runOptionalDashboardCommand("Processes", command: "ps -eo stat= 2>/dev/null | awk '{total++; state=substr($1,1,1); counts[state]++} END {printf \"total=%d running=%d sleeping=%d stopped=%d zombie=%d\\n\", total, counts[\"R\"], counts[\"S\"] + counts[\"I\"], counts[\"T\"], counts[\"Z\"]}'", profile: profile, sshClient: sshClient)
+        async let uptime = runOptionalDashboardCommand("Uptime", command: "uptime -p 2>/dev/null || awk '{days=int($1/86400); hours=int(($1%86400)/3600); mins=int(($1%3600)/60); printf \"%dd %dh %dm\\n\", days, hours, mins}' /proc/uptime 2>/dev/null || true", profile: profile, sshClient: sshClient)
 
         let osReleaseResult = try await osRelease
         let os = Self.parseOSRelease(osReleaseResult.stdout)
@@ -4159,6 +7221,7 @@ final class DashboardService: @unchecked Sendable {
             cpu,
             network,
             processes,
+            uptime,
         ]
         var warnings = optionalResults.compactMap(\.warning)
 
@@ -4189,8 +7252,17 @@ final class DashboardService: @unchecked Sendable {
         if let networkSummary = Self.parseNetworkTotals(optionalResults[4].stdout) {
             metrics.append(DashboardMetric(name: "Network", value: networkSummary, unit: "rx / tx", source: "SSH"))
         }
+        if let primaryInterface = Self.parsePrimaryNetworkInterface(optionalResults[4].stdout) {
+            metrics.append(DashboardMetric(name: "Active Network Interface", value: primaryInterface, unit: "rx / tx", source: "SSH"))
+        }
+        if let networkInterfaces = Self.parseNetworkInterfaceBreakdown(optionalResults[4].stdout) {
+            metrics.append(DashboardMetric(name: "Network Interfaces", value: networkInterfaces, unit: "rx / tx", source: "SSH"))
+        }
         if let processSummary = Self.parseProcessSummary(optionalResults[5].stdout) {
             metrics.append(DashboardMetric(name: "Processes", value: processSummary, unit: "total / running / zombie", source: "SSH"))
+        }
+        if let uptime = Self.parseUptime(optionalResults[6].stdout) {
+            metrics.append(DashboardMetric(name: "Uptime", value: uptime, unit: nil, source: "SSH"))
         }
         if let cloudMetricService {
             do {
@@ -4208,9 +7280,15 @@ final class DashboardService: @unchecked Sendable {
         profile: ServerProfile,
         sshClient: SSHClient
     ) async throws -> CommandResult {
-        try await CloudProviderRequestRunner.withTimeout(8) {
+        let result = try await CloudProviderRequestRunner.withTimeout(8) {
             try await sshClient.execute(command, profile: profile)
         }
+        guard result.exitCode == 0 else {
+            let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            let message = stderr.isEmpty ? "SSH command exited with \(result.exitCode)." : stderr
+            throw DashboardCommandError(message: message)
+        }
+        return result
     }
 
     private func runOptionalDashboardCommand(
@@ -4343,25 +7421,61 @@ final class DashboardService: @unchecked Sendable {
         return value
     }
 
+    static func parseUptime(_ text: String) -> String? {
+        let value = text.trimmed
+        guard !value.isEmpty else { return nil }
+        if value.hasPrefix("up ") {
+            return String(value.dropFirst(3)).trimmed.nilIfEmpty
+        }
+        return value
+    }
+
     static func parseNetworkTotals(_ text: String) -> String? {
-        var receivedBytes: Double = 0
-        var transmittedBytes: Double = 0
-        for line in text.split(separator: "\n").map(String.init) {
-            guard line.contains(":") else { continue }
+        let interfaces = Self.parseNetworkInterfaces(text)
+        let receivedBytes = interfaces.reduce(0) { $0 + $1.receivedBytes }
+        let transmittedBytes = interfaces.reduce(0) { $0 + $1.transmittedBytes }
+        guard receivedBytes > 0 || transmittedBytes > 0 else { return nil }
+        return "\(Self.formatBytes(receivedBytes)) / \(Self.formatBytes(transmittedBytes))"
+    }
+
+    static func parsePrimaryNetworkInterface(_ text: String) -> String? {
+        guard let primary = Self.parseNetworkInterfaces(text).max(by: {
+            ($0.receivedBytes + $0.transmittedBytes) < ($1.receivedBytes + $1.transmittedBytes)
+        }) else { return nil }
+        return "\(primary.name) \(Self.formatBytes(primary.receivedBytes)) / \(Self.formatBytes(primary.transmittedBytes))"
+    }
+
+    static func parseNetworkInterfaceBreakdown(_ text: String) -> String? {
+        let interfaces = Self.parseNetworkInterfaces(text)
+            .sorted {
+                ($0.receivedBytes + $0.transmittedBytes) > ($1.receivedBytes + $1.transmittedBytes)
+            }
+        guard !interfaces.isEmpty else { return nil }
+        return interfaces.map {
+            "\($0.name) \(Self.formatBytes($0.receivedBytes)) / \(Self.formatBytes($0.transmittedBytes))"
+        }
+        .joined(separator: "; ")
+    }
+
+    private static func parseNetworkInterfaces(_ text: String) -> [DashboardNetworkInterface] {
+        text.split(separator: "\n").compactMap { rawLine in
+            let line = String(rawLine)
+            guard line.contains(":") else { return nil }
             let interfaceAndData = line.split(separator: ":", maxSplits: 1).map(String.init)
-            guard interfaceAndData.count == 2 else { continue }
+            guard interfaceAndData.count == 2 else { return nil }
             let interface = interfaceAndData[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            guard interface != "lo" else { continue }
+            guard !interface.isEmpty, interface != "lo" else { return nil }
             let columns = interfaceAndData[1].split(separator: " ").map(String.init)
             guard columns.count >= 16,
                   let received = Double(columns[0]),
                   let transmitted = Double(columns[8])
-            else { continue }
-            receivedBytes += received
-            transmittedBytes += transmitted
+            else { return nil }
+            return DashboardNetworkInterface(
+                name: interface,
+                receivedBytes: received,
+                transmittedBytes: transmitted
+            )
         }
-        guard receivedBytes > 0 || transmittedBytes > 0 else { return nil }
-        return "\(Self.formatBytes(receivedBytes)) / \(Self.formatBytes(transmittedBytes))"
     }
 
     static func parseProcessSummary(_ text: String) -> String? {
@@ -4404,6 +7518,20 @@ final class DashboardService: @unchecked Sendable {
 private struct DashboardCommandOutput: Sendable {
     var stdout: String
     var warning: DashboardWarning?
+}
+
+private struct DashboardNetworkInterface: Sendable {
+    var name: String
+    var receivedBytes: Double
+    var transmittedBytes: Double
+}
+
+private struct DashboardCommandError: LocalizedError {
+    var message: String
+
+    var errorDescription: String? {
+        message
+    }
 }
 
 final class CloudMetricService: @unchecked Sendable {
@@ -4768,6 +7896,253 @@ final class SystemdServiceManager: @unchecked Sendable {
     }
 }
 
+final class DatabaseServiceManager: @unchecked Sendable {
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func loadSnapshot(profile: ServerProfile, sshClient: SSHClient) async throws -> DatabaseServiceSnapshot {
+        let result = try await CloudProviderRequestRunner.withTimeout(18) {
+            try await sshClient.execute(Self.discoveryCommand, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not discover database services.")
+        }
+        return DatabaseServiceSnapshot(
+            services: Self.parseSnapshot(result.stdout),
+            capturedAt: now()
+        )
+    }
+
+    func perform(
+        _ action: SystemdUnitAction,
+        service: DatabaseService,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws {
+        guard let unitName = service.unitName?.nilIfEmpty else {
+            throw SSHClientError.processFailed("No systemd unit was detected for \(service.kind.displayName).")
+        }
+        let unit = try SystemdServiceManager.validatedUnitName(unitName)
+        let command = "systemctl \(action.rawValue) -- \(Self.shellQuote(unit))"
+        let result = try await CloudProviderRequestRunner.withTimeout(24) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not \(action.rawValue) \(unit).")
+        }
+    }
+
+    func createBackup(
+        service: DatabaseService,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> DatabaseBackupResult {
+        guard service.isInstalled else {
+            throw SSHClientError.processFailed("\(service.kind.displayName) is not installed or could not be detected.")
+        }
+        let timestamp = Self.timestamp(for: now())
+        let plan = Self.backupRestorePlan(for: service, timestamp: timestamp)
+        let result = try await CloudProviderRequestRunner.withTimeout(180) {
+            try await sshClient.execute(plan.backupCommand, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(
+                Self.redactedOutput(from: result, fallback: "Could not create \(service.kind.displayName) backup.")
+            )
+        }
+        return DatabaseBackupResult(
+            serviceKind: service.kind,
+            backupPath: plan.backupPath,
+            output: Self.redactedOutput(from: result, fallback: "Backup command completed."),
+            capturedAt: now()
+        )
+    }
+
+    static func parseSnapshot(_ text: String) -> [DatabaseService] {
+        let parsed = text.split(separator: "\n").compactMap { line -> DatabaseService? in
+            guard line.hasPrefix("__HHC_DB_ROW__\t") else { return nil }
+            let raw = String(line.dropFirst("__HHC_DB_ROW__\t".count))
+            let parts = raw.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 9,
+                  let kind = DatabaseServiceKind(rawValue: parts[0])
+            else { return nil }
+            return DatabaseService(
+                kind: kind,
+                unitName: parts[1].nilIfEmpty,
+                activeState: parts[2].nilIfEmpty ?? "unknown",
+                subState: parts[3],
+                isInstalled: parts[4] == "yes",
+                version: parts[5].nilIfEmpty,
+                listenEndpoints: parts[6].split(separator: ",").map(String.init).filter { !$0.isEmpty },
+                dataPath: parts[7].nilIfEmpty,
+                recentLog: Self.decodeBase64(parts[8]).nilIfEmpty
+            )
+        }
+        let byKind = Dictionary(uniqueKeysWithValues: parsed.map { ($0.kind, $0) })
+        return DatabaseServiceKind.allCases.map { kind in
+            byKind[kind] ?? DatabaseService(
+                kind: kind,
+                unitName: nil,
+                activeState: "unknown",
+                subState: "",
+                isInstalled: false,
+                version: nil,
+                listenEndpoints: [],
+                dataPath: nil,
+                recentLog: nil
+            )
+        }
+    }
+
+    static func backupRestorePlan(
+        for service: DatabaseService,
+        timestamp: String = "YYYYMMDD-HHMMSS"
+    ) -> DatabaseBackupRestorePlan {
+        let backupDirectory = "~/hhc-db-backups"
+        let backupPath: String
+        let backupCommand: String
+        let restoreCommand: String
+        let prerequisites: [String]
+        let warnings: [String]
+
+        switch service.kind {
+        case .mysql:
+            backupPath = "\(backupDirectory)/mysql-\(timestamp).sql.gz"
+            backupCommand = "mkdir -p \(backupDirectory) && mysqldump --single-transaction --routines --events --all-databases | gzip > \(backupPath)"
+            restoreCommand = "gunzip -c \(backupPath) | mysql"
+            prerequisites = [
+                "需要 mysql/mysqldump 命令可用。",
+                "需要通过 ~/.my.cnf、环境变量或交互输入提供数据库账号权限。"
+            ]
+            warnings = [
+                "恢复会覆盖目标库中的同名对象，执行前必须确认备份文件来源和目标服务器。",
+                "大库备份前先确认磁盘剩余空间和业务低峰窗口。"
+            ]
+        case .mariadb:
+            backupPath = "\(backupDirectory)/mariadb-\(timestamp).sql.gz"
+            backupCommand = "mkdir -p \(backupDirectory) && (mariadb-dump --single-transaction --routines --events --all-databases || mysqldump --single-transaction --routines --events --all-databases) | gzip > \(backupPath)"
+            restoreCommand = "gunzip -c \(backupPath) | mariadb"
+            prerequisites = [
+                "需要 mariadb-dump 或 mysqldump 命令可用。",
+                "需要通过 ~/.my.cnf、环境变量或交互输入提供数据库账号权限。"
+            ]
+            warnings = [
+                "恢复会覆盖目标库中的同名对象，执行前必须确认备份文件来源和目标服务器。",
+                "MariaDB 与 MySQL 版本差异可能导致恢复兼容性问题。"
+            ]
+        case .postgresql:
+            backupPath = "\(backupDirectory)/postgresql-\(timestamp).sql.gz"
+            backupCommand = "mkdir -p \(backupDirectory) && sudo -u postgres pg_dumpall | gzip > \(backupPath)"
+            restoreCommand = "gunzip -c \(backupPath) | sudo -u postgres psql"
+            prerequisites = [
+                "需要 pg_dumpall/psql 命令可用。",
+                "当前 SSH 用户需要具备 sudo -u postgres 执行权限。"
+            ]
+            warnings = [
+                "pg_dumpall 会导出全实例对象，恢复前应确认角色、权限和数据库名不会冲突。",
+                "恢复应优先在测试环境验证，再用于生产实例。"
+            ]
+        case .redis:
+            let unitName = service.unitName ?? "redis.service"
+            let dataDirectory = service.dataPath ?? "/var/lib/redis"
+            let dumpPath = "\(dataDirectory)/dump.rdb"
+            backupPath = "\(backupDirectory)/redis-\(timestamp).rdb"
+            backupCommand = "mkdir -p \(backupDirectory) && redis-cli BGSAVE && sleep 2 && sudo cp \(dumpPath) \(backupPath)"
+            restoreCommand = "sudo systemctl stop \(unitName) && sudo cp \(backupPath) \(dumpPath) && sudo chown redis:redis \(dumpPath) && sudo systemctl start \(unitName)"
+            prerequisites = [
+                "需要 redis-cli 命令可用。",
+                "当前 SSH 用户需要具备复制 RDB 文件和控制 Redis 服务的 sudo 权限。"
+            ]
+            warnings = [
+                "Redis RDB 恢复需要停服并替换 dump.rdb，执行前必须确认业务可接受中断。",
+                "Redis 配置如果使用非默认 dir/dbfilename，需要先核对实际持久化路径。"
+            ]
+        }
+
+        return DatabaseBackupRestorePlan(
+            serviceKind: service.kind,
+            backupPath: backupPath,
+            backupCommand: backupCommand,
+            restoreCommand: restoreCommand,
+            prerequisites: prerequisites,
+            warnings: warnings
+        )
+    }
+
+    private static func decodeBase64(_ encoded: String) -> String {
+        guard let data = Data(base64Encoded: encoded),
+              let text = String(data: data, encoding: .utf8)
+        else { return "" }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func timestamp(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: date)
+    }
+
+    private static func redactedOutput(from result: CommandResult, fallback: String) -> String {
+        let output = [result.stdout, result.stderr]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return output.nilIfEmpty ?? fallback
+    }
+
+    private static let discoveryCommand = #"""
+    hhc_emit_db() {
+      kind="$1"; shift
+      units="$1"; shift
+      version_cmd="$1"; shift
+      port_pattern="$1"; shift
+      data_paths="$1"; shift
+      unit=""
+      active="unknown"
+      sub="unknown"
+      if command -v systemctl >/dev/null 2>&1; then
+        for candidate in $units; do
+          if systemctl status "$candidate" >/dev/null 2>&1 || systemctl list-unit-files "$candidate" --type=service --no-legend 2>/dev/null | grep -q .; then
+            unit="$candidate"
+            active=$(systemctl show "$candidate" -p ActiveState --value 2>/dev/null || printf unknown)
+            sub=$(systemctl show "$candidate" -p SubState --value 2>/dev/null || printf unknown)
+            break
+          fi
+        done
+      fi
+      version=$(sh -c "$version_cmd" 2>/dev/null | head -n 1 | tr '\t' ' ' | tr -d '\r' || true)
+      ports=$(ss -ltnp 2>/dev/null | grep -Ei "$port_pattern" | awk '{print $4}' | paste -sd, - 2>/dev/null || true)
+      if [ -z "$ports" ]; then
+        ports=$(ss -ltn 2>/dev/null | grep -E "$port_pattern" | awk '{print $4}' | paste -sd, - 2>/dev/null || true)
+      fi
+      data_path=""
+      for candidate_path in $data_paths; do
+        if [ -d "$candidate_path" ]; then data_path="$candidate_path"; break; fi
+      done
+      installed="no"
+      if [ -n "$unit" ] || [ -n "$version" ]; then installed="yes"; fi
+      log_b64=""
+      if [ -n "$unit" ] && command -v journalctl >/dev/null 2>&1; then
+        log_b64=$(journalctl -u "$unit" -n 30 --no-pager --output=short-iso 2>/dev/null | base64 | tr -d '\n' || true)
+      fi
+      printf '__HHC_DB_ROW__\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$kind" "$unit" "$active" "$sub" "$installed" "$version" "$ports" "$data_path" "$log_b64"
+    }
+    hhc_emit_db mysql "mysqld.service mysql.service" "mysql --version || mysqld --version" "mysqld|mysql|:3306\\b" "/var/lib/mysql /var/db/mysql"
+    hhc_emit_db mariadb "mariadb.service mariadb@.service" "mariadb --version || mariadbd --version || mysql --version" "mariadbd|mariadb|:3306\\b" "/var/lib/mysql /var/lib/mariadb"
+    hhc_emit_db postgresql "postgresql.service postgresql@.service postgresql-15.service postgresql-14.service postgresql-13.service postgresql-12.service" "psql --version || postgres --version" "postgres|:5432\\b" "/var/lib/pgsql /var/lib/postgresql"
+    hhc_emit_db redis "redis.service redis-server.service" "redis-server --version || redis-cli --version" "redis-server|redis|:6379\\b" "/var/lib/redis"
+    """#
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 final class CronManager: @unchecked Sendable {
     static let disabledPrefix = "# HHC_DISABLED "
     private static let userSectionMarker = "__HHC_USER_CRONTAB__"
@@ -4993,6 +8368,271 @@ final class CronManager: @unchecked Sendable {
     }
 }
 
+final class DockerManager: @unchecked Sendable {
+    private let now: @Sendable () -> Date
+
+    init(now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
+    }
+
+    func loadSnapshot(profile: ServerProfile, sshClient: SSHClient) async throws -> DockerSnapshot {
+        let result = try await CloudProviderRequestRunner.withTimeout(18) {
+            try await sshClient.execute(Self.snapshotCommand, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not inspect Docker.")
+        }
+        return Self.parseSnapshot(result.stdout, capturedAt: now())
+    }
+
+    func perform(
+        _ action: DockerContainerAction,
+        containerID: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws {
+        let container = try Self.validatedContainerReference(containerID)
+        let command = "docker \(action.rawValue) \(Self.shellQuote(container))"
+        let result = try await CloudProviderRequestRunner.withTimeout(30) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not \(action.rawValue) Docker container.")
+        }
+    }
+
+    func readLogs(
+        containerID: String,
+        limit: Int = 200,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> DockerContainerLog {
+        let container = try Self.validatedContainerReference(containerID)
+        let clampedLimit = min(max(limit, 20), 1_000)
+        let command = "docker logs --tail \(clampedLimit) --timestamps \(Self.shellQuote(container)) 2>&1"
+        let result = try await CloudProviderRequestRunner.withTimeout(15) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? result.stdout.nilIfEmpty ?? "Could not read Docker logs.")
+        }
+        return DockerContainerLog(containerID: container, text: result.stdout, capturedAt: now())
+    }
+
+    func pullImage(
+        reference: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> DockerImagePullResult {
+        let imageReference = try Self.validatedImageReference(reference)
+        let command = "docker pull \(Self.shellQuote(imageReference))"
+        let result = try await CloudProviderRequestRunner.withTimeout(300) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? result.stdout.nilIfEmpty ?? "Could not pull Docker image.")
+        }
+        return DockerImagePullResult(
+            reference: imageReference,
+            output: [result.stdout, result.stderr].filter { !$0.isEmpty }.joined(separator: "\n"),
+            capturedAt: now()
+        )
+    }
+
+    func removeImage(
+        imageID: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> DockerImageRemoveResult {
+        let image = try Self.validatedImageReference(imageID)
+        let command = "docker rmi \(Self.shellQuote(image))"
+        let result = try await CloudProviderRequestRunner.withTimeout(60) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? result.stdout.nilIfEmpty ?? "Could not remove Docker image.")
+        }
+        return DockerImageRemoveResult(
+            imageID: image,
+            output: [result.stdout, result.stderr].filter { !$0.isEmpty }.joined(separator: "\n"),
+            capturedAt: now()
+        )
+    }
+
+    static func parseSnapshot(_ text: String, capturedAt: Date = Date()) -> DockerSnapshot {
+        var version: String?
+        var unavailableReason: String?
+        var containers: [DockerContainer] = []
+        var images: [DockerImage] = []
+
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            if line.hasPrefix("__HHC_DOCKER_VERSION__\t") {
+                version = String(line.dropFirst("__HHC_DOCKER_VERSION__\t".count)).nilIfEmpty
+            } else if line.hasPrefix("__HHC_DOCKER_UNAVAILABLE__\t") {
+                unavailableReason = String(line.dropFirst("__HHC_DOCKER_UNAVAILABLE__\t".count)).nilIfEmpty ?? "Docker is not available."
+            } else if line.hasPrefix("__HHC_DOCKER_CONTAINER__\t") {
+                let json = String(line.dropFirst("__HHC_DOCKER_CONTAINER__\t".count))
+                if let container = decodeContainer(json) {
+                    containers.append(container)
+                }
+            } else if line.hasPrefix("__HHC_DOCKER_IMAGE__\t") {
+                let json = String(line.dropFirst("__HHC_DOCKER_IMAGE__\t".count))
+                if let image = decodeImage(json) {
+                    images.append(image)
+                }
+            }
+        }
+
+        return DockerSnapshot(
+            isAvailable: unavailableReason == nil,
+            version: version,
+            unavailableReason: unavailableReason,
+            containers: containers.sorted { left, right in
+                if left.isRunning, !right.isRunning { return true }
+                if !left.isRunning, right.isRunning { return false }
+                return left.displayName.localizedStandardCompare(right.displayName) == .orderedAscending
+            },
+            images: images.sorted { left, right in
+                left.displayName.localizedStandardCompare(right.displayName) == .orderedAscending
+            },
+            capturedAt: capturedAt
+        )
+    }
+
+    static func validatedContainerReference(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = #"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"#
+        guard trimmed.range(of: pattern, options: .regularExpression) != nil else {
+            throw SSHClientError.processFailed("Only simple Docker container IDs or names are supported.")
+        }
+        return trimmed
+    }
+
+    static func validatedImageReference(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = #"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$"#
+        guard trimmed.range(of: pattern, options: .regularExpression) != nil,
+              !trimmed.contains(".."),
+              !trimmed.contains("//"),
+              !trimmed.hasSuffix(":"),
+              !trimmed.hasSuffix("/")
+        else {
+            throw SSHClientError.processFailed("Only simple Docker image references are supported.")
+        }
+        return trimmed
+    }
+
+    private static func decodeContainer(_ json: String) -> DockerContainer? {
+        guard let data = json.data(using: .utf8),
+              let row = try? JSONDecoder().decode(DockerContainerRow.self, from: data)
+        else { return nil }
+        return DockerContainer(
+            containerID: row.id,
+            image: row.image,
+            command: row.command,
+            createdAt: row.createdAt,
+            runningFor: row.runningFor,
+            ports: row.ports,
+            status: row.status,
+            state: row.state,
+            names: row.names,
+            size: row.size
+        )
+    }
+
+    private static func decodeImage(_ json: String) -> DockerImage? {
+        guard let data = json.data(using: .utf8),
+              let row = try? JSONDecoder().decode(DockerImageRow.self, from: data)
+        else { return nil }
+        return DockerImage(
+            imageID: row.id,
+            repository: row.repository,
+            tag: row.tag,
+            digest: row.digest,
+            createdAt: row.createdAt,
+            createdSince: row.createdSince,
+            size: row.size
+        )
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private struct DockerContainerRow: Decodable {
+        var id: String
+        var image: String
+        var command: String
+        var createdAt: String
+        var runningFor: String
+        var ports: String
+        var status: String
+        var state: String
+        var names: String
+        var size: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id = "ID"
+            case image = "Image"
+            case command = "Command"
+            case createdAt = "CreatedAt"
+            case runningFor = "RunningFor"
+            case ports = "Ports"
+            case status = "Status"
+            case state = "State"
+            case names = "Names"
+            case size = "Size"
+        }
+    }
+
+    private struct DockerImageRow: Decodable {
+        var id: String
+        var repository: String
+        var tag: String
+        var digest: String?
+        var createdAt: String
+        var createdSince: String
+        var size: String
+
+        enum CodingKeys: String, CodingKey {
+            case id = "ID"
+            case repository = "Repository"
+            case tag = "Tag"
+            case digest = "Digest"
+            case createdAt = "CreatedAt"
+            case createdSince = "CreatedSince"
+            case size = "Size"
+        }
+    }
+
+    private static let snapshotCommand = #"""
+if ! command -v docker >/dev/null 2>&1; then
+  printf '__HHC_DOCKER_UNAVAILABLE__\tDocker CLI not found\n'
+  exit 0
+fi
+version="$(docker version --format '{{.Server.Version}}' 2>/dev/null || docker --version 2>/dev/null || true)"
+printf '__HHC_DOCKER_VERSION__\t%s\n' "$version"
+containers="$(docker ps -a --format '{{json .}}' 2>&1)"
+status=$?
+if [ "$status" -ne 0 ]; then
+  printf '__HHC_DOCKER_UNAVAILABLE__\t%s\n' "$containers"
+  exit 0
+fi
+if [ -n "$containers" ]; then
+  printf '%s\n' "$containers" | sed 's/^/__HHC_DOCKER_CONTAINER__\t/'
+fi
+images="$(docker images --format '{{json .}}' 2>&1)"
+status=$?
+if [ "$status" -ne 0 ]; then
+  printf '__HHC_DOCKER_UNAVAILABLE__\t%s\n' "$images"
+  exit 0
+fi
+if [ -n "$images" ]; then
+  printf '%s\n' "$images" | sed 's/^/__HHC_DOCKER_IMAGE__\t/'
+fi
+"""#
+}
+
 final class NginxConfigManager: @unchecked Sendable {
     static let maxConfigBytes = 512 * 1024
 
@@ -5061,6 +8701,34 @@ final class NginxConfigManager: @unchecked Sendable {
             byteCount: data.count,
             capturedAt: now()
         )
+    }
+
+    func listSites(profile: ServerProfile, sshClient: SSHClient) async throws -> NginxSiteList {
+        let configs = try await listConfigs(profile: profile, sshClient: sshClient)
+        var sites: [NginxSite] = []
+        for file in configs.files where (file.size ?? 0) <= Self.maxConfigBytes {
+            do {
+                let content = try await readConfig(file: file, profile: profile, sshClient: sshClient)
+                sites.append(contentsOf: Self.parseSites(in: content.content, configPath: file.path))
+            } catch {
+                continue
+            }
+        }
+        let certificatePaths = Set(
+            sites.flatMap(\.sslCertificatePaths)
+                .filter(Self.isInspectableCertificatePath)
+        )
+        let certificates = await inspectCertificates(
+            paths: Array(certificatePaths),
+            profile: profile,
+            sshClient: sshClient
+        )
+        let enrichedSites = sites.map { site in
+            var site = site
+            site.sslCertificates = site.sslCertificatePaths.compactMap { certificates[$0] }
+            return site
+        }
+        return NginxSiteList(sites: enrichedSites.sorted(by: Self.siteSort), capturedAt: now())
     }
 
     func testConfig(profile: ServerProfile, sshClient: SSHClient) async throws -> NginxTestResult {
@@ -5220,6 +8888,71 @@ final class NginxConfigManager: @unchecked Sendable {
         }
     }
 
+    static func parseSites(in config: String, configPath: String) -> [NginxSite] {
+        serverBlocks(in: stripComments(config)).enumerated().compactMap { index, block in
+            let serverNames = directiveValues(named: "server_name", in: block)
+                .flatMap { splitDirectiveTokens($0) }
+                .filter { !$0.isEmpty && $0 != ";" }
+            let listen = directiveValues(named: "listen", in: block)
+                .map { normalizeDirectiveValue($0) }
+                .filter { !$0.isEmpty }
+            let root = directiveValues(named: "root", in: block)
+                .map { normalizeDirectiveValue($0) }
+                .first { !$0.isEmpty }
+            let proxyPasses = directiveValues(named: "proxy_pass", in: block)
+                .map { normalizeDirectiveValue($0) }
+                .filter { !$0.isEmpty }
+            let hasSSL = listen.contains { $0.localizedCaseInsensitiveContains("ssl") } ||
+                block.range(of: #"ssl_certificate\s+"#, options: .regularExpression) != nil
+            let sslCertificatePaths = directiveValues(named: "ssl_certificate", in: block)
+                .map { normalizeDirectiveValue($0) }
+                .filter { !$0.isEmpty }
+
+            guard !serverNames.isEmpty || !listen.isEmpty || root != nil || !proxyPasses.isEmpty else {
+                return nil
+            }
+            return NginxSite(
+                configPath: configPath,
+                blockIndex: index,
+                serverNames: serverNames.isEmpty ? ["_"] : serverNames,
+                listen: listen,
+                root: root,
+                hasSSL: hasSSL,
+                sslCertificatePaths: sslCertificatePaths,
+                sslCertificates: [],
+                proxyPasses: proxyPasses
+            )
+        }
+    }
+
+    static func parseCertificateInspections(_ text: String) -> [String: NginxSSLCertificate] {
+        var certificates: [String: NginxSSLCertificate] = [:]
+        var currentPath: String?
+
+        for line in text.components(separatedBy: .newlines) {
+            if line.hasPrefix("__HHC_NGINX_CERT__\t") {
+                let path = String(line.dropFirst("__HHC_NGINX_CERT__\t".count)).trimmed
+                currentPath = path
+                certificates[path] = NginxSSLCertificate(path: path)
+                continue
+            }
+
+            guard let path = currentPath else { continue }
+            if line.hasPrefix("__HHC_NGINX_CERT_NOT_AFTER__\t") {
+                let value = String(line.dropFirst("__HHC_NGINX_CERT_NOT_AFTER__\t".count)).trimmed
+                certificates[path]?.notAfter = certificateDate(from: value)
+            } else if line.hasPrefix("__HHC_NGINX_CERT_SUBJECT__\t") {
+                certificates[path]?.subject = String(line.dropFirst("__HHC_NGINX_CERT_SUBJECT__\t".count)).trimmed.nilIfEmpty
+            } else if line.hasPrefix("__HHC_NGINX_CERT_ISSUER__\t") {
+                certificates[path]?.issuer = String(line.dropFirst("__HHC_NGINX_CERT_ISSUER__\t".count)).trimmed.nilIfEmpty
+            } else if line.hasPrefix("__HHC_NGINX_CERT_ERROR__\t") {
+                certificates[path]?.inspectionError = String(line.dropFirst("__HHC_NGINX_CERT_ERROR__\t".count)).trimmed.nilIfEmpty
+            }
+        }
+
+        return certificates
+    }
+
     static func validatedConfigPath(_ path: String) throws -> String {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("/"),
@@ -5239,6 +8972,161 @@ final class NginxConfigManager: @unchecked Sendable {
         [result.stdout.trimmed, result.stderr.trimmed]
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
+    }
+
+    private static func siteSort(_ lhs: NginxSite, _ rhs: NginxSite) -> Bool {
+        let nameCompare = lhs.primaryName.localizedStandardCompare(rhs.primaryName)
+        if nameCompare != .orderedSame {
+            return nameCompare == .orderedAscending
+        }
+        return lhs.configPath.localizedStandardCompare(rhs.configPath) == .orderedAscending
+    }
+
+    private func inspectCertificates(
+        paths: [String],
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async -> [String: NginxSSLCertificate] {
+        let paths = paths.sorted()
+        guard !paths.isEmpty else { return [:] }
+        let quotedPaths = paths.map(Self.shellQuote).joined(separator: " ")
+        let command = """
+        for cert in \(quotedPaths); do \
+        printf '__HHC_NGINX_CERT__\\t%s\\n' "$cert"; \
+        if ! command -v openssl >/dev/null 2>&1; then printf '__HHC_NGINX_CERT_ERROR__\\topenssl not found\\n'; continue; fi; \
+        if [ ! -r "$cert" ]; then printf '__HHC_NGINX_CERT_ERROR__\\tcertificate is not readable\\n'; continue; fi; \
+        end=$(openssl x509 -in "$cert" -noout -enddate 2>&1); status=$?; \
+        if [ "$status" -ne 0 ]; then printf '__HHC_NGINX_CERT_ERROR__\\t%s\\n' "$end"; continue; fi; \
+        printf '%s\\n' "$end" | sed 's/^notAfter=/__HHC_NGINX_CERT_NOT_AFTER__\\t/'; \
+        subject=$(openssl x509 -in "$cert" -noout -subject 2>/dev/null | sed 's/^subject=//'); \
+        issuer=$(openssl x509 -in "$cert" -noout -issuer 2>/dev/null | sed 's/^issuer=//'); \
+        [ -n "$subject" ] && printf '__HHC_NGINX_CERT_SUBJECT__\\t%s\\n' "$subject"; \
+        [ -n "$issuer" ] && printf '__HHC_NGINX_CERT_ISSUER__\\t%s\\n' "$issuer"; \
+        done
+        """
+        do {
+            let result = try await CloudProviderRequestRunner.withTimeout(10) {
+                try await sshClient.execute(command, profile: profile)
+            }
+            guard result.exitCode == 0 else { return [:] }
+            return Self.parseCertificateInspections(result.stdout)
+        } catch {
+            return [:]
+        }
+    }
+
+    private static func isInspectableCertificatePath(_ path: String) -> Bool {
+        path.hasPrefix("/") &&
+            !path.contains("\n") &&
+            !path.contains("\r") &&
+            !path.contains("/../") &&
+            !path.hasSuffix("/..") &&
+            !path.contains("$")
+    }
+
+    private static func certificateDate(from value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMM d HH:mm:ss yyyy zzz"
+        if let date = formatter.date(from: value) {
+            return date
+        }
+        formatter.dateFormat = "MMM  d HH:mm:ss yyyy zzz"
+        return formatter.date(from: value)
+    }
+
+    private static func stripComments(_ config: String) -> String {
+        config.components(separatedBy: .newlines)
+            .map { line in
+                guard let index = line.firstIndex(of: "#") else { return line }
+                return String(line[..<index])
+            }
+            .joined(separator: "\n")
+    }
+
+    private static func serverBlocks(in config: String) -> [String] {
+        let chars = Array(config)
+        var blocks: [String] = []
+        var index = 0
+
+        while index < chars.count {
+            guard startsDirective("server", at: index, in: chars),
+                  let openBrace = nextNonWhitespaceIndex(after: index + "server".count, in: chars),
+                  chars[openBrace] == "{"
+            else {
+                index += 1
+                continue
+            }
+
+            var depth = 0
+            var cursor = openBrace
+            while cursor < chars.count {
+                if chars[cursor] == "{" {
+                    depth += 1
+                } else if chars[cursor] == "}" {
+                    depth -= 1
+                    if depth == 0 {
+                        let bodyStart = chars.index(after: openBrace)
+                        if bodyStart <= cursor {
+                            blocks.append(String(chars[bodyStart..<cursor]))
+                        }
+                        index = cursor + 1
+                        break
+                    }
+                }
+                cursor += 1
+            }
+            if cursor >= chars.count {
+                break
+            }
+        }
+        return blocks
+    }
+
+    private static func startsDirective(_ directive: String, at index: Int, in chars: [Character]) -> Bool {
+        guard index >= 0, index + directive.count <= chars.count else { return false }
+        let name = String(chars[index..<index + directive.count])
+        guard name == directive else { return false }
+        if index > 0, isDirectiveNameCharacter(chars[index - 1]) { return false }
+        let after = index + directive.count
+        return after >= chars.count || !isDirectiveNameCharacter(chars[after])
+    }
+
+    private static func nextNonWhitespaceIndex(after index: Int, in chars: [Character]) -> Int? {
+        var cursor = index
+        while cursor < chars.count {
+            if !chars[cursor].isWhitespace {
+                return cursor
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private static func isDirectiveNameCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "_" || character == "-"
+    }
+
+    private static func directiveValues(named name: String, in block: String) -> [String] {
+        let escapedName = NSRegularExpression.escapedPattern(for: name)
+        let pattern = #"(?m)(^|[\s;{])"# + escapedName + #"\s+([^;{}]+);"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let nsRange = NSRange(block.startIndex..<block.endIndex, in: block)
+        return regex.matches(in: block, range: nsRange).compactMap { match in
+            guard let range = Range(match.range(at: 2), in: block) else { return nil }
+            return String(block[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private static func splitDirectiveTokens(_ value: String) -> [String] {
+        value.split(whereSeparator: { $0.isWhitespace })
+            .map { normalizeDirectiveValue(String($0)) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func normalizeDirectiveValue(_ value: String) -> String {
+        value.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ";\"'")))
     }
 
     private static func markerValue(_ marker: String, from output: String) -> String? {
@@ -5743,6 +9631,43 @@ final class RemoteFileService: @unchecked Sendable {
         guard result.exitCode == 0 else {
             throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not rename \(entry.name).")
         }
+    }
+
+    func createItem(
+        named name: String,
+        kind: RemoteFileCreationKind,
+        inDirectoryPath directoryPath: String,
+        profile: ServerProfile,
+        sshClient: SSHClient
+    ) async throws -> RemoteFileEntry {
+        let targetName = Self.validatedFileName(name)
+        guard !targetName.isEmpty else {
+            throw SSHClientError.processFailed("File name cannot be empty, '.', '..', or contain '/'.")
+        }
+        let parentPath = Self.normalizedDirectoryPath(directoryPath)
+        let targetPath = Self.joinedPath(basePath: parentPath, name: targetName)
+        let command: String
+        switch kind {
+        case .file:
+            command = "set -e; test ! -e \(Self.shellQuote(targetPath)); : > \(Self.shellQuote(targetPath))"
+        case .directory:
+            command = "mkdir -- \(Self.shellQuote(targetPath))"
+        }
+        let result = try await CloudProviderRequestRunner.withTimeout(10) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            let targetDescription = kind == .file ? "file" : "folder"
+            throw SSHClientError.processFailed(result.stderr.nilIfEmpty ?? "Could not create \(targetDescription) \(targetName).")
+        }
+        return RemoteFileEntry(
+            name: targetName,
+            path: targetPath,
+            kind: kind == .file ? .file : .directory,
+            size: kind == .file ? 0 : nil,
+            modifiedAt: now(),
+            permissions: ""
+        )
     }
 
     func moveToTrash(

@@ -9,6 +9,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isRefreshingDashboard = false
     @Published var isDashboardAutoRefreshEnabled = false
     @Published var dashboardSnapshot: ServerDashboardSnapshot?
+    @Published var dashboardSnapshots: [ServerDashboardSnapshot] = []
     @Published var dashboardErrorMessage: String?
     @Published var remoteFilePath = "~"
     @Published var remoteDirectoryListing: RemoteDirectoryListing?
@@ -31,20 +32,42 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isLoadingSystemdJournal = false
     @Published var systemdErrorMessage: String?
     @Published var systemdActionMessage: String?
+    @Published var databaseServiceSnapshot: DatabaseServiceSnapshot?
+    @Published var selectedDatabaseService: DatabaseService?
+    @Published var isLoadingDatabaseServices = false
+    @Published var isPerformingDatabaseServiceAction = false
+    @Published var isCreatingDatabaseBackup = false
+    @Published var databaseBackupResult: DatabaseBackupResult?
+    @Published var databaseServiceErrorMessage: String?
+    @Published var databaseServiceActionMessage: String?
+    @Published var dockerSnapshot: DockerSnapshot?
+    @Published var selectedDockerContainer: DockerContainer?
+    @Published var dockerContainerLog: DockerContainerLog?
+    @Published var isLoadingDocker = false
+    @Published var isMutatingDockerContainer = false
+    @Published var isMutatingDockerImage = false
+    @Published var isLoadingDockerLogs = false
+    @Published var dockerErrorMessage: String?
+    @Published var dockerActionMessage: String?
     @Published var cronSnapshot: CronTabSnapshot?
     @Published var isLoadingCron = false
     @Published var isMutatingCron = false
     @Published var cronErrorMessage: String?
     @Published var cronActionMessage: String?
     @Published var nginxConfigList: NginxConfigList?
+    @Published var nginxSiteList: NginxSiteList?
     @Published var selectedNginxConfig: NginxConfigFile?
+    @Published var selectedNginxSite: NginxSite?
     @Published var nginxConfigContent: NginxConfigContent?
     @Published var nginxConfigDraft = ""
+    @Published var nginxReverseProxyDraft = NginxReverseProxyDraft()
+    @Published var nginxReverseProxyUpsertResult: NginxConfigUpsertResult?
     @Published var nginxTestResult: NginxTestResult?
     @Published var isLoadingNginxConfigs = false
     @Published var isLoadingNginxConfigContent = false
     @Published var isTestingNginxConfig = false
     @Published var isSavingNginxConfig = false
+    @Published var isWritingNginxReverseProxy = false
     @Published var isReloadingNginx = false
     @Published var nginxErrorMessage: String?
     @Published var nginxActionMessage: String?
@@ -93,6 +116,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var deploymentWebhookListenerURL: String?
     @Published var deploymentErrorMessage: String?
     @Published var deploymentActionMessage: String?
+    @Published var didLoadDeploymentProjects = false
     @Published var remoteChangeLogs: [RemoteChangeLogEntry] = []
     @Published var operationLogs: [OperationLogEntry] = []
     @Published var isLoadingAuditLogs = false
@@ -110,8 +134,10 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var verdaccioInstallResult: VerdaccioInstallResult?
     @Published var verdaccioStatusSnapshot: VerdaccioStatusSnapshot?
     @Published var verdaccioPackages: [VerdaccioPackageSummary] = []
+    @Published var selectedVerdaccioPackageDetail: VerdaccioPackageDetail?
     @Published var verdaccioBackupResult: VerdaccioRegistryBackupResult?
     @Published var verdaccioRestoreResult: VerdaccioRegistryRestoreResult?
+    @Published var verdaccioPackageDeletionResult: VerdaccioPackageDeletionResult?
     @Published var verdaccioUserMutationResult: VerdaccioUserMutationResult?
     @Published var verdaccioConfigPolicyDraft = VerdaccioConfigPolicy()
     @Published var verdaccioConfigSaveResult: VerdaccioConfigSaveResult?
@@ -130,6 +156,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var isInstallingVerdaccio = false
     @Published var isLoadingVerdaccioStatus = false
     @Published var isLoadingVerdaccioPackages = false
+    @Published var isLoadingVerdaccioPackageDetail = false
+    @Published var isDeletingVerdaccioPackage = false
     @Published var isCreatingVerdaccioBackup = false
     @Published var isRestoringVerdaccioBackup = false
     @Published var isMutatingVerdaccioUser = false
@@ -165,6 +193,56 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var gitLabActionMessage: String?
     @Published var giteaErrorMessage: String?
     @Published var giteaActionMessage: String?
+    @Published var giteaNativeSnapshot: GiteaNativeSnapshot?
+    @Published var gitLabNativeSnapshot: GitLabNativeSnapshot?
+    @Published var selectedGiteaPackageDetail: GiteaPackageDetail?
+    @Published var selectedGitLabJobTrace: GitLabJobTrace?
+    @Published var giteaTokenDraft = ""
+    @Published var gitLabTokenDraft = ""
+    @Published var isGiteaTokenBound = false
+    @Published var isGitLabTokenBound = false
+    @Published var isLoadingGitNativeSnapshot = false
+    @Published var isMutatingGitNativeRepository = false
+    @Published var isMutatingGitNativeIssueState = false
+    @Published var isMutatingGitLabPipeline = false
+    @Published var isMutatingGitLabJob = false
+    @Published var isLoadingGitLabJobTrace = false
+    @Published var isMutatingGitLabPackage = false
+    @Published var isMutatingGitLabVariable = false
+    @Published var isMutatingGitLabGroup = false
+    @Published var isMutatingGitLabMember = false
+    @Published var isMutatingGiteaUser = false
+    @Published var isMutatingGiteaOrganization = false
+    @Published var isMutatingGiteaTeam = false
+    @Published var isMutatingGiteaTeamMember = false
+    @Published var isMutatingGiteaTeamRepository = false
+    @Published var isMutatingGiteaKey = false
+    @Published var isMutatingGiteaAccessToken = false
+    @Published var isMutatingGiteaPackage = false
+    @Published var isLoadingGiteaPackageDetail = false
+    @Published var isMutatingGitLabDeployKey = false
+    @Published var isMutatingGitLabDeployToken = false
+    @Published var isMutatingGitLabTag = false
+    @Published var gitNativeRepositoryDraft = GitNativeRepositoryDraft()
+    @Published var giteaTeamDraft = GiteaTeamDraft()
+    @Published var giteaTeamMemberDraft = GiteaTeamMemberDraft()
+    @Published var giteaTeamRepositoryDraft = GiteaTeamRepositoryDraft()
+    @Published var giteaKeyDraft = GiteaKeyDraft()
+    @Published var giteaAccessTokenDraft = GiteaAccessTokenDraft()
+    @Published var giteaAccessTokenCreationResult: GiteaAccessTokenCreationResult?
+    @Published var giteaOrganizationDraft = GiteaOrganizationDraft()
+    @Published var gitLabVariableDraft = GitLabVariableDraft()
+    @Published var gitLabProjectSettingsDraft = GitLabProjectSettingsDraft()
+    @Published var gitLabGroupDraft = GitLabGroupDraft()
+    @Published var gitLabMemberDraft = GitLabMemberDraft()
+    @Published var gitLabDeployKeyDraft = GitLabDeployKeyDraft()
+    @Published var gitLabDeployTokenDraft = GitLabDeployTokenDraft()
+    @Published var gitLabDeployTokenCreationResult: GitLabDeployTokenCreationResult?
+    @Published var gitLabTagDraft = GitLabTagDraft()
+    @Published var gitNativeErrorMessage: String?
+    @Published var gitNativeActionMessage: String?
+    @Published var giteaUserDraft = GiteaUserDraft()
+    @Published var giteaRepositorySettingsDraft = GiteaRepositorySettingsDraft()
     @Published var commandResult: CommandResult?
     @Published var commandHistory: [CommandResult] = []
     @Published var persistedCommandHistory: [CommandHistoryEntry] = []
@@ -222,12 +300,22 @@ final class ServerWorkspaceViewModel: ObservableObject {
         isRunningCommand = false
         isRefreshingDashboard = false
         isDashboardAutoRefreshEnabled = false
+        dashboardSnapshot = nil
+        dashboardSnapshots = []
         isLoadingRemoteFiles = false
         isMutatingRemoteFile = false
         isTransferringRemoteFile = false
         isLoadingSystemdUnits = false
         isPerformingSystemdAction = false
         isLoadingSystemdJournal = false
+        isLoadingDatabaseServices = false
+        isPerformingDatabaseServiceAction = false
+        isCreatingDatabaseBackup = false
+        databaseBackupResult = nil
+        isLoadingDocker = false
+        isMutatingDockerContainer = false
+        isMutatingDockerImage = false
+        isLoadingDockerLogs = false
         isLoadingCron = false
         isMutatingCron = false
         isLoadingNginxConfigs = false
@@ -250,6 +338,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
         isInstallingVerdaccio = false
         isLoadingVerdaccioStatus = false
         isLoadingVerdaccioPackages = false
+        isLoadingVerdaccioPackageDetail = false
+        isDeletingVerdaccioPackage = false
         isCreatingVerdaccioBackup = false
         isRestoringVerdaccioBackup = false
         isMutatingVerdaccioUser = false
@@ -264,6 +354,29 @@ final class ServerWorkspaceViewModel: ObservableObject {
         isInstallingGitea = false
         isLoadingGitLabStatus = false
         isControllingGitLabService = false
+        isLoadingGitNativeSnapshot = false
+        isMutatingGitNativeRepository = false
+        isMutatingGitNativeIssueState = false
+        isMutatingGitLabPipeline = false
+        isMutatingGitLabJob = false
+        isLoadingGitLabJobTrace = false
+        isMutatingGitLabPackage = false
+        isMutatingGitLabVariable = false
+        isMutatingGitLabGroup = false
+        isMutatingGitLabMember = false
+        isMutatingGiteaUser = false
+        isMutatingGiteaOrganization = false
+        isMutatingGiteaTeam = false
+        isMutatingGiteaTeamMember = false
+        isMutatingGiteaTeamRepository = false
+        isMutatingGiteaKey = false
+        isMutatingGiteaAccessToken = false
+        isMutatingGiteaPackage = false
+        isLoadingGiteaPackageDetail = false
+        isMutatingGitLabDeployKey = false
+        isMutatingGitLabDeployToken = false
+        isMutatingGitLabTag = false
+        selectedGitLabJobTrace = nil
 
         dashboardSnapshot = nil
         dashboardErrorMessage = nil
@@ -279,13 +392,25 @@ final class ServerWorkspaceViewModel: ObservableObject {
         systemdJournalLog = nil
         systemdErrorMessage = nil
         systemdActionMessage = nil
+        databaseServiceSnapshot = nil
+        selectedDatabaseService = nil
+        databaseServiceErrorMessage = nil
+        databaseServiceActionMessage = nil
+        dockerSnapshot = nil
+        selectedDockerContainer = nil
+        dockerContainerLog = nil
+        dockerErrorMessage = nil
+        dockerActionMessage = nil
         cronSnapshot = nil
         cronErrorMessage = nil
         cronActionMessage = nil
         nginxConfigList = nil
+        nginxSiteList = nil
         selectedNginxConfig = nil
+        selectedNginxSite = nil
         nginxConfigContent = nil
         nginxConfigDraft = ""
+        nginxReverseProxyUpsertResult = nil
         nginxTestResult = nil
         nginxErrorMessage = nil
         nginxActionMessage = nil
@@ -311,6 +436,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
         deploymentCommandPlan = nil
         deploymentErrorMessage = nil
         deploymentActionMessage = nil
+        didLoadDeploymentProjects = false
         remoteChangeLogs = []
         operationLogs = []
         auditLogErrorMessage = nil
@@ -319,8 +445,10 @@ final class ServerWorkspaceViewModel: ObservableObject {
         verdaccioInstallResult = nil
         verdaccioStatusSnapshot = nil
         verdaccioPackages = []
+        selectedVerdaccioPackageDetail = nil
         verdaccioBackupResult = nil
         verdaccioRestoreResult = nil
+        verdaccioPackageDeletionResult = nil
         verdaccioUserMutationResult = nil
         verdaccioConfigPolicyDraft = VerdaccioConfigPolicy()
         verdaccioConfigSaveResult = nil
@@ -343,6 +471,31 @@ final class ServerWorkspaceViewModel: ObservableObject {
         gitLabActionMessage = nil
         giteaErrorMessage = nil
         giteaActionMessage = nil
+        giteaNativeSnapshot = nil
+        gitLabNativeSnapshot = nil
+        selectedGiteaPackageDetail = nil
+        giteaTokenDraft = ""
+        gitLabTokenDraft = ""
+        gitNativeRepositoryDraft = GitNativeRepositoryDraft()
+        giteaUserDraft = GiteaUserDraft()
+        giteaOrganizationDraft = GiteaOrganizationDraft()
+        giteaRepositorySettingsDraft = GiteaRepositorySettingsDraft()
+        giteaTeamDraft = GiteaTeamDraft()
+        giteaTeamMemberDraft = GiteaTeamMemberDraft()
+        giteaKeyDraft = GiteaKeyDraft()
+        giteaAccessTokenDraft = GiteaAccessTokenDraft()
+        giteaAccessTokenCreationResult = nil
+        gitLabProjectSettingsDraft = GitLabProjectSettingsDraft()
+        gitLabVariableDraft = GitLabVariableDraft()
+        gitLabGroupDraft = GitLabGroupDraft()
+        gitLabMemberDraft = GitLabMemberDraft()
+        gitLabDeployKeyDraft = GitLabDeployKeyDraft()
+        gitLabDeployTokenDraft = GitLabDeployTokenDraft()
+        gitLabDeployTokenCreationResult = nil
+        isGiteaTokenBound = false
+        isGitLabTokenBound = false
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
         commandResult = nil
         commandHistory = []
         persistedCommandHistory = []
@@ -491,6 +644,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
     func loadCachedDashboardSnapshot(profile: ServerProfile, repository: ServerRepository) {
         do {
             dashboardSnapshot = try repository.fetchLatestDashboardSnapshot(serverId: profile.id)
+            dashboardSnapshots = try repository.fetchDashboardSnapshots(serverId: profile.id)
         } catch {
             dashboardErrorMessage = error.localizedDescription
         }
@@ -535,8 +689,20 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     cloudMetricService: cloudMetricService
                 )
                 try repository?.saveDashboardSnapshot(snapshot, serverId: profile.id)
+                let cachedSnapshots = try repository?.fetchDashboardSnapshots(serverId: profile.id)
                 await MainActor.run {
                     self.dashboardSnapshot = snapshot
+                    if let cachedSnapshots {
+                        self.dashboardSnapshots = cachedSnapshots
+                    } else {
+                        self.dashboardSnapshots.append(snapshot)
+                    }
+                    self.isRefreshingDashboard = false
+                }
+            } catch SSHClientError.unknownHostKey(let hostKeyInfo) {
+                await MainActor.run {
+                    self.pendingHostKey = hostKeyInfo
+                    self.pendingHostKeyAction = .dashboard(dashboardService, cloudMetricService, repository)
                     self.isRefreshingDashboard = false
                 }
             } catch {
@@ -723,6 +889,74 @@ final class ServerWorkspaceViewModel: ObservableObject {
                         targetId: entry.path,
                         action: "rename",
                         beforeSnapshot: Self.remoteFileSnapshot(entry),
+                        afterSnapshot: nil,
+                        status: "failed",
+                        message: error.localizedDescription
+                    )
+                    self.isMutatingRemoteFile = false
+                }
+            }
+        }
+    }
+
+    func createRemoteFileItem(
+        named name: String,
+        kind: RemoteFileCreationKind,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        remoteFileService: RemoteFileService,
+        repository: ServerRepository? = nil
+    ) {
+        isMutatingRemoteFile = true
+        remoteFileErrorMessage = nil
+        remoteFileActionMessage = nil
+        let directoryPath = remoteFilePath
+
+        Task {
+            do {
+                let entry = try await remoteFileService.createItem(
+                    named: name,
+                    kind: kind,
+                    inDirectoryPath: directoryPath,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let listing = try await remoteFileService.listDirectory(
+                    path: directoryPath,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.remoteDirectoryListing = listing
+                    self.remoteFilePath = listing.path
+                    self.remoteFileActionMessage = "Created \(entry.name)."
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: entry.path,
+                        action: kind == .file ? "create_file" : "create_directory",
+                        beforeSnapshot: nil,
+                        afterSnapshot: Self.remoteFileSnapshot(entry),
+                        status: "succeeded",
+                        message: self.remoteFileActionMessage
+                    )
+                    self.isMutatingRemoteFile = false
+                }
+            } catch {
+                let targetPath = RemoteFileService.joinedPath(
+                    basePath: RemoteFileService.normalizedDirectoryPath(directoryPath),
+                    name: name.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+                await MainActor.run {
+                    self.remoteFileErrorMessage = error.localizedDescription
+                    self.saveRemoteChangeLog(
+                        repository: repository,
+                        profile: profile,
+                        targetType: "remote_file",
+                        targetId: targetPath,
+                        action: kind == .file ? "create_file" : "create_directory",
+                        beforeSnapshot: nil,
                         afterSnapshot: nil,
                         status: "failed",
                         message: error.localizedDescription
@@ -1496,6 +1730,419 @@ final class ServerWorkspaceViewModel: ObservableObject {
         }
     }
 
+    func loadDatabaseServices(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        databaseServiceManager: DatabaseServiceManager
+    ) {
+        isLoadingDatabaseServices = true
+        databaseServiceErrorMessage = nil
+        databaseServiceActionMessage = nil
+
+        Task {
+            do {
+                let snapshot = try await databaseServiceManager.loadSnapshot(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.databaseServiceSnapshot = snapshot
+                    if let selected = self.selectedDatabaseService,
+                       let refreshed = snapshot.services.first(where: { $0.id == selected.id }) {
+                        self.selectedDatabaseService = refreshed
+                    } else {
+                        self.selectedDatabaseService = snapshot.services.first(where: { $0.isInstalled }) ?? snapshot.services.first
+                    }
+                    self.isLoadingDatabaseServices = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.databaseServiceErrorMessage = error.localizedDescription
+                    self.isLoadingDatabaseServices = false
+                }
+            }
+        }
+    }
+
+    func selectDatabaseService(_ service: DatabaseService) {
+        selectedDatabaseService = service
+    }
+
+    func performDatabaseServiceAction(
+        _ action: SystemdUnitAction,
+        service: DatabaseService,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        databaseServiceManager: DatabaseServiceManager,
+        repository: ServerRepository? = nil
+    ) {
+        isPerformingDatabaseServiceAction = true
+        databaseServiceErrorMessage = nil
+        databaseServiceActionMessage = nil
+        let beforeSnapshot = Self.databaseServiceSnapshot(service)
+
+        Task {
+            do {
+                try await databaseServiceManager.perform(
+                    action,
+                    service: service,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let snapshot = try await databaseServiceManager.loadSnapshot(profile: profile, sshClient: sshClient)
+                let refreshed = snapshot.services.first(where: { $0.id == service.id })
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "database_service",
+                    targetId: service.unitName ?? service.kind.rawValue,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: refreshed.map(Self.databaseServiceSnapshot),
+                    status: "success",
+                    message: "\(action.displayName) requested for \(service.kind.displayName)."
+                )
+                await MainActor.run {
+                    self.databaseServiceSnapshot = snapshot
+                    self.selectedDatabaseService = refreshed
+                    self.databaseServiceActionMessage = "\(action.displayName) requested for \(service.kind.displayName)."
+                    self.isPerformingDatabaseServiceAction = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "database_service",
+                    targetId: service.unitName ?? service.kind.rawValue,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.databaseServiceErrorMessage = error.localizedDescription
+                    self.isPerformingDatabaseServiceAction = false
+                }
+            }
+        }
+    }
+
+    func createDatabaseBackup(
+        service: DatabaseService,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        databaseServiceManager: DatabaseServiceManager,
+        repository: ServerRepository? = nil
+    ) {
+        isCreatingDatabaseBackup = true
+        databaseBackupResult = nil
+        databaseServiceErrorMessage = nil
+        databaseServiceActionMessage = nil
+        let beforeSnapshot = Self.databaseServiceSnapshot(service)
+
+        Task {
+            do {
+                let result = try await databaseServiceManager.createBackup(
+                    service: service,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let snapshot = try await databaseServiceManager.loadSnapshot(profile: profile, sshClient: sshClient)
+                let refreshed = snapshot.services.first(where: { $0.id == service.id })
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "database_service",
+                    targetId: service.unitName ?? service.kind.rawValue,
+                    action: "backup",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: "backupPath=\(result.backupPath)\noutput=\(result.output)",
+                    status: "success",
+                    message: "Created \(service.kind.displayName) backup at \(result.backupPath)."
+                )
+                await MainActor.run {
+                    self.databaseBackupResult = result
+                    self.databaseServiceSnapshot = snapshot
+                    self.selectedDatabaseService = refreshed ?? service
+                    self.databaseServiceActionMessage = "Created \(service.kind.displayName) backup at \(result.backupPath)."
+                    self.isCreatingDatabaseBackup = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "database_service",
+                    targetId: service.unitName ?? service.kind.rawValue,
+                    action: "backup",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.databaseServiceErrorMessage = error.localizedDescription
+                    self.isCreatingDatabaseBackup = false
+                }
+            }
+        }
+    }
+
+    func loadDockerSnapshot(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        dockerManager: DockerManager
+    ) {
+        isLoadingDocker = true
+        dockerErrorMessage = nil
+        dockerActionMessage = nil
+
+        Task {
+            do {
+                let snapshot = try await dockerManager.loadSnapshot(profile: profile, sshClient: sshClient)
+                await MainActor.run {
+                    self.dockerSnapshot = snapshot
+                    if let selected = self.selectedDockerContainer,
+                       let refreshed = snapshot.containers.first(where: { $0.id == selected.id }) {
+                        self.selectedDockerContainer = refreshed
+                    } else {
+                        self.selectedDockerContainer = snapshot.containers.first
+                    }
+                    self.isLoadingDocker = false
+                }
+                if let selected = await MainActor.run(body: { self.selectedDockerContainer }) {
+                    await MainActor.run {
+                        self.loadDockerLogs(
+                            container: selected,
+                            profile: profile,
+                            sshClient: sshClient,
+                            dockerManager: dockerManager
+                        )
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.dockerErrorMessage = error.localizedDescription
+                    self.isLoadingDocker = false
+                }
+            }
+        }
+    }
+
+    func selectDockerContainer(
+        _ container: DockerContainer,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        dockerManager: DockerManager
+    ) {
+        selectedDockerContainer = container
+        loadDockerLogs(container: container, profile: profile, sshClient: sshClient, dockerManager: dockerManager)
+    }
+
+    func loadDockerLogs(
+        container: DockerContainer,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        dockerManager: DockerManager
+    ) {
+        isLoadingDockerLogs = true
+        dockerErrorMessage = nil
+
+        Task {
+            do {
+                let log = try await dockerManager.readLogs(
+                    containerID: container.containerID,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.dockerContainerLog = log
+                    self.isLoadingDockerLogs = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.dockerErrorMessage = error.localizedDescription
+                    self.isLoadingDockerLogs = false
+                }
+            }
+        }
+    }
+
+    func performDockerContainerAction(
+        _ action: DockerContainerAction,
+        container: DockerContainer,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        dockerManager: DockerManager,
+        repository: ServerRepository? = nil
+    ) {
+        isMutatingDockerContainer = true
+        dockerErrorMessage = nil
+        dockerActionMessage = nil
+        let beforeSnapshot = Self.dockerContainerSnapshot(container)
+
+        Task {
+            do {
+                try await dockerManager.perform(
+                    action,
+                    containerID: container.containerID,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let snapshot = try await dockerManager.loadSnapshot(profile: profile, sshClient: sshClient)
+                let refreshed = snapshot.containers.first(where: { $0.id == container.id })
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "docker_container",
+                    targetId: container.containerID,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: refreshed.map(Self.dockerContainerSnapshot),
+                    status: "success",
+                    message: "\(action.displayName) requested for \(container.displayName)."
+                )
+                await MainActor.run {
+                    self.dockerSnapshot = snapshot
+                    self.selectedDockerContainer = refreshed
+                    self.dockerActionMessage = "\(action.displayName) requested for \(container.displayName)."
+                    self.isMutatingDockerContainer = false
+                }
+                if let refreshed {
+                    await MainActor.run {
+                        self.loadDockerLogs(
+                            container: refreshed,
+                            profile: profile,
+                            sshClient: sshClient,
+                            dockerManager: dockerManager
+                        )
+                    }
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "docker_container",
+                    targetId: container.containerID,
+                    action: action.rawValue,
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.dockerErrorMessage = error.localizedDescription
+                    self.isMutatingDockerContainer = false
+                }
+            }
+        }
+    }
+
+    func pullDockerImage(
+        reference: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        dockerManager: DockerManager,
+        repository: ServerRepository? = nil
+    ) {
+        isMutatingDockerImage = true
+        dockerErrorMessage = nil
+        dockerActionMessage = nil
+        let target = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        Task {
+            do {
+                let result = try await dockerManager.pullImage(reference: target, profile: profile, sshClient: sshClient)
+                let snapshot = try await dockerManager.loadSnapshot(profile: profile, sshClient: sshClient)
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "docker_image",
+                    targetId: result.reference,
+                    action: "pull",
+                    beforeSnapshot: nil,
+                    afterSnapshot: result.output,
+                    status: "success",
+                    message: "Pulled Docker image \(result.reference)."
+                )
+                await MainActor.run {
+                    self.dockerSnapshot = snapshot
+                    self.dockerActionMessage = "Pulled Docker image \(result.reference)."
+                    self.isMutatingDockerImage = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "docker_image",
+                    targetId: target,
+                    action: "pull",
+                    beforeSnapshot: nil,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.dockerErrorMessage = error.localizedDescription
+                    self.isMutatingDockerImage = false
+                }
+            }
+        }
+    }
+
+    func removeDockerImage(
+        _ image: DockerImage,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        dockerManager: DockerManager,
+        repository: ServerRepository? = nil
+    ) {
+        isMutatingDockerImage = true
+        dockerErrorMessage = nil
+        dockerActionMessage = nil
+        let beforeSnapshot = Self.dockerImageSnapshot(image)
+
+        Task {
+            do {
+                let result = try await dockerManager.removeImage(
+                    imageID: image.imageID,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let snapshot = try await dockerManager.loadSnapshot(profile: profile, sshClient: sshClient)
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "docker_image",
+                    targetId: image.imageID,
+                    action: "remove",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: result.output,
+                    status: "success",
+                    message: "Removed Docker image \(image.displayName)."
+                )
+                await MainActor.run {
+                    self.dockerSnapshot = snapshot
+                    self.dockerActionMessage = "Removed Docker image \(image.displayName)."
+                    self.isMutatingDockerImage = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "docker_image",
+                    targetId: image.imageID,
+                    action: "remove",
+                    beforeSnapshot: beforeSnapshot,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.dockerErrorMessage = error.localizedDescription
+                    self.isMutatingDockerImage = false
+                }
+            }
+        }
+    }
+
     func loadCron(
         profile: ServerProfile,
         sshClient: SSHClient,
@@ -1639,13 +2286,21 @@ final class ServerWorkspaceViewModel: ObservableObject {
         Task {
             do {
                 let list = try await nginxConfigManager.listConfigs(profile: profile, sshClient: sshClient)
+                let sites = try await nginxConfigManager.listSites(profile: profile, sshClient: sshClient)
                 await MainActor.run {
                     self.nginxConfigList = list
+                    self.nginxSiteList = sites
                     if let selected = self.selectedNginxConfig,
                        let refreshed = list.files.first(where: { $0.id == selected.id }) {
                         self.selectedNginxConfig = refreshed
                     } else {
                         self.selectedNginxConfig = list.files.first
+                    }
+                    if let selectedSite = self.selectedNginxSite,
+                       let refreshedSite = sites.sites.first(where: { $0.id == selectedSite.id }) {
+                        self.selectedNginxSite = refreshedSite
+                    } else {
+                        self.selectedNginxSite = sites.sites.first
                     }
                     self.isLoadingNginxConfigs = false
                 }
@@ -1665,6 +2320,23 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.isLoadingNginxConfigs = false
                 }
             }
+        }
+    }
+
+    func selectNginxSite(
+        _ site: NginxSite,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        nginxConfigManager: NginxConfigManager
+    ) {
+        selectedNginxSite = site
+        if let file = nginxConfigList?.files.first(where: { $0.path == site.configPath }) {
+            selectNginxConfig(
+                file,
+                profile: profile,
+                sshClient: sshClient,
+                nginxConfigManager: nginxConfigManager
+            )
         }
     }
 
@@ -1739,6 +2411,11 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.nginxConfigContent = refreshed
                     self.nginxConfigDraft = refreshed.content
+                    if let list = self.nginxSiteList {
+                        let sites = list.sites.filter { $0.configPath != content.file.path } +
+                            NginxConfigManager.parseSites(in: refreshed.content, configPath: content.file.path)
+                        self.nginxSiteList = NginxSiteList(sites: sites, capturedAt: Date())
+                    }
                     self.nginxTestResult = result.testResult
                     self.nginxActionMessage = result.rolledBack
                         ? "Nginx test failed. Restored backup: \(result.backupPath)."
@@ -1760,6 +2437,84 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.nginxErrorMessage = error.localizedDescription
                     self.isSavingNginxConfig = false
+                }
+            }
+        }
+    }
+
+    func writeNginxReverseProxy(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        nginxConfigManager: NginxConfigManager,
+        repository: ServerRepository? = nil
+    ) {
+        isWritingNginxReverseProxy = true
+        nginxErrorMessage = nil
+        nginxActionMessage = nil
+        nginxReverseProxyUpsertResult = nil
+        let draft = nginxReverseProxyDraft
+
+        Task {
+            do {
+                let content = try NginxReverseProxyConfigurationBuilder.config(for: draft)
+                let file = try NginxReverseProxyConfigurationBuilder.configFile(for: draft)
+                let result = try await nginxConfigManager.upsertConfig(
+                    path: file.path,
+                    content: content,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let configs = try await nginxConfigManager.listConfigs(profile: profile, sshClient: sshClient)
+                let sites = try await nginxConfigManager.listSites(profile: profile, sshClient: sshClient)
+                let status = result.rolledBack ? "failed" : "success"
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: file.path,
+                    action: "upsert-reverse-proxy",
+                    beforeSnapshot: result.backupPath.map { "backupPath=\($0)" },
+                    afterSnapshot: result.rolledBack ? nil : "serverName=\(draft.serverName.trimmingCharacters(in: .whitespacesAndNewlines)); upstream=\(draft.upstreamURL.trimmingCharacters(in: .whitespacesAndNewlines))",
+                    status: status,
+                    message: result.rolledBack
+                        ? "Reverse proxy config failed nginx -t and was rolled back."
+                        : "Reverse proxy config was written after successful nginx -t."
+                )
+
+                await MainActor.run {
+                    self.nginxConfigList = configs
+                    self.nginxSiteList = sites
+                    self.nginxReverseProxyUpsertResult = result
+                    self.selectedNginxConfig = configs.files.first { $0.path == result.file.path } ?? result.file
+                    self.nginxConfigContent = NginxConfigContent(
+                        file: result.file,
+                        content: result.content,
+                        byteCount: result.content.utf8.count,
+                        capturedAt: result.capturedAt
+                    )
+                    self.nginxConfigDraft = result.content
+                    self.selectedNginxSite = sites.sites.first { $0.configPath == result.file.path }
+                    self.nginxTestResult = result.testResult
+                    self.nginxActionMessage = result.rolledBack
+                        ? "Nginx test failed. Reverse proxy was rolled back."
+                        : "Wrote reverse proxy to \(result.file.path). Review it before reload."
+                    self.isWritingNginxReverseProxy = false
+                }
+            } catch {
+                self.saveRemoteChangeLog(
+                    repository: repository,
+                    profile: profile,
+                    targetType: "nginx",
+                    targetId: draft.configPath,
+                    action: "upsert-reverse-proxy",
+                    beforeSnapshot: nil,
+                    afterSnapshot: nil,
+                    status: "failed",
+                    message: error.localizedDescription
+                )
+                await MainActor.run {
+                    self.nginxErrorMessage = error.localizedDescription
+                    self.isWritingNginxReverseProxy = false
                 }
             }
         }
@@ -2176,6 +2931,7 @@ final class ServerWorkspaceViewModel: ObservableObject {
 
         do {
             deploymentProjects = try repository.fetchDeploymentProjects(serverId: profile.id)
+            didLoadDeploymentProjects = true
             if let selected = selectedDeploymentProject,
                let refreshed = deploymentProjects.first(where: { $0.id == selected.id }) {
                 selectDeploymentProject(refreshed, repository: repository)
@@ -2194,6 +2950,22 @@ final class ServerWorkspaceViewModel: ObservableObject {
             isLoadingDeployments = false
         } catch {
             deploymentErrorMessage = error.localizedDescription
+            didLoadDeploymentProjects = true
+            isLoadingDeployments = false
+        }
+    }
+
+    func loadDeploymentProjectSummary(profile: ServerProfile, repository: ServerRepository) {
+        isLoadingDeployments = true
+        deploymentErrorMessage = nil
+
+        do {
+            deploymentProjects = try repository.fetchDeploymentProjects(serverId: profile.id)
+            didLoadDeploymentProjects = true
+            isLoadingDeployments = false
+        } catch {
+            deploymentErrorMessage = error.localizedDescription
+            didLoadDeploymentProjects = true
             isLoadingDeployments = false
         }
     }
@@ -2731,6 +3503,41 @@ final class ServerWorkspaceViewModel: ObservableObject {
         ].joined(separator: "\n")
     }
 
+    private static func databaseServiceSnapshot(_ service: DatabaseService) -> String {
+        [
+            "kind=\(service.kind.rawValue)",
+            "unit=\(service.unitName ?? "")",
+            "installed=\(service.isInstalled)",
+            "active=\(service.activeState)",
+            "sub=\(service.subState)",
+            "version=\(service.version ?? "")",
+            "ports=\(service.listenEndpoints.joined(separator: ","))",
+            "dataPath=\(service.dataPath ?? "")",
+        ].joined(separator: "\n")
+    }
+
+    private static func dockerContainerSnapshot(_ container: DockerContainer) -> String {
+        [
+            "id=\(container.containerID)",
+            "name=\(container.names)",
+            "image=\(container.image)",
+            "state=\(container.state)",
+            "status=\(container.status)",
+            "ports=\(container.ports)",
+        ].joined(separator: "\n")
+    }
+
+    private static func dockerImageSnapshot(_ image: DockerImage) -> String {
+        [
+            "id=\(image.imageID)",
+            "name=\(image.displayName)",
+            "repository=\(image.repository)",
+            "tag=\(image.tag)",
+            "size=\(image.size)",
+            "created=\(image.createdSince.isEmpty ? image.createdAt : image.createdSince)",
+        ].joined(separator: "\n")
+    }
+
     private static func remoteFileSnapshot(_ entry: RemoteFileEntry) -> String {
         let lines: [String?] = [
             "path=\(entry.path)",
@@ -3116,6 +3923,2217 @@ final class ServerWorkspaceViewModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    func loadGitNativeTokenState(profile: ServerProfile, keychain: KeychainService) {
+        do {
+            isGiteaTokenBound = try keychain.readDevelopmentServiceToken(keychainRef: gitNativeTokenRef(profile: profile, service: .gitea)) != nil
+            isGitLabTokenBound = try keychain.readDevelopmentServiceToken(keychainRef: gitNativeTokenRef(profile: profile, service: .gitLab)) != nil
+            gitNativeErrorMessage = nil
+        } catch {
+            gitNativeErrorMessage = error.localizedDescription
+        }
+    }
+
+    func saveGitNativeToken(
+        service: GitNativeServiceKind,
+        token: String,
+        profile: ServerProfile,
+        keychain: KeychainService
+    ) {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.rangeOfCharacter(from: .newlines) == nil else {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = "Token cannot be empty or contain line breaks."
+            return
+        }
+        do {
+            try keychain.saveDevelopmentServiceToken(trimmed, keychainRef: gitNativeTokenRef(profile: profile, service: service))
+            switch service {
+            case .gitea:
+                giteaTokenDraft = ""
+                isGiteaTokenBound = true
+            case .gitLab:
+                gitLabTokenDraft = ""
+                isGitLabTokenBound = true
+            }
+            gitNativeErrorMessage = nil
+            gitNativeActionMessage = "Saved \(service.rawValue) API token in Keychain."
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteGitNativeToken(
+        service: GitNativeServiceKind,
+        profile: ServerProfile,
+        keychain: KeychainService
+    ) {
+        keychain.deleteDevelopmentServiceToken(keychainRef: gitNativeTokenRef(profile: profile, service: service))
+        switch service {
+        case .gitea:
+            isGiteaTokenBound = false
+            giteaNativeSnapshot = nil
+        case .gitLab:
+            isGitLabTokenBound = false
+            gitLabNativeSnapshot = nil
+        }
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = "Removed \(service.rawValue) API token from Keychain."
+    }
+
+    func loadGitNativeSnapshot(
+        service: GitNativeServiceKind,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isLoadingGitNativeSnapshot else { return }
+        let token: String
+        do {
+            guard let storedToken = try keychain.readDevelopmentServiceToken(keychainRef: gitNativeTokenRef(profile: profile, service: service)) else {
+                gitNativeActionMessage = nil
+                gitNativeErrorMessage = "Bind an administrator API token before loading native \(service.rawValue) data."
+                return
+            }
+            token = storedToken
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isLoadingGitNativeSnapshot = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(service)
+
+        Task {
+            do {
+                switch service {
+                case .gitea:
+                    let snapshot = try await giteaAPIClient.loadSnapshot(baseURL: baseURL, token: token)
+                    await MainActor.run {
+                        self.giteaNativeSnapshot = snapshot
+                        self.isGiteaTokenBound = true
+                        self.gitNativeActionMessage = "Loaded Gitea native management data."
+                        self.isLoadingGitNativeSnapshot = false
+                    }
+                case .gitLab:
+                    let snapshot = try await gitLabAPIClient.loadSnapshot(baseURL: baseURL, token: token)
+                    await MainActor.run {
+                        self.gitLabNativeSnapshot = snapshot
+                        self.isGitLabTokenBound = true
+                        self.gitNativeActionMessage = "Loaded GitLab native management data."
+                        self.isLoadingGitNativeSnapshot = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isLoadingGitNativeSnapshot = false
+                }
+            }
+        }
+    }
+
+    func createGitNativeRepository(
+        service: GitNativeServiceKind,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitNativeRepository else { return }
+        let draft = gitNativeRepositoryDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: service, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitNativeRepository = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(service)
+
+        Task {
+            do {
+                switch service {
+                case .gitea:
+                    let repository = try await giteaAPIClient.createRepository(baseURL: baseURL, token: token, draft: draft)
+                    await MainActor.run {
+                        if self.giteaNativeSnapshot == nil {
+                            self.giteaNativeSnapshot = GiteaNativeSnapshot(
+                                repositories: [],
+                                users: [],
+                                organizations: [],
+                                teams: [],
+                                teamMembers: [],
+                                teamRepositories: [],
+                                keys: [],
+                                tokens: [],
+                                packages: [],
+                                adminOverview: GiteaAdminOverviewSummary(version: nil, cronTasks: []),
+                                issues: [],
+                                pullRequests: [],
+                                capturedAt: Date()
+                            )
+                        }
+                        self.giteaNativeSnapshot?.repositories.insert(repository, at: 0)
+                        self.giteaNativeSnapshot?.capturedAt = Date()
+                        self.gitNativeRepositoryDraft = GitNativeRepositoryDraft()
+                        self.gitNativeActionMessage = "Created Gitea repository \(repository.fullName)."
+                        self.isMutatingGitNativeRepository = false
+                    }
+                case .gitLab:
+                    let project = try await gitLabAPIClient.createProject(baseURL: baseURL, token: token, draft: draft)
+                    await MainActor.run {
+                        if self.gitLabNativeSnapshot == nil {
+                            self.gitLabNativeSnapshot = GitLabNativeSnapshot(
+                                projects: [],
+                                groups: [],
+                                users: [],
+                                members: [],
+                                branches: [],
+                                tags: [],
+                                issues: [],
+                                mergeRequests: [],
+                                pipelines: [],
+                                jobs: [],
+                                packages: [],
+                                runners: [],
+                                variables: [],
+                                deployKeys: [],
+                                deployTokens: [],
+                                adminOverview: .empty,
+                                capturedAt: Date()
+                            )
+                        }
+                        self.gitLabNativeSnapshot?.projects.insert(project, at: 0)
+                        self.gitLabNativeSnapshot?.capturedAt = Date()
+                        self.gitNativeRepositoryDraft = GitNativeRepositoryDraft()
+                        self.gitNativeActionMessage = "Created GitLab project \(project.pathWithNamespace)."
+                        self.isMutatingGitNativeRepository = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitNativeRepository = false
+                }
+            }
+        }
+    }
+
+    func deleteGiteaNativeRepository(
+        fullName: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGitNativeRepository else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitNativeRepository = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.deleteRepository(baseURL: baseURL, token: token, fullName: fullName)
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.repositories.removeAll { $0.fullName == fullName }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted Gitea repository \(fullName)."
+                    self.isMutatingGitNativeRepository = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitNativeRepository = false
+                }
+            }
+        }
+    }
+
+    func updateGiteaNativeRepositorySettings(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGitNativeRepository else { return }
+        let draft = giteaRepositorySettingsDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitNativeRepository = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                let repository = try await giteaAPIClient.updateRepository(
+                    baseURL: baseURL,
+                    token: token,
+                    draft: draft
+                )
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.repositories.replaceOrAppend(repository) {
+                        $0.fullName == repository.fullName || $0.id == repository.id
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.giteaRepositorySettingsDraft = GiteaRepositorySettingsDraft(
+                        fullName: repository.fullName,
+                        description: repository.description ?? "",
+                        isPrivate: repository.isPrivate,
+                        defaultBranch: repository.defaultBranch ?? "",
+                        hasIssues: repository.hasIssues,
+                        hasWiki: repository.hasWiki,
+                        hasPullRequests: repository.hasPullRequests,
+                        hasPackages: repository.hasPackages,
+                        archived: repository.isArchived == true
+                    )
+                    self.gitNativeActionMessage = "Updated Gitea repository \(repository.fullName)."
+                    self.isMutatingGitNativeRepository = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitNativeRepository = false
+                }
+            }
+        }
+    }
+
+    func deleteGitLabNativeProject(
+        projectId: Int64,
+        pathWithNamespace: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitNativeRepository else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitNativeRepository = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                try await gitLabAPIClient.deleteProject(baseURL: baseURL, token: token, projectId: projectId)
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.projects.removeAll { $0.id == projectId }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted GitLab project \(pathWithNamespace)."
+                    self.isMutatingGitNativeRepository = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitNativeRepository = false
+                }
+            }
+        }
+    }
+
+    func updateGitLabNativeProjectSettings(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitNativeRepository else { return }
+        let draft = gitLabProjectSettingsDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitNativeRepository = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let project = try await gitLabAPIClient.updateProject(
+                    baseURL: baseURL,
+                    token: token,
+                    draft: draft
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.projects.replaceOrAppend(project) {
+                        $0.id == project.id
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitLabProjectSettingsDraft = GitLabProjectSettingsDraft(
+                        projectId: project.id,
+                        pathWithNamespace: project.pathWithNamespace,
+                        description: draft.description,
+                        visibility: project.visibility ?? draft.visibility,
+                        defaultBranch: project.defaultBranch ?? draft.defaultBranch,
+                        archived: project.archived
+                    )
+                    self.gitNativeActionMessage = "Updated GitLab project \(project.pathWithNamespace)."
+                    self.isMutatingGitNativeRepository = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitNativeRepository = false
+                }
+            }
+        }
+    }
+
+    func deleteGitLabNativePackage(
+        projectId: Int64,
+        packageId: Int64,
+        name: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabPackage else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabPackage = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                try await gitLabAPIClient.deletePackage(
+                    baseURL: baseURL,
+                    token: token,
+                    projectId: projectId,
+                    packageId: packageId
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.packages.removeAll {
+                        $0.projectId == projectId && $0.id == packageId
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted GitLab package \(name)."
+                    self.isMutatingGitLabPackage = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabPackage = false
+                }
+            }
+        }
+    }
+
+    func addGiteaNativeTeamMember(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaTeamMember else { return }
+        let draft = giteaTeamMemberDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaTeamMember = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.addTeamMember(baseURL: baseURL, token: token, draft: draft)
+                await MainActor.run {
+                    let member = GiteaTeamMemberSummary(
+                        teamId: draft.teamId,
+                        username: draft.trimmedUsername,
+                        fullName: nil,
+                        email: nil,
+                        isAdmin: nil,
+                        isActive: nil,
+                        lastLogin: nil
+                    )
+                    self.giteaNativeSnapshot?.teamMembers.replaceOrAppend(member) {
+                        $0.teamId == member.teamId && $0.username == member.username
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Added \(draft.trimmedUsername) to Gitea team \(draft.teamId)."
+                    self.giteaTeamMemberDraft.username = ""
+                    self.isMutatingGiteaTeamMember = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaTeamMember = false
+                }
+            }
+        }
+    }
+
+    func addGiteaNativeTeamRepository(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaTeamRepository else { return }
+        let draft = giteaTeamRepositoryDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaTeamRepository = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.addTeamRepository(baseURL: baseURL, token: token, draft: draft)
+                await MainActor.run {
+                    let repository = self.giteaNativeSnapshot?.repositories.first {
+                        $0.fullName == draft.trimmedRepositoryFullName
+                    }
+                    let parts = draft.trimmedRepositoryFullName.split(separator: "/", maxSplits: 1).map(String.init)
+                    let teamRepository = GiteaTeamRepositorySummary(
+                        teamId: draft.teamId,
+                        repositoryId: repository?.id ?? 0,
+                        fullName: draft.trimmedRepositoryFullName,
+                        owner: repository?.owner ?? parts.first ?? "",
+                        name: repository?.name ?? parts.dropFirst().first ?? draft.trimmedRepositoryFullName,
+                        isPrivate: repository?.isPrivate ?? true,
+                        defaultBranch: repository?.defaultBranch,
+                        updatedAt: repository?.updatedAt
+                    )
+                    self.giteaNativeSnapshot?.teamRepositories.replaceOrAppend(teamRepository) {
+                        $0.teamId == teamRepository.teamId && $0.fullName == teamRepository.fullName
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Bound \(draft.trimmedRepositoryFullName) to Gitea team \(draft.teamId)."
+                    self.giteaTeamRepositoryDraft.repositoryFullName = ""
+                    self.isMutatingGiteaTeamRepository = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaTeamRepository = false
+                }
+            }
+        }
+    }
+
+    func saveGiteaNativeTeam(
+        mode: GiteaTeamSaveMode,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaTeam else { return }
+        let draft = giteaTeamDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaTeam = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                let team: GiteaTeamSummary
+                switch mode {
+                case .create:
+                    team = try await giteaAPIClient.createTeam(baseURL: baseURL, token: token, draft: draft)
+                case .update:
+                    team = try await giteaAPIClient.updateTeam(baseURL: baseURL, token: token, draft: draft)
+                }
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.teams.replaceOrAppend(team) {
+                        $0.id == team.id
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "\(mode.displayName) Gitea team \(team.organization)/\(team.name)."
+                    self.giteaTeamDraft = GiteaTeamDraft()
+                    self.isMutatingGiteaTeam = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaTeam = false
+                }
+            }
+        }
+    }
+
+    func deleteGiteaNativeTeam(
+        teamId: Int64,
+        name: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaTeam else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaTeam = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.deleteTeam(baseURL: baseURL, token: token, teamId: teamId)
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.teams.removeAll { $0.id == teamId }
+                    self.giteaNativeSnapshot?.teamMembers.removeAll { $0.teamId == teamId }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    if self.giteaTeamDraft.teamId == teamId {
+                        self.giteaTeamDraft = GiteaTeamDraft()
+                    }
+                    self.gitNativeActionMessage = "Deleted Gitea team \(name)."
+                    self.isMutatingGiteaTeam = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaTeam = false
+                }
+            }
+        }
+    }
+
+    func saveGiteaNativeUser(
+        mode: GiteaUserSaveMode,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaUser else { return }
+        let draft = giteaUserDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaUser = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                let user: GiteaUserSummary
+                switch mode {
+                case .create:
+                    user = try await giteaAPIClient.createUser(baseURL: baseURL, token: token, draft: draft)
+                case .update:
+                    user = try await giteaAPIClient.updateUser(baseURL: baseURL, token: token, draft: draft)
+                }
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.users.replaceOrAppend(user) {
+                        $0.username == user.username || $0.username == draft.trimmedOriginalUsername || $0.id == user.id
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "\(mode.displayName) Gitea user \(user.username)."
+                    self.giteaUserDraft = GiteaUserDraft()
+                    self.isMutatingGiteaUser = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaUser = false
+                }
+            }
+        }
+    }
+
+    func deleteGiteaNativeUser(
+        username: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaUser else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaUser = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.deleteUser(baseURL: baseURL, token: token, username: username)
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.users.removeAll { $0.username == username }
+                    self.giteaNativeSnapshot?.teamMembers.removeAll { $0.username == username }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted Gitea user \(username)."
+                    self.isMutatingGiteaUser = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaUser = false
+                }
+            }
+        }
+    }
+
+    func saveGiteaNativeOrganization(
+        mode: GiteaOrganizationSaveMode,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaOrganization else { return }
+        let draft = giteaOrganizationDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaOrganization = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                let organization: GiteaOrganizationSummary
+                switch mode {
+                case .create:
+                    organization = try await giteaAPIClient.createOrganization(baseURL: baseURL, token: token, draft: draft)
+                case .update:
+                    organization = try await giteaAPIClient.updateOrganization(baseURL: baseURL, token: token, draft: draft)
+                }
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.organizations.replaceOrAppend(organization) {
+                        $0.id == organization.id || $0.username == organization.username || $0.username == draft.trimmedOriginalUsername
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "\(mode.displayName) Gitea organization \(organization.username)."
+                    self.giteaOrganizationDraft = GiteaOrganizationDraft()
+                    self.isMutatingGiteaOrganization = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaOrganization = false
+                }
+            }
+        }
+    }
+
+    func deleteGiteaNativeOrganization(
+        username: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaOrganization else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaOrganization = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.deleteOrganization(baseURL: baseURL, token: token, username: username)
+                await MainActor.run {
+                    let removedTeamIds = Set(self.giteaNativeSnapshot?.teams.filter { $0.organization == username }.map(\.id) ?? [])
+                    self.giteaNativeSnapshot?.organizations.removeAll { $0.username == username }
+                    self.giteaNativeSnapshot?.teams.removeAll { $0.organization == username }
+                    self.giteaNativeSnapshot?.teamMembers.removeAll { removedTeamIds.contains($0.teamId) }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    if self.giteaOrganizationDraft.trimmedOriginalUsername == username || self.giteaOrganizationDraft.trimmedUsername == username {
+                        self.giteaOrganizationDraft = GiteaOrganizationDraft()
+                    }
+                    self.gitNativeActionMessage = "Deleted Gitea organization \(username)."
+                    self.isMutatingGiteaOrganization = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaOrganization = false
+                }
+            }
+        }
+    }
+
+    func createGiteaNativeKey(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaKey else { return }
+        let draft = giteaKeyDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaKey = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                let key = try await giteaAPIClient.createKey(baseURL: baseURL, token: token, draft: draft)
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.keys.insert(key, at: 0)
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Created Gitea SSH key \(key.title)."
+                    self.giteaKeyDraft = GiteaKeyDraft()
+                    self.isMutatingGiteaKey = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaKey = false
+                }
+            }
+        }
+    }
+
+    func deleteGiteaNativeKey(
+        keyId: Int64,
+        title: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaKey else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaKey = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.deleteKey(baseURL: baseURL, token: token, keyId: keyId)
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.keys.removeAll { $0.id == keyId }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted Gitea SSH key \(title)."
+                    self.isMutatingGiteaKey = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaKey = false
+                }
+            }
+        }
+    }
+
+    func createGiteaNativeAccessToken(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaAccessToken else { return }
+        let draft = giteaAccessTokenDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaAccessToken = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        giteaAccessTokenCreationResult = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                let result = try await giteaAPIClient.createAccessToken(baseURL: baseURL, token: token, draft: draft)
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.tokens.replaceOrAppend(result.token) {
+                        $0.id == result.token.id || $0.name == result.token.name
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.giteaAccessTokenCreationResult = result
+                    self.gitNativeActionMessage = "Created Gitea access token \(result.token.name). Copy the one-time secret now."
+                    self.giteaAccessTokenDraft = GiteaAccessTokenDraft(username: draft.trimmedUsername)
+                    self.isMutatingGiteaAccessToken = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaAccessToken = false
+                }
+            }
+        }
+    }
+
+    func clearGiteaAccessTokenCreationResult() {
+        giteaAccessTokenCreationResult = nil
+    }
+
+    func loadGiteaNativePackageDetail(
+        owner: String,
+        type: String,
+        name: String,
+        version: String?,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isLoadingGiteaPackageDetail else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isLoadingGiteaPackageDetail = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                let detail = try await giteaAPIClient.packageDetail(
+                    baseURL: baseURL,
+                    token: token,
+                    owner: owner,
+                    type: type,
+                    name: name,
+                    version: version
+                )
+                await MainActor.run {
+                    self.selectedGiteaPackageDetail = detail
+                    self.gitNativeActionMessage = "Loaded Gitea package \(name)\(detail.selectedVersion.map { " version \($0)" } ?? "")."
+                    self.isLoadingGiteaPackageDetail = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isLoadingGiteaPackageDetail = false
+                }
+            }
+        }
+    }
+
+    func deleteGiteaNativeAccessToken(
+        username: String,
+        tokenId: Int64,
+        name: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaAccessToken else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaAccessToken = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.deleteAccessToken(baseURL: baseURL, token: token, username: username, tokenId: tokenId)
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.tokens.removeAll { $0.id == tokenId }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted Gitea access token \(name)."
+                    self.isMutatingGiteaAccessToken = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaAccessToken = false
+                }
+            }
+        }
+    }
+
+    func deleteGiteaNativePackage(
+        owner: String,
+        type: String,
+        name: String,
+        version: String?,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaPackage else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaPackage = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.deletePackage(
+                    baseURL: baseURL,
+                    token: token,
+                    owner: owner,
+                    type: type,
+                    name: name,
+                    version: version
+                )
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.packages.removeAll {
+                        $0.owner == owner &&
+                            $0.type == type &&
+                            $0.name == name &&
+                            (version == nil || $0.version == version)
+                    }
+                    if self.selectedGiteaPackageDetail?.owner == owner &&
+                        self.selectedGiteaPackageDetail?.type == type &&
+                        self.selectedGiteaPackageDetail?.name == name &&
+                        (version == nil || self.selectedGiteaPackageDetail?.selectedVersion == version) {
+                        self.selectedGiteaPackageDetail = nil
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted Gitea package \(name)\(version.map { " version \($0)" } ?? "")."
+                    self.isMutatingGiteaPackage = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaPackage = false
+                }
+            }
+        }
+    }
+
+    func removeGiteaNativeTeamMember(
+        teamId: Int64,
+        username: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaTeamMember else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaTeamMember = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.removeTeamMember(baseURL: baseURL, token: token, teamId: teamId, username: username)
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.teamMembers.removeAll {
+                        $0.teamId == teamId && $0.username == username
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Removed \(username) from Gitea team \(teamId)."
+                    self.isMutatingGiteaTeamMember = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaTeamMember = false
+                }
+            }
+        }
+    }
+
+    func removeGiteaNativeTeamRepository(
+        teamId: Int64,
+        repositoryFullName: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGiteaTeamRepository else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGiteaTeamRepository = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                try await giteaAPIClient.removeTeamRepository(
+                    baseURL: baseURL,
+                    token: token,
+                    teamId: teamId,
+                    repositoryFullName: repositoryFullName
+                )
+                await MainActor.run {
+                    self.giteaNativeSnapshot?.teamRepositories.removeAll {
+                        $0.teamId == teamId && $0.fullName == repositoryFullName
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Removed \(repositoryFullName) from Gitea team \(teamId)."
+                    self.isMutatingGiteaTeamRepository = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGiteaTeamRepository = false
+                }
+            }
+        }
+    }
+
+    func updateGiteaNativeIssueState(
+        repositoryFullName: String,
+        issueNumber: Int,
+        isPullRequest: Bool,
+        action: GitNativeIssueStateAction,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        giteaAPIClient: GiteaAPIClient
+    ) {
+        guard !isMutatingGitNativeIssueState else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitea, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitNativeIssueState = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitea)
+
+        Task {
+            do {
+                let updatedIssue = try await giteaAPIClient.updateIssueState(
+                    baseURL: baseURL,
+                    token: token,
+                    repositoryFullName: repositoryFullName,
+                    issueNumber: issueNumber,
+                    action: action
+                )
+                await MainActor.run {
+                    if isPullRequest {
+                        let updatedPullRequest = GiteaPullRequestSummary(
+                            id: updatedIssue.id,
+                            number: updatedIssue.number,
+                            title: updatedIssue.title,
+                            state: updatedIssue.state,
+                            repository: updatedIssue.repository,
+                            author: updatedIssue.author,
+                            updatedAt: updatedIssue.updatedAt
+                        )
+                        self.giteaNativeSnapshot?.pullRequests.replaceOrAppend(updatedPullRequest) {
+                            $0.repository == repositoryFullName && $0.number == issueNumber
+                        }
+                    } else {
+                        self.giteaNativeSnapshot?.issues.replaceOrAppend(updatedIssue) {
+                            $0.repository == repositoryFullName && $0.number == issueNumber
+                        }
+                    }
+                    self.giteaNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "\(action.displayName) Gitea \(isPullRequest ? "PR" : "Issue") #\(issueNumber)."
+                    self.isMutatingGitNativeIssueState = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitNativeIssueState = false
+                }
+            }
+        }
+    }
+
+    func createGitLabNativeGroup(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabGroup else { return }
+        let draft = gitLabGroupDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabGroup = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let group = try await gitLabAPIClient.createGroup(baseURL: baseURL, token: token, draft: draft)
+                await MainActor.run {
+                    if self.gitLabNativeSnapshot == nil {
+                        self.gitLabNativeSnapshot = GitLabNativeSnapshot(
+                            projects: [],
+                            groups: [],
+                            users: [],
+                            members: [],
+                            branches: [],
+                            tags: [],
+                            issues: [],
+                            mergeRequests: [],
+                            pipelines: [],
+                            jobs: [],
+                            packages: [],
+                            runners: [],
+                            variables: [],
+                            deployKeys: [],
+                            deployTokens: [],
+                            adminOverview: .empty,
+                            capturedAt: Date()
+                        )
+                    }
+                    self.gitLabNativeSnapshot?.groups.insert(group, at: 0)
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitLabGroupDraft = GitLabGroupDraft(parentId: draft.parentId)
+                    self.gitNativeActionMessage = "Created GitLab group \(group.fullPath)."
+                    self.isMutatingGitLabGroup = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabGroup = false
+                }
+            }
+        }
+    }
+
+    func updateGitLabNativeGroup(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabGroup else { return }
+        let draft = gitLabGroupDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabGroup = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let group = try await gitLabAPIClient.updateGroup(baseURL: baseURL, token: token, draft: draft)
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.groups.replaceOrAppend(group) { $0.id == group.id }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitLabGroupDraft = GitLabGroupDraft(parentId: draft.parentId)
+                    self.gitNativeActionMessage = "Updated GitLab group \(group.fullPath)."
+                    self.isMutatingGitLabGroup = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabGroup = false
+                }
+            }
+        }
+    }
+
+    func deleteGitLabNativeGroup(
+        groupId: Int64,
+        fullPath: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitNativeRepository else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitNativeRepository = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                try await gitLabAPIClient.deleteGroup(baseURL: baseURL, token: token, groupId: groupId)
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.groups.removeAll { $0.id == groupId }
+                    self.gitLabNativeSnapshot?.members.removeAll { $0.scope == .group && $0.targetId == groupId }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    if self.gitLabGroupDraft.groupId == groupId {
+                        self.gitLabGroupDraft = GitLabGroupDraft()
+                    }
+                    self.gitNativeActionMessage = "Deleted GitLab group \(fullPath)."
+                    self.isMutatingGitNativeRepository = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitNativeRepository = false
+                }
+            }
+        }
+    }
+
+    func updateGitLabNativeIssueState(
+        projectId: Int64,
+        issueIid: Int,
+        action: GitNativeIssueStateAction,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitNativeIssueState else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitNativeIssueState = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let updatedIssue = try await gitLabAPIClient.updateIssueState(
+                    baseURL: baseURL,
+                    token: token,
+                    projectId: projectId,
+                    issueIid: issueIid,
+                    action: action
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.issues.replaceOrAppend(updatedIssue) {
+                        $0.projectId == projectId && $0.iid == issueIid
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "\(action.displayName) GitLab Issue !\(issueIid)."
+                    self.isMutatingGitNativeIssueState = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitNativeIssueState = false
+                }
+            }
+        }
+    }
+
+    func updateGitLabNativeMergeRequestState(
+        projectId: Int64,
+        mergeRequestIid: Int,
+        action: GitNativeIssueStateAction,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitNativeIssueState else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitNativeIssueState = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let updatedMergeRequest = try await gitLabAPIClient.updateMergeRequestState(
+                    baseURL: baseURL,
+                    token: token,
+                    projectId: projectId,
+                    mergeRequestIid: mergeRequestIid,
+                    action: action
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.mergeRequests.replaceOrAppend(updatedMergeRequest) {
+                        $0.projectId == projectId && $0.iid == mergeRequestIid
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "\(action.displayName) GitLab MR !\(mergeRequestIid)."
+                    self.isMutatingGitNativeIssueState = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitNativeIssueState = false
+                }
+            }
+        }
+    }
+
+    func performGitLabNativePipelineAction(
+        projectId: Int64,
+        pipelineId: Int64,
+        action: GitLabPipelineAction,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabPipeline else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabPipeline = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let updatedPipeline: GitLabPipelineSummary
+                switch action {
+                case .retry:
+                    updatedPipeline = try await gitLabAPIClient.retryPipeline(
+                        baseURL: baseURL,
+                        token: token,
+                        projectId: projectId,
+                        pipelineId: pipelineId
+                    )
+                case .cancel:
+                    updatedPipeline = try await gitLabAPIClient.cancelPipeline(
+                        baseURL: baseURL,
+                        token: token,
+                        projectId: projectId,
+                        pipelineId: pipelineId
+                    )
+                }
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.pipelines.replaceOrAppend(updatedPipeline) {
+                        $0.projectId == projectId && $0.id == pipelineId
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "\(action.displayName) GitLab Pipeline #\(pipelineId)."
+                    self.isMutatingGitLabPipeline = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabPipeline = false
+                }
+            }
+        }
+    }
+
+    func performGitLabNativeJobAction(
+        projectId: Int64,
+        jobId: Int64,
+        action: GitLabJobAction,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabJob else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabJob = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let updatedJob: GitLabJobSummary
+                switch action {
+                case .retry:
+                    updatedJob = try await gitLabAPIClient.retryJob(
+                        baseURL: baseURL,
+                        token: token,
+                        projectId: projectId,
+                        jobId: jobId
+                    )
+                case .cancel:
+                    updatedJob = try await gitLabAPIClient.cancelJob(
+                        baseURL: baseURL,
+                        token: token,
+                        projectId: projectId,
+                        jobId: jobId
+                    )
+                case .play:
+                    updatedJob = try await gitLabAPIClient.playJob(
+                        baseURL: baseURL,
+                        token: token,
+                        projectId: projectId,
+                        jobId: jobId
+                    )
+                }
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.jobs.replaceOrAppend(updatedJob) {
+                        $0.projectId == projectId && $0.id == jobId
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "\(action.displayName) GitLab Job #\(jobId)."
+                    self.isMutatingGitLabJob = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabJob = false
+                }
+            }
+        }
+    }
+
+    func loadGitLabNativeJobTrace(
+        projectId: Int64,
+        jobId: Int64,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isLoadingGitLabJobTrace else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isLoadingGitLabJobTrace = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let trace = try await gitLabAPIClient.jobTrace(
+                    baseURL: baseURL,
+                    token: token,
+                    projectId: projectId,
+                    jobId: jobId
+                )
+                await MainActor.run {
+                    self.selectedGitLabJobTrace = trace
+                    self.gitNativeActionMessage = "Loaded GitLab Job #\(jobId) trace."
+                    self.isLoadingGitLabJobTrace = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isLoadingGitLabJobTrace = false
+                }
+            }
+        }
+    }
+
+    func saveGitLabNativeVariable(
+        mode: GitLabVariableSaveMode,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabVariable else { return }
+        let draft = gitLabVariableDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabVariable = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let variable: GitLabVariableSummary
+                switch mode {
+                case .create:
+                    variable = try await gitLabAPIClient.createVariable(baseURL: baseURL, token: token, draft: draft)
+                case .update:
+                    variable = try await gitLabAPIClient.updateVariable(baseURL: baseURL, token: token, draft: draft)
+                }
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.variables.replaceOrAppend(variable) {
+                        $0.projectId == variable.projectId &&
+                            $0.key == variable.key &&
+                            ($0.environmentScope ?? "*") == (variable.environmentScope ?? "*")
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitLabVariableDraft.value = ""
+                    self.gitNativeActionMessage = "\(mode.displayName) GitLab variable \(variable.key)."
+                    self.isMutatingGitLabVariable = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabVariable = false
+                }
+            }
+        }
+    }
+
+    func saveGitLabNativeMember(
+        mode: GitLabMemberSaveMode,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabMember else { return }
+        let draft = gitLabMemberDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabMember = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let member: GitLabMemberSummary
+                switch mode {
+                case .add:
+                    member = try await gitLabAPIClient.addMember(baseURL: baseURL, token: token, draft: draft)
+                case .update:
+                    member = try await gitLabAPIClient.updateMember(baseURL: baseURL, token: token, draft: draft)
+                }
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.members.replaceOrAppend(member) {
+                        $0.scope == member.scope &&
+                            $0.targetId == member.targetId &&
+                            $0.userId == member.userId
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "\(mode.displayName) GitLab \(member.scope.displayName) member \(member.username)."
+                    self.isMutatingGitLabMember = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabMember = false
+                }
+            }
+        }
+    }
+
+    func deleteGitLabNativeMember(
+        scope: GitLabMemberScope,
+        targetId: Int64,
+        userId: Int64,
+        username: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabMember else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabMember = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                try await gitLabAPIClient.deleteMember(
+                    baseURL: baseURL,
+                    token: token,
+                    scope: scope,
+                    targetId: targetId,
+                    userId: userId
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.members.removeAll {
+                        $0.scope == scope && $0.targetId == targetId && $0.userId == userId
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Removed GitLab \(scope.displayName) member \(username)."
+                    self.isMutatingGitLabMember = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabMember = false
+                }
+            }
+        }
+    }
+
+    func deleteGitLabNativeVariable(
+        projectId: Int64,
+        key: String,
+        environmentScope: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabVariable else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabVariable = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                try await gitLabAPIClient.deleteVariable(
+                    baseURL: baseURL,
+                    token: token,
+                    projectId: projectId,
+                    key: key,
+                    environmentScope: environmentScope
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.variables.removeAll {
+                        $0.projectId == projectId &&
+                            $0.key == key &&
+                            ($0.environmentScope ?? "*") == environmentScope
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted GitLab variable \(key)."
+                    self.isMutatingGitLabVariable = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabVariable = false
+                }
+            }
+        }
+    }
+
+    func createGitLabNativeDeployKey(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabDeployKey else { return }
+        let draft = gitLabDeployKeyDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabDeployKey = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let deployKey = try await gitLabAPIClient.createDeployKey(baseURL: baseURL, token: token, draft: draft)
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.deployKeys.replaceOrAppend(deployKey) {
+                        $0.projectId == deployKey.projectId && $0.id == deployKey.id
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Created GitLab deploy key \(deployKey.title)."
+                    self.gitLabDeployKeyDraft = GitLabDeployKeyDraft(projectId: draft.projectId)
+                    self.isMutatingGitLabDeployKey = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabDeployKey = false
+                }
+            }
+        }
+    }
+
+    func deleteGitLabNativeDeployKey(
+        projectId: Int64,
+        keyId: Int64,
+        title: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabDeployKey else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabDeployKey = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                try await gitLabAPIClient.deleteDeployKey(
+                    baseURL: baseURL,
+                    token: token,
+                    projectId: projectId,
+                    keyId: keyId
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.deployKeys.removeAll {
+                        $0.projectId == projectId && $0.id == keyId
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted GitLab deploy key \(title)."
+                    self.isMutatingGitLabDeployKey = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabDeployKey = false
+                }
+            }
+        }
+    }
+
+    func createGitLabNativeDeployToken(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabDeployToken else { return }
+        let draft = gitLabDeployTokenDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabDeployToken = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        gitLabDeployTokenCreationResult = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let result = try await gitLabAPIClient.createDeployToken(
+                    baseURL: baseURL,
+                    token: token,
+                    draft: draft
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.deployTokens.replaceOrAppend(result.deployToken) {
+                        $0.projectId == result.deployToken.projectId && $0.id == result.deployToken.id
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitLabDeployTokenCreationResult = result
+                    self.gitNativeActionMessage = "Created GitLab deploy token \(result.deployToken.name). Copy the one-time secret now."
+                    self.gitLabDeployTokenDraft = GitLabDeployTokenDraft(projectId: draft.projectId)
+                    self.isMutatingGitLabDeployToken = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabDeployToken = false
+                }
+            }
+        }
+    }
+
+    func clearGitLabDeployTokenCreationResult() {
+        gitLabDeployTokenCreationResult = nil
+    }
+
+    func deleteGitLabNativeDeployToken(
+        projectId: Int64,
+        tokenId: Int64,
+        name: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabDeployToken else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabDeployToken = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                try await gitLabAPIClient.deleteDeployToken(
+                    baseURL: baseURL,
+                    token: token,
+                    projectId: projectId,
+                    tokenId: tokenId
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.deployTokens.removeAll {
+                        $0.projectId == projectId && $0.id == tokenId
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted GitLab deploy token \(name)."
+                    self.isMutatingGitLabDeployToken = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabDeployToken = false
+                }
+            }
+        }
+    }
+
+    func createGitLabNativeTag(
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabTag else { return }
+        let draft = gitLabTagDraft
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabTag = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                let tag = try await gitLabAPIClient.createTag(baseURL: baseURL, token: token, draft: draft)
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.tags.replaceOrAppend(tag) {
+                        $0.projectId == tag.projectId && $0.name == tag.name
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Created GitLab tag \(tag.name)."
+                    self.gitLabTagDraft = GitLabTagDraft(projectId: draft.projectId, ref: draft.ref)
+                    self.isMutatingGitLabTag = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabTag = false
+                }
+            }
+        }
+    }
+
+    func deleteGitLabNativeTag(
+        projectId: Int64,
+        tagName: String,
+        profile: ServerProfile,
+        keychain: KeychainService,
+        gitLabAPIClient: GitLabAPIClient
+    ) {
+        guard !isMutatingGitLabTag else { return }
+        let token: String
+        do {
+            token = try readGitNativeToken(service: .gitLab, profile: profile, keychain: keychain)
+        } catch {
+            gitNativeActionMessage = nil
+            gitNativeErrorMessage = error.localizedDescription
+            return
+        }
+
+        isMutatingGitLabTag = true
+        gitNativeErrorMessage = nil
+        gitNativeActionMessage = nil
+        let baseURL = gitNativeBaseURL(.gitLab)
+
+        Task {
+            do {
+                try await gitLabAPIClient.deleteTag(
+                    baseURL: baseURL,
+                    token: token,
+                    projectId: projectId,
+                    tagName: tagName
+                )
+                await MainActor.run {
+                    self.gitLabNativeSnapshot?.tags.removeAll {
+                        $0.projectId == projectId && $0.name == tagName
+                    }
+                    self.gitLabNativeSnapshot?.capturedAt = Date()
+                    self.gitNativeActionMessage = "Deleted GitLab tag \(tagName)."
+                    self.isMutatingGitLabTag = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.gitNativeActionMessage = nil
+                    self.gitNativeErrorMessage = error.localizedDescription
+                    self.isMutatingGitLabTag = false
+                }
+            }
+        }
+    }
+
+    private func gitNativeBaseURL(_ service: GitNativeServiceKind) -> String {
+        switch service {
+        case .gitea:
+            giteaInstallResult?.externalURL ?? giteaDraft.externalURL
+        case .gitLab:
+            gitLabStatusSnapshot?.externalURL ?? gitLabServiceInstance?.webURL ?? gitLabDraft.externalURL
+        }
+    }
+
+    private func readGitNativeToken(service: GitNativeServiceKind, profile: ServerProfile, keychain: KeychainService) throws -> String {
+        guard let token = try keychain.readDevelopmentServiceToken(keychainRef: gitNativeTokenRef(profile: profile, service: service)) else {
+            throw GitServiceAPIError.invalidToken
+        }
+        return token
+    }
+
+    private func gitNativeTokenRef(profile: ServerProfile, service: GitNativeServiceKind) -> String {
+        "\(profile.id.uuidString)_\(service.rawValue)"
+    }
+
     @discardableResult
     func validateRegistryDraftForEditing() -> Bool {
         do {
@@ -3266,6 +6284,10 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 )
                 await MainActor.run {
                     self.verdaccioPackages = packages
+                    if let detail = self.selectedVerdaccioPackageDetail,
+                       !packages.contains(where: { $0.name == detail.name }) {
+                        self.selectedVerdaccioPackageDetail = nil
+                    }
                     self.registryActionMessage = "Loaded \(packages.count) Verdaccio packages."
                     self.isLoadingVerdaccioPackages = false
                 }
@@ -3273,6 +6295,80 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 await MainActor.run {
                     self.registryErrorMessage = error.localizedDescription
                     self.isLoadingVerdaccioPackages = false
+                }
+            }
+        }
+    }
+
+    func loadVerdaccioPackageDetail(
+        packageName: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager
+    ) {
+        guard !isLoadingVerdaccioPackageDetail else { return }
+        isLoadingVerdaccioPackageDetail = true
+        registryErrorMessage = nil
+
+        Task {
+            do {
+                let detail = try await verdaccioManager.packageDetail(
+                    draft: registryDraft,
+                    packageName: packageName,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.selectedVerdaccioPackageDetail = detail
+                    self.registryActionMessage = "Loaded Verdaccio package \(detail.name)."
+                    self.isLoadingVerdaccioPackageDetail = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isLoadingVerdaccioPackageDetail = false
+                }
+            }
+        }
+    }
+
+    func deleteVerdaccioPackage(
+        packageName: String,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        verdaccioManager: VerdaccioManager
+    ) {
+        guard !isDeletingVerdaccioPackage else { return }
+        isDeletingVerdaccioPackage = true
+        registryErrorMessage = nil
+        registryActionMessage = nil
+
+        Task {
+            do {
+                let result = try await verdaccioManager.deletePackage(
+                    draft: registryDraft,
+                    packageName: packageName,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                let packages = try await verdaccioManager.listPackages(
+                    draft: registryDraft,
+                    profile: profile,
+                    sshClient: sshClient
+                )
+                await MainActor.run {
+                    self.verdaccioPackageDeletionResult = result
+                    self.verdaccioPackages = packages
+                    if self.selectedVerdaccioPackageDetail?.name == result.packageName {
+                        self.selectedVerdaccioPackageDetail = nil
+                    }
+                    self.registryActionMessage = "Deleted Verdaccio package \(result.packageName). Backup: \(result.backupPath)."
+                    self.isDeletingVerdaccioPackage = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.registryErrorMessage = error.localizedDescription
+                    self.isDeletingVerdaccioPackage = false
                 }
             }
         }
@@ -4032,6 +7128,14 @@ final class ServerWorkspaceViewModel: ObservableObject {
                 runSmokeTest(profile: profile, sshClient: sshClient)
             case let .command(command, repository):
                 executeCommand(command, profile: profile, sshClient: sshClient, repository: repository)
+            case let .dashboard(dashboardService, cloudMetricService, repository):
+                refreshDashboard(
+                    profile: profile,
+                    sshClient: sshClient,
+                    dashboardService: dashboardService,
+                    cloudMetricService: cloudMetricService,
+                    repository: repository
+                )
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -4563,6 +7667,7 @@ private enum PendingHostKeyAction {
     case connect
     case smokeTest
     case command(String, ServerRepository?)
+    case dashboard(DashboardService, CloudMetricService?, ServerRepository?)
 }
 
 private enum QueuedRemoteFileTransfer {
@@ -4617,5 +7722,15 @@ private enum QueuedRemoteFileTransfer {
 private extension String {
     var withTableBounds: String {
         "| \(self) |"
+    }
+}
+
+private extension Array {
+    mutating func replaceOrAppend(_ element: Element, matching predicate: (Element) -> Bool) {
+        if let index = firstIndex(where: predicate) {
+            self[index] = element
+        } else {
+            append(element)
+        }
     }
 }

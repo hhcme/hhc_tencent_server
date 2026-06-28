@@ -1174,7 +1174,7 @@ private struct ServerRowView: View {
                 Text(profile.name)
                     .font(.headline)
                 Spacer()
-                Text(cloudLink?.providerId.displayName ?? profile.authType.displayName)
+                Text(profile.serverKind.displayName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1233,6 +1233,10 @@ private struct ServerSummaryPanel: View {
                 GridRow {
                     Text("Auth").foregroundStyle(.secondary)
                     Text(profile.authType.displayName)
+                }
+                GridRow {
+                    Text("Type").foregroundStyle(.secondary)
+                    Text(profile.serverKind.displayName)
                 }
                 if let groupName = profile.groupName {
                     GridRow {

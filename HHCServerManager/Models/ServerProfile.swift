@@ -16,6 +16,34 @@ enum SSHAuthType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum ServerKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case manualSSH
+    case tencentLighthouse
+    case tencentCVM
+    case alibabaECS
+    case huaweiECS
+    case selfHosted
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .manualSSH:
+            "手动 SSH"
+        case .tencentLighthouse:
+            "腾讯云轻量应用服务器"
+        case .tencentCVM:
+            "腾讯云 CVM"
+        case .alibabaECS:
+            "阿里云 ECS"
+        case .huaweiECS:
+            "华为云 ECS"
+        case .selfHosted:
+            "自建服务器/VPS"
+        }
+    }
+}
+
 struct ServerProfile: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var name: String
@@ -23,6 +51,7 @@ struct ServerProfile: Identifiable, Codable, Equatable, Hashable {
     var port: Int
     var username: String
     var authType: SSHAuthType
+    var serverKind: ServerKind = .manualSSH
     var keychainRef: String
     var groupName: String?
     var createdAt: Date
@@ -147,6 +176,62 @@ struct SystemdUnitList: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+struct SystemdServiceSummary: Equatable, Hashable, Sendable {
+    var total: Int
+    var running: Int
+    var stopped: Int
+    var failed: Int
+    var commonApplications: Int
+}
+
+enum SystemdServiceClassifier {
+    static func summary(for units: [SystemdUnit]) -> SystemdServiceSummary {
+        SystemdServiceSummary(
+            total: units.count,
+            running: units.filter(\.isRunning).count,
+            stopped: units.filter { !isFailed($0) && !$0.isRunning }.count,
+            failed: units.filter(isFailed).count,
+            commonApplications: units.filter(isCommonApplication).count
+        )
+    }
+
+    static func isFailed(_ unit: SystemdUnit) -> Bool {
+        unit.activeState.localizedCaseInsensitiveCompare("failed") == .orderedSame ||
+            unit.subState.localizedCaseInsensitiveContains("failed") ||
+            unit.loadState.localizedCaseInsensitiveContains("failed")
+    }
+
+    static func isCommonApplication(_ unit: SystemdUnit) -> Bool {
+        commonApplicationName(for: unit) != nil
+    }
+
+    static func commonApplicationName(for unit: SystemdUnit) -> String? {
+        let haystack = "\(unit.name) \(unit.description)".lowercased()
+        return commonApplicationRules.first { rule in
+            haystack.contains(rule.keyword)
+        }?.label
+    }
+
+    private static let commonApplicationRules: [(keyword: String, label: String)] = [
+        ("nginx", "Nginx"),
+        ("apache", "Apache"),
+        ("caddy", "Caddy"),
+        ("mysql", "MySQL"),
+        ("mariadb", "MariaDB"),
+        ("postgres", "PostgreSQL"),
+        ("redis", "Redis"),
+        ("mongodb", "MongoDB"),
+        ("docker", "Docker"),
+        ("containerd", "Containerd"),
+        ("node", "Node.js"),
+        ("pm2", "PM2"),
+        ("php", "PHP"),
+        ("gitea", "Gitea"),
+        ("gitlab", "GitLab"),
+        ("verdaccio", "Verdaccio"),
+    ]
+}
+
 enum SystemdUnitAction: String, CaseIterable, Identifiable, Sendable {
     case start
     case stop
@@ -175,6 +260,360 @@ struct SystemdJournalLog: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+enum DatabaseServiceKind: String, CaseIterable, Identifiable, Sendable {
+    case mysql
+    case mariadb
+    case postgresql
+    case redis
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .mysql:
+            "MySQL"
+        case .mariadb:
+            "MariaDB"
+        case .postgresql:
+            "PostgreSQL"
+        case .redis:
+            "Redis"
+        }
+    }
+
+    var defaultPort: String {
+        switch self {
+        case .mysql, .mariadb:
+            "3306"
+        case .postgresql:
+            "5432"
+        case .redis:
+            "6379"
+        }
+    }
+}
+
+struct DatabaseService: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { kind.rawValue }
+    var kind: DatabaseServiceKind
+    var unitName: String?
+    var activeState: String
+    var subState: String
+    var isInstalled: Bool
+    var version: String?
+    var listenEndpoints: [String]
+    var dataPath: String?
+    var recentLog: String?
+
+    var isRunning: Bool {
+        activeState == "active"
+    }
+
+    var statusText: String {
+        guard isInstalled else { return "not found" }
+        if activeState == "unknown" { return "installed" }
+        return subState.isEmpty ? activeState : "\(activeState) / \(subState)"
+    }
+}
+
+struct DatabaseServiceSnapshot: Equatable, Hashable, Sendable {
+    var services: [DatabaseService]
+    var capturedAt: Date
+}
+
+struct DatabaseServiceSummary: Equatable, Hashable, Sendable {
+    var total: Int
+    var installed: Int
+    var running: Int
+    var attention: Int
+    var missing: Int
+}
+
+enum DatabaseServiceFilter: String, CaseIterable, Identifiable, Sendable {
+    case all
+    case installed
+    case running
+    case attention
+    case missing
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            "全部"
+        case .installed:
+            "已安装"
+        case .running:
+            "运行中"
+        case .attention:
+            "需关注"
+        case .missing:
+            "未发现"
+        }
+    }
+}
+
+enum DatabaseServiceInspector {
+    static func summary(for services: [DatabaseService]) -> DatabaseServiceSummary {
+        DatabaseServiceSummary(
+            total: services.count,
+            installed: services.filter(\.isInstalled).count,
+            running: services.filter(\.isRunning).count,
+            attention: services.filter(needsAttention).count,
+            missing: services.filter { !$0.isInstalled }.count
+        )
+    }
+
+    static func filter(_ services: [DatabaseService], by filter: DatabaseServiceFilter) -> [DatabaseService] {
+        services.filter { service in
+            switch filter {
+            case .all:
+                true
+            case .installed:
+                service.isInstalled
+            case .running:
+                service.isRunning
+            case .attention:
+                needsAttention(service)
+            case .missing:
+                !service.isInstalled
+            }
+        }
+    }
+
+    static func needsAttention(_ service: DatabaseService) -> Bool {
+        service.isInstalled && !service.isRunning
+    }
+}
+
+struct DatabaseBackupRestorePlan: Equatable, Hashable, Sendable {
+    var serviceKind: DatabaseServiceKind
+    var backupPath: String
+    var backupCommand: String
+    var restoreCommand: String
+    var prerequisites: [String]
+    var warnings: [String]
+}
+
+struct DatabaseBackupResult: Equatable, Hashable, Sendable {
+    var serviceKind: DatabaseServiceKind
+    var backupPath: String
+    var output: String
+    var capturedAt: Date
+}
+
+struct NetworkInterfaceTrafficUsage: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { name }
+    var name: String
+    var receivedBytes: Double
+    var transmittedBytes: Double
+
+    var totalBytes: Double {
+        receivedBytes + transmittedBytes
+    }
+}
+
+struct NetworkTrafficSummary: Equatable, Hashable, Sendable {
+    var interfaceCount: Int
+    var receivedBytes: Double
+    var transmittedBytes: Double
+    var busiestInterface: NetworkInterfaceTrafficUsage?
+
+    var totalBytes: Double {
+        receivedBytes + transmittedBytes
+    }
+
+    var hasTraffic: Bool {
+        totalBytes > 0
+    }
+}
+
+enum NetworkTrafficInspector {
+    static func parseInterfaceBreakdown(_ value: String) -> [NetworkInterfaceTrafficUsage] {
+        value
+            .split(separator: ";")
+            .compactMap { rawItem -> NetworkInterfaceTrafficUsage? in
+                let item = String(rawItem).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let firstSpace = item.firstIndex(where: \.isWhitespace) else { return nil }
+                let name = String(item[..<firstSpace])
+                let pair = String(item[firstSpace...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let bytes = bytePair(from: pair) else { return nil }
+                return NetworkInterfaceTrafficUsage(
+                    name: name,
+                    receivedBytes: bytes.received,
+                    transmittedBytes: bytes.transmitted
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.totalBytes == rhs.totalBytes {
+                    return lhs.name < rhs.name
+                }
+                return lhs.totalBytes > rhs.totalBytes
+            }
+    }
+
+    static func summary(for interfaces: [NetworkInterfaceTrafficUsage]) -> NetworkTrafficSummary {
+        NetworkTrafficSummary(
+            interfaceCount: interfaces.count,
+            receivedBytes: interfaces.reduce(0) { $0 + $1.receivedBytes },
+            transmittedBytes: interfaces.reduce(0) { $0 + $1.transmittedBytes },
+            busiestInterface: interfaces.max { lhs, rhs in
+                lhs.totalBytes < rhs.totalBytes
+            }
+        )
+    }
+
+    static func trafficShare(
+        for interface: NetworkInterfaceTrafficUsage,
+        in summary: NetworkTrafficSummary
+    ) -> Double {
+        guard summary.totalBytes > 0 else { return 0 }
+        return min(max(interface.totalBytes / summary.totalBytes, 0), 1)
+    }
+
+    static func attentionMessages(for summary: NetworkTrafficSummary) -> [String] {
+        guard summary.interfaceCount > 0 else {
+            return ["未解析到非 lo 网卡明细，无法判断单网卡流量分布。"]
+        }
+        guard let busiest = summary.busiestInterface,
+              summary.totalBytes > 0
+        else {
+            return []
+        }
+
+        let share = trafficShare(for: busiest, in: summary)
+        if share >= 0.9, summary.interfaceCount > 1 {
+            return ["\(busiest.name) 承载超过 90% 的累计流量，建议确认默认路由和业务出口是否符合预期。"]
+        }
+        return []
+    }
+
+    private static func bytePair(from value: String) -> (received: Double, transmitted: Double)? {
+        let parts = value.split(separator: "/").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count == 2,
+              let received = byteValue(parts[0]),
+              let transmitted = byteValue(parts[1])
+        else { return nil }
+        return (received, transmitted)
+    }
+
+    private static func byteValue(_ value: String) -> Double? {
+        let pattern = #"([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+              let numberRange = Range(match.range(at: 1), in: value),
+              let unitRange = Range(match.range(at: 2), in: value),
+              let number = Double(value[numberRange])
+        else { return nil }
+
+        switch value[unitRange].lowercased() {
+        case "b":
+            return number
+        case "kib", "kb":
+            return number * 1024
+        case "mib", "mb":
+            return number * 1024 * 1024
+        case "gib", "gb":
+            return number * 1024 * 1024 * 1024
+        case "tib", "tb":
+            return number * 1024 * 1024 * 1024 * 1024
+        default:
+            return nil
+        }
+    }
+}
+
+enum DockerContainerAction: String, CaseIterable, Identifiable, Sendable {
+    case start
+    case stop
+    case restart
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .start:
+            "Start"
+        case .stop:
+            "Stop"
+        case .restart:
+            "Restart"
+        }
+    }
+}
+
+struct DockerContainer: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { containerID }
+    var containerID: String
+    var image: String
+    var command: String
+    var createdAt: String
+    var runningFor: String
+    var ports: String
+    var status: String
+    var state: String
+    var names: String
+    var size: String?
+
+    var displayName: String {
+        names.nilIfEmpty ?? containerID
+    }
+
+    var isRunning: Bool {
+        state.lowercased() == "running" || status.lowercased().hasPrefix("up ")
+    }
+}
+
+struct DockerImage: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { imageID }
+    var imageID: String
+    var repository: String
+    var tag: String
+    var digest: String?
+    var createdAt: String
+    var createdSince: String
+    var size: String
+
+    var displayName: String {
+        if tag.isEmpty || tag == "<none>" {
+            return repository
+        }
+        return "\(repository):\(tag)"
+    }
+}
+
+struct DockerImagePullResult: Equatable, Hashable, Sendable {
+    var reference: String
+    var output: String
+    var capturedAt: Date
+}
+
+struct DockerImageRemoveResult: Equatable, Hashable, Sendable {
+    var imageID: String
+    var output: String
+    var capturedAt: Date
+}
+
+struct DockerSnapshot: Equatable, Hashable, Sendable {
+    var isAvailable: Bool
+    var version: String?
+    var unavailableReason: String?
+    var containers: [DockerContainer]
+    var images: [DockerImage]
+    var capturedAt: Date
+
+    var runningContainerCount: Int {
+        containers.filter(\.isRunning).count
+    }
+}
+
+struct DockerContainerLog: Equatable, Hashable, Sendable {
+    var containerID: String
+    var text: String
+    var capturedAt: Date
+}
+
 struct CronEntry: Identifiable, Equatable, Hashable, Sendable {
     var id: String { "\(sourcePath ?? "user"):\(originalLine)" }
     var schedule: String
@@ -194,6 +633,37 @@ struct CronTabSnapshot: Equatable, Hashable, Sendable {
     var rawText: String
     var userRawText: String
     var capturedAt: Date
+}
+
+struct CronEntrySummary: Equatable, Hashable, Sendable {
+    var total: Int
+    var enabled: Int
+    var disabled: Int
+    var userEntries: Int
+    var systemEntries: Int
+}
+
+enum CronEntryClassifier {
+    static func summary(for entries: [CronEntry]) -> CronEntrySummary {
+        CronEntrySummary(
+            total: entries.count,
+            enabled: entries.filter(\.isEnabled).count,
+            disabled: entries.filter { !$0.isEnabled }.count,
+            userEntries: entries.filter(\.isUserCrontabEntry).count,
+            systemEntries: entries.filter { !$0.isUserCrontabEntry }.count
+        )
+    }
+
+    static func sourceTitle(for entry: CronEntry) -> String {
+        entry.sourcePath ?? "User crontab"
+    }
+
+    static func runAsTitle(for entry: CronEntry) -> String {
+        if let runAsUser = entry.runAsUser?.nilIfEmpty {
+            return runAsUser
+        }
+        return entry.isUserCrontabEntry ? "SSH user" : "-"
+    }
 }
 
 enum CronEntryAction: String, CaseIterable, Identifiable, Sendable {
@@ -234,6 +704,123 @@ struct NginxConfigList: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+struct NginxSite: Identifiable, Equatable, Hashable, Sendable {
+    var id: String {
+        "\(configPath)#\(blockIndex)"
+    }
+
+    var configPath: String
+    var blockIndex: Int
+    var serverNames: [String]
+    var listen: [String]
+    var root: String?
+    var hasSSL: Bool
+    var sslCertificatePaths: [String]
+    var sslCertificates: [NginxSSLCertificate]
+    var proxyPasses: [String]
+
+    var primaryName: String {
+        serverNames.first ?? "_"
+    }
+
+    var isReverseProxy: Bool {
+        !proxyPasses.isEmpty
+    }
+}
+
+struct NginxSSLCertificate: Identifiable, Equatable, Hashable, Sendable {
+    var id: String { path }
+    var path: String
+    var subject: String?
+    var issuer: String?
+    var notAfter: Date?
+    var inspectionError: String?
+
+    var hasInspectionError: Bool {
+        inspectionError?.isEmpty == false
+    }
+}
+
+struct NginxSiteList: Equatable, Hashable, Sendable {
+    var sites: [NginxSite]
+    var capturedAt: Date
+}
+
+struct NginxSiteSummary: Equatable, Hashable, Sendable {
+    var total: Int
+    var sslEnabled: Int
+    var reverseProxy: Int
+    var staticSites: Int
+    var certificateIssues: Int
+}
+
+enum NginxSiteFilter: String, CaseIterable, Identifiable, Sendable {
+    case all
+    case ssl
+    case reverseProxy
+    case staticSite
+    case certificateIssues
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            "全部"
+        case .ssl:
+            "SSL"
+        case .reverseProxy:
+            "反向代理"
+        case .staticSite:
+            "静态站点"
+        case .certificateIssues:
+            "证书异常"
+        }
+    }
+}
+
+enum NginxSiteInspector {
+    static func summary(for sites: [NginxSite]) -> NginxSiteSummary {
+        NginxSiteSummary(
+            total: sites.count,
+            sslEnabled: sites.filter(\.hasSSL).count,
+            reverseProxy: sites.filter(\.isReverseProxy).count,
+            staticSites: sites.filter(isStaticSite).count,
+            certificateIssues: sites.filter(hasCertificateIssue).count
+        )
+    }
+
+    static func filter(_ sites: [NginxSite], by filter: NginxSiteFilter) -> [NginxSite] {
+        sites.filter { site in
+            switch filter {
+            case .all:
+                true
+            case .ssl:
+                site.hasSSL
+            case .reverseProxy:
+                site.isReverseProxy
+            case .staticSite:
+                isStaticSite(site)
+            case .certificateIssues:
+                hasCertificateIssue(site)
+            }
+        }
+    }
+
+    static func isStaticSite(_ site: NginxSite) -> Bool {
+        site.root?.nilIfEmpty != nil && !site.isReverseProxy
+    }
+
+    static func hasCertificateIssue(_ site: NginxSite) -> Bool {
+        guard site.hasSSL else { return false }
+        if site.sslCertificatePaths.isEmpty { return true }
+        if site.sslCertificates.isEmpty { return true }
+        return site.sslCertificates.contains { certificate in
+            certificate.hasInspectionError || certificate.notAfter.map { $0 < Date() } == true
+        }
+    }
+}
+
 struct NginxTestResult: Equatable, Hashable, Sendable {
     var succeeded: Bool
     var output: String
@@ -257,6 +844,28 @@ struct NginxConfigUpsertResult: Equatable, Hashable, Sendable {
     var createdNewFile: Bool
     var rolledBack: Bool
     var capturedAt: Date
+}
+
+struct NginxReverseProxyDraft: Equatable, Hashable, Sendable {
+    var serverName: String
+    var upstreamURL: String
+    var configPath: String
+    var clientMaxBodySize: String
+    var enableWebSocket: Bool
+
+    init(
+        serverName: String = "example.com",
+        upstreamURL: String = "http://127.0.0.1:3000",
+        configPath: String = "/etc/nginx/conf.d/example-proxy.conf",
+        clientMaxBodySize: String = "50m",
+        enableWebSocket: Bool = true
+    ) {
+        self.serverName = serverName
+        self.upstreamURL = upstreamURL
+        self.configPath = configPath
+        self.clientMaxBodySize = clientMaxBodySize
+        self.enableWebSocket = enableWebSocket
+    }
 }
 
 enum FirewallBackend: String, CaseIterable, Identifiable, Sendable {
@@ -389,11 +998,123 @@ struct EnvironmentFileSaveResult: Equatable, Hashable, Sendable {
     var capturedAt: Date
 }
 
+struct EnvironmentVariableAnalysis: Equatable, Hashable, Sendable {
+    var keys: [String]
+    var sensitiveKeys: [String]
+
+    var variableCount: Int {
+        keys.count
+    }
+}
+
+struct EnvironmentVariableChangeSummary: Equatable, Hashable, Sendable {
+    var addedKeys: [String]
+    var changedKeys: [String]
+    var removedKeys: [String]
+
+    var hasChanges: Bool {
+        !addedKeys.isEmpty || !changedKeys.isEmpty || !removedKeys.isEmpty
+    }
+
+    var allChangedKeys: [String] {
+        Array(Set(addedKeys + changedKeys + removedKeys)).sorted()
+    }
+}
+
+enum EnvironmentVariableInspector {
+    static func analyze(_ content: String) -> EnvironmentVariableAnalysis {
+        let keys = Array(parsedVariables(from: content).keys).sorted()
+        return EnvironmentVariableAnalysis(
+            keys: keys,
+            sensitiveKeys: keys.filter(isSensitiveKey).sorted()
+        )
+    }
+
+    static func changeSummary(from original: String, to draft: String) -> EnvironmentVariableChangeSummary {
+        let originalVariables = parsedVariables(from: original)
+        let draftVariables = parsedVariables(from: draft)
+        let originalKeys = Set(originalVariables.keys)
+        let draftKeys = Set(draftVariables.keys)
+        let sharedKeys = originalKeys.intersection(draftKeys)
+
+        return EnvironmentVariableChangeSummary(
+            addedKeys: Array(draftKeys.subtracting(originalKeys)).sorted(),
+            changedKeys: sharedKeys.filter { originalVariables[$0] != draftVariables[$0] }.sorted(),
+            removedKeys: Array(originalKeys.subtracting(draftKeys)).sorted()
+        )
+    }
+
+    static func maskedKeyList(_ keys: [String], limit: Int = 4) -> String {
+        guard !keys.isEmpty else { return "None" }
+        let visible = keys.prefix(limit).joined(separator: ", ")
+        let remaining = keys.count - min(keys.count, limit)
+        return remaining > 0 ? "\(visible) +\(remaining)" : visible
+    }
+
+    private static func parsedVariables(from content: String) -> [String: String] {
+        content.components(separatedBy: .newlines).reduce(into: [String: String]()) { variables, rawLine in
+            var line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#") else { return }
+            if line.hasPrefix("export ") {
+                line = String(line.dropFirst("export ".count)).trimmingCharacters(in: .whitespaces)
+            }
+            guard let equalsIndex = line.firstIndex(of: "=") else { return }
+            let key = String(line[..<equalsIndex]).trimmingCharacters(in: .whitespaces)
+            guard isValidKey(key) else { return }
+            let value = String(line[line.index(after: equalsIndex)...]).trimmingCharacters(in: .whitespaces)
+            variables[key] = value
+        }
+    }
+
+    private static func isValidKey(_ key: String) -> Bool {
+        key.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil
+    }
+
+    private static func isSensitiveKey(_ key: String) -> Bool {
+        let uppercased = key.uppercased()
+        return [
+            "PASSWORD",
+            "PASS",
+            "SECRET",
+            "TOKEN",
+            "PRIVATE_KEY",
+            "ACCESS_KEY",
+            "CREDENTIAL",
+            "AUTH",
+        ].contains { uppercased.contains($0) }
+    }
+}
+
 enum RemoteFileKind: String, Equatable, Hashable {
     case directory
     case file
     case symlink
     case other
+}
+
+enum RemoteFileCreationKind: String, CaseIterable, Identifiable, Sendable {
+    case file
+    case directory
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .file:
+            "New File"
+        case .directory:
+            "New Folder"
+        }
+    }
+
+    var defaultName: String {
+        switch self {
+        case .file:
+            "untitled.txt"
+        case .directory:
+            "new-folder"
+        }
+    }
 }
 
 struct RemoteFileEntry: Identifiable, Equatable, Hashable {
@@ -550,6 +1271,70 @@ struct CommandHistoryEntry: Identifiable, Codable, Equatable, Hashable {
     var createdAt: Date
 }
 
+struct CommandHistorySummary: Equatable, Hashable, Sendable {
+    var total: Int
+    var succeeded: Int
+    var failed: Int
+    var averageDuration: TimeInterval?
+    var lastRunAt: Date?
+}
+
+enum CommandHistoryStatusFilter: String, CaseIterable, Identifiable, Sendable {
+    case all
+    case succeeded
+    case failed
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            "全部"
+        case .succeeded:
+            "成功"
+        case .failed:
+            "失败"
+        }
+    }
+}
+
+enum CommandHistoryInspector {
+    static func summary(for entries: [CommandHistoryEntry]) -> CommandHistorySummary {
+        let durations = entries.compactMap(\.duration)
+        return CommandHistorySummary(
+            total: entries.count,
+            succeeded: entries.filter { $0.exitCode == 0 }.count,
+            failed: entries.filter { $0.exitCode != 0 }.count,
+            averageDuration: durations.isEmpty ? nil : durations.reduce(0, +) / Double(durations.count),
+            lastRunAt: entries.map(\.createdAt).max()
+        )
+    }
+
+    static func filter(
+        _ entries: [CommandHistoryEntry],
+        query: String,
+        status: CommandHistoryStatusFilter
+    ) -> [CommandHistoryEntry] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return entries.filter { entry in
+            let matchesStatus: Bool
+            switch status {
+            case .all:
+                matchesStatus = true
+            case .succeeded:
+                matchesStatus = entry.exitCode == 0
+            case .failed:
+                matchesStatus = entry.exitCode != 0
+            }
+
+            let matchesQuery = normalizedQuery.isEmpty ||
+                entry.command.lowercased().contains(normalizedQuery)
+
+            return matchesStatus && matchesQuery
+        }
+    }
+}
+
 struct OperationLogEntry: Identifiable, Codable, Equatable, Hashable {
     var id: UUID
     var scope: String
@@ -588,6 +1373,46 @@ struct DeploymentProject: Identifiable, Codable, Equatable, Hashable, Sendable {
     var webhookSecretRef: String?
     var createdAt: Date
     var updatedAt: Date
+}
+
+extension DeploymentProject {
+    var referencedSystemdUnitNames: [String] {
+        Self.referencedSystemdUnitNames(in: restartCommand)
+    }
+
+    static func referencedSystemdUnitNames(in command: String?) -> [String] {
+        guard let command = command?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !command.isEmpty,
+              let regex = try? NSRegularExpression(
+                pattern: #"\bsystemctl\s+(?:--user\s+)?(?:--no-block\s+)?(?:start|stop|restart|reload|try-restart)\s+(?:--\s+)?['\"]?([A-Za-z0-9:_.@-]+)['\"]?"#
+              )
+        else { return [] }
+
+        let range = NSRange(command.startIndex..., in: command)
+        var seen = Set<String>()
+        return regex.matches(in: command, range: range).compactMap { match in
+            guard let unitRange = Range(match.range(at: 1), in: command) else { return nil }
+            let unit = Self.normalizedSystemdUnitName(String(command[unitRange]))
+            guard !seen.contains(unit) else { return nil }
+            seen.insert(unit)
+            return unit
+        }
+    }
+
+    static func projects(_ projects: [DeploymentProject], referencing unitName: String) -> [DeploymentProject] {
+        let normalizedUnitName = normalizedSystemdUnitName(unitName)
+        return projects.filter { project in
+            project.referencedSystemdUnitNames.contains(normalizedUnitName)
+        }
+    }
+
+    private static func normalizedSystemdUnitName(_ rawValue: String) -> String {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.contains(".") {
+            return value
+        }
+        return "\(value).service"
+    }
 }
 
 enum DeploymentTriggerType: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -852,6 +1677,1844 @@ struct GiteaInstallResult: Codable, Equatable, Hashable, Sendable {
     var status: String
 }
 
+enum GitNativeServiceKind: String, Codable, CaseIterable, Identifiable, Sendable {
+    case gitea
+    case gitLab
+
+    var id: String { rawValue }
+}
+
+struct GitNativeRepositoryDraft: Equatable, Hashable, Sendable {
+    var name = ""
+    var description = ""
+    var isPrivate = true
+    var autoInitialize = true
+
+    var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDescription: String {
+        description.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GitLabProjectSettingsDraft: Equatable, Hashable, Sendable {
+    var projectId: Int64 = 0
+    var pathWithNamespace = ""
+    var description = ""
+    var visibility = "private"
+    var defaultBranch = ""
+    var archived = false
+
+    var trimmedPathWithNamespace: String {
+        pathWithNamespace.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDescription: String {
+        description.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDefaultBranch: String {
+        defaultBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GitLabGroupDraft: Equatable, Hashable, Sendable {
+    var groupId: Int64 = 0
+    var name = ""
+    var path = ""
+    var description = ""
+    var visibility = "private"
+    var parentId: Int64 = 0
+
+    var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedPath: String {
+        path.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDescription: String {
+        description.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GitLabVariableDraft: Equatable, Hashable, Sendable {
+    var projectId: Int64 = 0
+    var key = ""
+    var value = ""
+    var environmentScope = "*"
+    var variableType = "env_var"
+    var protected = false
+    var masked = false
+    var raw = false
+
+    var trimmedKey: String {
+        key.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedValue: String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedEnvironmentScope: String {
+        let scope = environmentScope.trimmingCharacters(in: .whitespacesAndNewlines)
+        return scope.isEmpty ? "*" : scope
+    }
+}
+
+struct GitLabDeployKeyDraft: Equatable, Hashable, Sendable {
+    var projectId: Int64 = 0
+    var title = ""
+    var key = ""
+    var canPush = false
+
+    var trimmedTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedKey: String {
+        key.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GitLabDeployTokenDraft: Equatable, Hashable, Sendable {
+    var projectId: Int64 = 0
+    var name = ""
+    var username = ""
+    var expiresAt = ""
+    var readRepository = true
+    var readRegistry = false
+    var writeRegistry = false
+    var readPackageRegistry = true
+    var writePackageRegistry = false
+
+    var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedUsername: String {
+        username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedExpiresAt: String {
+        expiresAt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var selectedScopes: [String] {
+        [
+            readRepository ? "read_repository" : nil,
+            readRegistry ? "read_registry" : nil,
+            writeRegistry ? "write_registry" : nil,
+            readPackageRegistry ? "read_package_registry" : nil,
+            writePackageRegistry ? "write_package_registry" : nil,
+        ].compactMap { $0 }
+    }
+}
+
+struct GitLabTagDraft: Equatable, Hashable, Sendable {
+    var projectId: Int64 = 0
+    var name = ""
+    var ref = ""
+    var message = ""
+
+    var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedRef: String {
+        ref.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedMessage: String {
+        message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum GitLabMemberScope: String, CaseIterable, Identifiable, Sendable {
+    case project
+    case group
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .project:
+            "Project"
+        case .group:
+            "Group"
+        }
+    }
+}
+
+struct GitLabMemberDraft: Equatable, Hashable, Sendable {
+    var scope: GitLabMemberScope = .project
+    var targetId: Int64 = 0
+    var userId: Int64 = 0
+    var accessLevel: Int = 30
+    var expiresAt = ""
+
+    var trimmedExpiresAt: String {
+        expiresAt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum GitLabMemberSaveMode: String, CaseIterable, Identifiable, Sendable {
+    case add
+    case update
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .add:
+            "添加"
+        case .update:
+            "更新"
+        }
+    }
+}
+
+enum GitLabVariableSaveMode: String, CaseIterable, Identifiable, Sendable {
+    case create
+    case update
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .create:
+            "创建"
+        case .update:
+            "更新"
+        }
+    }
+}
+
+enum GitLabGroupSaveMode: String, CaseIterable, Identifiable, Sendable {
+    case create
+    case update
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .create:
+            "创建"
+        case .update:
+            "保存"
+        }
+    }
+
+    var actionDescription: String {
+        switch self {
+        case .create:
+            "creates"
+        case .update:
+            "updates"
+        }
+    }
+}
+
+enum GitNativeIssueStateAction: String, CaseIterable, Identifiable, Sendable {
+    case close
+    case reopen
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .close:
+            "关闭"
+        case .reopen:
+            "重新打开"
+        }
+    }
+
+    static func suggested(for state: String) -> GitNativeIssueStateAction {
+        let normalized = state.lowercased()
+        if normalized == "closed" || normalized == "merged" {
+            return .reopen
+        }
+        return .close
+    }
+}
+
+enum GitLabPipelineAction: String, CaseIterable, Identifiable, Sendable {
+    case retry
+    case cancel
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .retry:
+            "重试"
+        case .cancel:
+            "取消"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .retry:
+            "arrow.clockwise.circle"
+        case .cancel:
+            "xmark.circle"
+        }
+    }
+}
+
+enum GitLabJobAction: String, CaseIterable, Identifiable, Sendable {
+    case retry
+    case cancel
+    case play
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .retry:
+            "重试"
+        case .cancel:
+            "取消"
+        case .play:
+            "运行"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .retry:
+            "arrow.clockwise.circle"
+        case .cancel:
+            "xmark.circle"
+        case .play:
+            "play.circle"
+        }
+    }
+}
+
+struct GiteaNativeSnapshot: Decodable, Equatable, Hashable, Sendable {
+    var repositories: [GiteaRepositorySummary]
+    var users: [GiteaUserSummary]
+    var organizations: [GiteaOrganizationSummary]
+    var teams: [GiteaTeamSummary]
+    var teamMembers: [GiteaTeamMemberSummary]
+    var teamRepositories: [GiteaTeamRepositorySummary]
+    var keys: [GiteaKeySummary]
+    var tokens: [GiteaAccessTokenSummary]
+    var packages: [GiteaPackageSummary]
+    var adminOverview: GiteaAdminOverviewSummary
+    var issues: [GiteaIssueSummary]
+    var pullRequests: [GiteaPullRequestSummary]
+    var capturedAt: Date
+}
+
+struct GiteaRepositorySummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var name: String
+    var fullName: String
+    var owner: String
+    var isPrivate: Bool
+    var isArchived: Bool?
+    var defaultBranch: String?
+    var description: String?
+    var hasIssues: Bool = false
+    var hasWiki: Bool = false
+    var hasPullRequests: Bool = false
+    var hasPackages: Bool = false
+    var htmlURL: String?
+    var updatedAt: Date?
+    var starsCount: Int?
+    var forksCount: Int?
+}
+
+struct GiteaRepositorySettingsDraft: Equatable, Hashable, Sendable {
+    var fullName = ""
+    var description = ""
+    var isPrivate = true
+    var defaultBranch = ""
+    var hasIssues = true
+    var hasWiki = true
+    var hasPullRequests = true
+    var hasPackages = true
+    var archived = false
+
+    var trimmedFullName: String {
+        fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDescription: String {
+        description.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDefaultBranch: String {
+        defaultBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GiteaUserSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var username: String
+    var fullName: String?
+    var email: String?
+    var isAdmin: Bool?
+    var isActive: Bool?
+    var lastLogin: Date?
+}
+
+struct GiteaUserDraft: Equatable, Hashable, Sendable {
+    var originalUsername = ""
+    var username = ""
+    var email = ""
+    var password = ""
+    var fullName = ""
+    var mustChangePassword = true
+    var isActive = true
+    var isAdmin = false
+    var prohibitLogin = false
+    var restricted = false
+
+    var trimmedOriginalUsername: String {
+        originalUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedUsername: String {
+        username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedEmail: String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedPassword: String {
+        password.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedFullName: String {
+        fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum GiteaUserSaveMode: String, CaseIterable, Identifiable, Sendable {
+    case create
+    case update
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .create:
+            "创建"
+        case .update:
+            "保存"
+        }
+    }
+
+    var actionDescription: String {
+        switch self {
+        case .create:
+            "creates"
+        case .update:
+            "updates"
+        }
+    }
+}
+
+struct GiteaOrganizationSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var username: String
+    var fullName: String?
+    var description: String?
+    var website: String?
+    var visibility: String?
+}
+
+struct GiteaOrganizationDraft: Equatable, Hashable, Sendable {
+    var originalUsername = ""
+    var username = ""
+    var fullName = ""
+    var description = ""
+    var website = ""
+    var visibility = "public"
+
+    var trimmedOriginalUsername: String {
+        originalUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedUsername: String {
+        username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedFullName: String {
+        fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDescription: String {
+        description.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedWebsite: String {
+        website.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum GiteaOrganizationSaveMode: String, CaseIterable, Identifiable, Sendable {
+    case create
+    case update
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .create:
+            "创建"
+        case .update:
+            "保存"
+        }
+    }
+
+    var actionDescription: String {
+        switch self {
+        case .create:
+            "creates"
+        case .update:
+            "updates"
+        }
+    }
+}
+
+struct GiteaTeamSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var organization: String
+    var name: String
+    var description: String?
+    var permission: String?
+    var includesAllRepositories: Bool?
+    var canCreateOrgRepo: Bool?
+    var units: [String]?
+}
+
+struct GiteaTeamDraft: Equatable, Hashable, Sendable {
+    var teamId: Int64 = 0
+    var organization = ""
+    var name = ""
+    var description = ""
+    var permission = "read"
+    var includesAllRepositories = false
+    var canCreateOrgRepo = true
+    var units: [String] = ["repo.code", "repo.issues", "repo.pulls", "repo.releases"]
+
+    var trimmedOrganization: String {
+        organization.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDescription: String {
+        description.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum GiteaTeamSaveMode: String, CaseIterable, Identifiable, Sendable {
+    case create
+    case update
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .create:
+            "创建"
+        case .update:
+            "保存"
+        }
+    }
+
+    var actionDescription: String {
+        switch self {
+        case .create:
+            "creates"
+        case .update:
+            "updates"
+        }
+    }
+}
+
+struct GiteaTeamMemberSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: String { "\(teamId):\(username)" }
+    var teamId: Int64
+    var username: String
+    var fullName: String?
+    var email: String?
+    var isAdmin: Bool?
+    var isActive: Bool?
+    var lastLogin: Date?
+}
+
+struct GiteaTeamMemberDraft: Equatable, Hashable, Sendable {
+    var teamId: Int64 = 0
+    var username = ""
+
+    var trimmedUsername: String {
+        username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GiteaTeamRepositorySummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: String { "\(teamId):\(fullName)" }
+    var teamId: Int64
+    var repositoryId: Int64
+    var fullName: String
+    var owner: String
+    var name: String
+    var isPrivate: Bool
+    var defaultBranch: String?
+    var updatedAt: Date?
+}
+
+struct GiteaTeamRepositoryDraft: Equatable, Hashable, Sendable {
+    var teamId: Int64 = 0
+    var repositoryFullName = ""
+
+    var trimmedRepositoryFullName: String {
+        repositoryFullName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GiteaKeySummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var title: String
+    var key: String
+    var fingerprint: String?
+    var url: String?
+    var isReadOnly: Bool?
+    var createdAt: Date?
+}
+
+struct GiteaKeyDraft: Equatable, Hashable, Sendable {
+    var title = ""
+    var key = ""
+    var isReadOnly = false
+
+    var trimmedTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedKey: String {
+        key.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GiteaAccessTokenSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var username: String = ""
+    var name: String
+    var scopes: [String]
+    var sha1: String?
+    var tokenLastEight: String?
+    var createdAt: Date?
+    var lastUsedAt: Date?
+}
+
+struct GiteaAccessTokenDraft: Equatable, Hashable, Sendable {
+    var username = ""
+    var name = ""
+    var scopes: [String] = ["read:repository", "read:user"]
+
+    var trimmedUsername: String {
+        username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct GiteaAccessTokenCreationResult: Identifiable, Equatable, Hashable, Sendable {
+    var id: Int64 { token.id }
+    var token: GiteaAccessTokenSummary
+    var secret: String
+}
+
+struct GiteaPackageSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var owner: String
+    var name: String
+    var type: String
+    var version: String?
+    var repository: String?
+    var htmlURL: String?
+    var createdAt: Date?
+}
+
+struct GiteaPackageDetail: Equatable, Hashable, Sendable {
+    var id: String { "\(owner)/\(type)/\(name)#\(selectedVersion ?? "all")" }
+    var owner: String
+    var type: String
+    var name: String
+    var selectedVersion: String?
+    var package: GiteaPackageSummary?
+    var versions: [GiteaPackageSummary]
+    var files: [GiteaPackageFileSummary]
+    var capturedAt: Date
+}
+
+struct GiteaPackageFileSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var name: String
+    var size: Int64?
+    var md5: String?
+    var sha1: String?
+    var sha256: String?
+    var sha512: String?
+}
+
+struct GiteaAdminOverviewSummary: Decodable, Equatable, Hashable, Sendable {
+    var version: String?
+    var cronTasks: [GiteaCronTaskSummary]
+}
+
+struct GiteaCronTaskSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: String { name }
+    var name: String
+    var schedule: String?
+    var execTimes: Int64?
+    var previousRunAt: Date?
+    var nextRunAt: Date?
+}
+
+struct GiteaIssueSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var number: Int
+    var title: String
+    var state: String
+    var repository: String?
+    var author: String?
+    var assignees: [String] = []
+    var labels: [String] = []
+    var milestone: String?
+    var htmlURL: String?
+    var updatedAt: Date?
+}
+
+struct GiteaPullRequestSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var number: Int
+    var title: String
+    var state: String
+    var repository: String?
+    var author: String?
+    var assignees: [String] = []
+    var labels: [String] = []
+    var milestone: String?
+    var htmlURL: String?
+    var updatedAt: Date?
+}
+
+struct GitLabAdminOverviewSummary: Decodable, Equatable, Hashable, Sendable {
+    var version: String?
+    var revision: String?
+    var enterprise: Bool?
+    var licensePlan: String?
+    var licenseStartsAt: String?
+    var licenseExpiresAt: String?
+    var licenseExpired: Bool?
+    var userLimit: Int?
+    var activeUserCount: Int?
+    var userCount: Int?
+    var projectCount: Int?
+    var groupCount: Int?
+    var issueCount: Int?
+    var mergeRequestCount: Int?
+    var runnerCount: Int?
+    var healthStatus: String?
+    var readinessStatus: String?
+    var livenessStatus: String?
+    var unavailableReasons: [String]
+
+    static var empty: GitLabAdminOverviewSummary {
+        GitLabAdminOverviewSummary(
+            version: nil,
+            revision: nil,
+            enterprise: nil,
+            licensePlan: nil,
+            licenseStartsAt: nil,
+            licenseExpiresAt: nil,
+            licenseExpired: nil,
+            userLimit: nil,
+            activeUserCount: nil,
+            userCount: nil,
+            projectCount: nil,
+            groupCount: nil,
+            issueCount: nil,
+            mergeRequestCount: nil,
+            runnerCount: nil,
+            healthStatus: nil,
+            readinessStatus: nil,
+            livenessStatus: nil,
+            unavailableReasons: []
+        )
+    }
+}
+
+struct GitLabNativeSnapshot: Decodable, Equatable, Hashable, Sendable {
+    var projects: [GitLabProjectSummary]
+    var groups: [GitLabGroupSummary]
+    var users: [GitLabUserSummary]
+    var members: [GitLabMemberSummary]
+    var branches: [GitLabBranchSummary]
+    var tags: [GitLabTagSummary]
+    var issues: [GitLabIssueSummary]
+    var mergeRequests: [GitLabMergeRequestSummary]
+    var pipelines: [GitLabPipelineSummary]
+    var jobs: [GitLabJobSummary]
+    var packages: [GitLabPackageSummary]
+    var runners: [GitLabRunnerSummary]
+    var variables: [GitLabVariableSummary]
+    var deployKeys: [GitLabDeployKeySummary]
+    var deployTokens: [GitLabDeployTokenSummary]
+    var adminOverview: GitLabAdminOverviewSummary
+    var capturedAt: Date
+}
+
+extension GitLabNativeSnapshot {
+    private enum CodingKeys: String, CodingKey {
+        case projects
+        case groups
+        case users
+        case members
+        case branches
+        case tags
+        case issues
+        case mergeRequests
+        case pipelines
+        case jobs
+        case packages
+        case runners
+        case variables
+        case deployKeys
+        case deployTokens
+        case adminOverview
+        case capturedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        projects = try container.decode([GitLabProjectSummary].self, forKey: .projects)
+        groups = try container.decode([GitLabGroupSummary].self, forKey: .groups)
+        users = try container.decode([GitLabUserSummary].self, forKey: .users)
+        members = try container.decode([GitLabMemberSummary].self, forKey: .members)
+        branches = try container.decode([GitLabBranchSummary].self, forKey: .branches)
+        tags = try container.decode([GitLabTagSummary].self, forKey: .tags)
+        issues = try container.decode([GitLabIssueSummary].self, forKey: .issues)
+        mergeRequests = try container.decode([GitLabMergeRequestSummary].self, forKey: .mergeRequests)
+        pipelines = try container.decode([GitLabPipelineSummary].self, forKey: .pipelines)
+        jobs = try container.decode([GitLabJobSummary].self, forKey: .jobs)
+        packages = try container.decode([GitLabPackageSummary].self, forKey: .packages)
+        runners = try container.decode([GitLabRunnerSummary].self, forKey: .runners)
+        variables = try container.decode([GitLabVariableSummary].self, forKey: .variables)
+        deployKeys = try container.decode([GitLabDeployKeySummary].self, forKey: .deployKeys)
+        deployTokens = try container.decode([GitLabDeployTokenSummary].self, forKey: .deployTokens)
+        adminOverview = try container.decodeIfPresent(GitLabAdminOverviewSummary.self, forKey: .adminOverview) ?? .empty
+        capturedAt = try container.decode(Date.self, forKey: .capturedAt)
+    }
+}
+
+struct GitLabProjectSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var name: String
+    var pathWithNamespace: String
+    var description: String?
+    var visibility: String?
+    var defaultBranch: String?
+    var webURL: String?
+    var lastActivityAt: Date?
+    var archived: Bool
+}
+
+struct GitLabGroupSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var name: String
+    var fullPath: String
+    var visibility: String?
+    var webURL: String?
+}
+
+struct GitLabUserSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var username: String
+    var name: String?
+    var state: String?
+    var webURL: String?
+    var isAdmin: Bool?
+}
+
+struct GitLabMemberSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: String { "\(scope.rawValue):\(targetId):\(userId)" }
+    var scope: GitLabMemberScope
+    var targetId: Int64
+    var userId: Int64
+    var username: String
+    var name: String?
+    var state: String?
+    var webURL: String?
+    var accessLevel: Int
+    var expiresAt: String?
+    var createdAt: Date?
+}
+
+struct GitLabBranchSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: String { "\(projectId):\(name)" }
+    var projectId: Int64
+    var name: String
+    var merged: Bool?
+    var protected: Bool
+    var isDefault: Bool
+    var canPush: Bool?
+    var webURL: String?
+    var commitShortID: String?
+    var commitTitle: String?
+    var committedDate: Date?
+}
+
+struct GitLabTagSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: String { "\(projectId):\(name)" }
+    var projectId: Int64
+    var name: String
+    var message: String?
+    var target: String?
+    var protected: Bool?
+    var commitShortID: String?
+    var commitTitle: String?
+    var createdAt: Date?
+}
+
+struct GitLabIssueSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var iid: Int
+    var title: String
+    var state: String
+    var projectId: Int64?
+    var author: String?
+    var assignees: [String] = []
+    var labels: [String] = []
+    var milestone: String?
+    var webURL: String?
+    var updatedAt: Date?
+}
+
+struct GitLabMergeRequestSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var iid: Int
+    var title: String
+    var state: String
+    var sourceBranch: String?
+    var targetBranch: String?
+    var projectId: Int64?
+    var author: String?
+    var assignees: [String] = []
+    var reviewers: [String] = []
+    var labels: [String] = []
+    var milestone: String?
+    var webURL: String?
+    var updatedAt: Date?
+}
+
+struct GitLabPipelineSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var projectId: Int64
+    var ref: String?
+    var sha: String?
+    var status: String
+    var webURL: String?
+    var updatedAt: Date?
+}
+
+struct GitLabJobSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var projectId: Int64
+    var name: String
+    var stage: String?
+    var ref: String?
+    var status: String
+    var webURL: String?
+    var duration: Double?
+    var startedAt: Date?
+    var finishedAt: Date?
+}
+
+struct GitLabJobTrace: Equatable, Hashable, Sendable {
+    var projectId: Int64
+    var jobId: Int64
+    var text: String
+    var capturedAt: Date
+}
+
+struct GitLabPackageSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var projectId: Int64
+    var name: String
+    var version: String?
+    var packageType: String
+    var status: String?
+    var createdAt: Date?
+    var updatedAt: Date?
+}
+
+struct GitLabRunnerSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var description: String?
+    var name: String?
+    var status: String?
+    var runnerType: String?
+    var isShared: Bool?
+    var active: Bool?
+    var paused: Bool?
+    var online: Bool?
+    var tagList: [String]
+    var version: String?
+    var contactedAt: Date?
+}
+
+struct GitLabVariableSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: String { "\(projectId):\(key):\(environmentScope ?? "*")" }
+    var projectId: Int64
+    var key: String
+    var variableType: String?
+    var environmentScope: String?
+    var protected: Bool
+    var masked: Bool
+    var raw: Bool?
+    var description: String?
+}
+
+struct GitLabDeployKeySummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var projectId: Int64
+    var title: String
+    var key: String?
+    var fingerprint: String?
+    var canPush: Bool
+    var createdAt: Date?
+    var expiresAt: String?
+}
+
+struct GitLabDeployTokenSummary: Identifiable, Decodable, Equatable, Hashable, Sendable {
+    var id: Int64
+    var projectId: Int64
+    var name: String
+    var username: String?
+    var scopes: [String]
+    var revoked: Bool
+    var expired: Bool
+    var active: Bool?
+    var createdAt: Date?
+    var expiresAt: String?
+}
+
+struct GitLabDeployTokenCreationResult: Identifiable, Equatable, Hashable, Sendable {
+    var id: Int64 { deployToken.id }
+    var deployToken: GitLabDeployTokenSummary
+    var token: String
+}
+
+extension GiteaRepositorySummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case fullName = "full_name"
+        case owner
+        case isPrivate = "private"
+        case isArchived = "archived"
+        case defaultBranch = "default_branch"
+        case description
+        case hasIssues = "has_issues"
+        case hasWiki = "has_wiki"
+        case hasPullRequests = "has_pull_requests"
+        case hasPackages = "has_packages"
+        case htmlURL = "html_url"
+        case updatedAt = "updated_at"
+        case starsCount = "stars_count"
+        case forksCount = "forks_count"
+    }
+
+    private struct Owner: Decodable {
+        var login: String?
+        var username: String?
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let owner = try? container.decode(Owner.self, forKey: .owner)
+        let fallbackName = try container.decode(String.self, forKey: .name)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            name: fallbackName,
+            fullName: (try container.decodeIfPresent(String.self, forKey: .fullName)) ?? fallbackName,
+            owner: owner?.login ?? owner?.username ?? "",
+            isPrivate: try container.decodeIfPresent(Bool.self, forKey: .isPrivate) ?? false,
+            isArchived: try container.decodeIfPresent(Bool.self, forKey: .isArchived),
+            defaultBranch: try container.decodeIfPresent(String.self, forKey: .defaultBranch),
+            description: try container.decodeIfPresent(String.self, forKey: .description),
+            hasIssues: try container.decodeIfPresent(Bool.self, forKey: .hasIssues) ?? false,
+            hasWiki: try container.decodeIfPresent(Bool.self, forKey: .hasWiki) ?? false,
+            hasPullRequests: try container.decodeIfPresent(Bool.self, forKey: .hasPullRequests) ?? false,
+            hasPackages: try container.decodeIfPresent(Bool.self, forKey: .hasPackages) ?? false,
+            htmlURL: try container.decodeIfPresent(String.self, forKey: .htmlURL),
+            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt),
+            starsCount: try container.decodeIfPresent(Int.self, forKey: .starsCount),
+            forksCount: try container.decodeIfPresent(Int.self, forKey: .forksCount)
+        )
+    }
+}
+
+extension GiteaUserSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case username = "login"
+        case fullName = "full_name"
+        case email
+        case isAdmin = "is_admin"
+        case isActive = "active"
+        case lastLogin = "last_login"
+    }
+}
+
+extension GiteaOrganizationSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case username
+        case fullName = "full_name"
+        case description
+        case website
+        case visibility
+    }
+}
+
+extension GiteaTeamSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case organization
+        case name
+        case description
+        case permission
+        case includesAllRepositories = "includes_all_repositories"
+        case canCreateOrgRepo = "can_create_org_repo"
+        case units
+    }
+
+    private struct Organization: Decodable {
+        var username: String?
+        var name: String?
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let organization = try? container.decode(Organization.self, forKey: .organization)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            organization: organization?.username ?? organization?.name ?? "",
+            name: try container.decode(String.self, forKey: .name),
+            description: try container.decodeIfPresent(String.self, forKey: .description),
+            permission: try container.decodeIfPresent(String.self, forKey: .permission),
+            includesAllRepositories: try container.decodeIfPresent(Bool.self, forKey: .includesAllRepositories),
+            canCreateOrgRepo: try container.decodeIfPresent(Bool.self, forKey: .canCreateOrgRepo),
+            units: try container.decodeIfPresent([String].self, forKey: .units)
+        )
+    }
+}
+
+extension GiteaTeamMemberSummary {
+    private enum CodingKeys: String, CodingKey {
+        case username = "login"
+        case fullName = "full_name"
+        case email
+        case isAdmin = "is_admin"
+        case isActive = "active"
+        case lastLogin = "last_login"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            teamId: 0,
+            username: try container.decode(String.self, forKey: .username),
+            fullName: try container.decodeIfPresent(String.self, forKey: .fullName),
+            email: try container.decodeIfPresent(String.self, forKey: .email),
+            isAdmin: try container.decodeIfPresent(Bool.self, forKey: .isAdmin),
+            isActive: try container.decodeIfPresent(Bool.self, forKey: .isActive),
+            lastLogin: try container.decodeIfPresent(Date.self, forKey: .lastLogin)
+        )
+    }
+}
+
+extension GiteaKeySummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case key
+        case fingerprint
+        case url
+        case isReadOnly = "read_only"
+        case createdAt = "created_at"
+    }
+}
+
+extension GiteaAccessTokenSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case scopes
+        case sha1
+        case tokenLastEight = "token_last_eight"
+        case createdAt = "created_at"
+        case lastUsedAt = "last_used_at"
+    }
+}
+
+extension GiteaPackageSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case owner
+        case name
+        case type
+        case version
+        case repository
+        case htmlURL = "html_url"
+        case createdAt = "created_at"
+    }
+
+    private struct Owner: Decodable {
+        var username: String?
+        var login: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case username
+            case login
+        }
+    }
+
+    private struct Repository: Decodable {
+        var fullName: String?
+        var name: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case fullName = "full_name"
+            case name
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let owner = try container.decodeIfPresent(Owner.self, forKey: .owner)
+        let repository = try container.decodeIfPresent(Repository.self, forKey: .repository)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            owner: owner?.username ?? owner?.login ?? "",
+            name: try container.decode(String.self, forKey: .name),
+            type: try container.decode(String.self, forKey: .type),
+            version: try container.decodeIfPresent(String.self, forKey: .version),
+            repository: repository?.fullName ?? repository?.name,
+            htmlURL: try container.decodeIfPresent(String.self, forKey: .htmlURL),
+            createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        )
+    }
+}
+
+extension GiteaPackageFileSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case size
+        case md5
+        case sha1
+        case sha256
+        case sha512
+    }
+}
+
+private extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen: Set<Element> = []
+        return filter { seen.insert($0).inserted }
+    }
+}
+
+extension GiteaCronTaskSummary {
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case schedule
+        case execTimes = "exec_times"
+        case previousRunAt = "prev"
+        case nextRunAt = "next"
+    }
+}
+
+extension GiteaIssueSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case number
+        case title
+        case state
+        case repository
+        case user
+        case assignee
+        case assignees
+        case labels
+        case milestone
+        case htmlURL = "html_url"
+        case updatedAt = "updated_at"
+    }
+
+    private struct Repository: Decodable {
+        var fullName: String?
+        var name: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case fullName = "full_name"
+            case name
+        }
+    }
+
+    private struct User: Decodable {
+        var login: String?
+        var username: String?
+    }
+
+    private struct Label: Decodable {
+        var name: String?
+    }
+
+    private struct Milestone: Decodable {
+        var title: String?
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let repository = try? container.decode(Repository.self, forKey: .repository)
+        let user = try? container.decode(User.self, forKey: .user)
+        let assignee = try? container.decode(User.self, forKey: .assignee)
+        let assignees = (try? container.decode([User].self, forKey: .assignees)) ?? []
+        let labels = (try? container.decode([Label].self, forKey: .labels)) ?? []
+        let milestone = try? container.decode(Milestone.self, forKey: .milestone)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            number: try container.decode(Int.self, forKey: .number),
+            title: try container.decode(String.self, forKey: .title),
+            state: try container.decode(String.self, forKey: .state),
+            repository: repository?.fullName ?? repository?.name,
+            author: user?.login ?? user?.username,
+            assignees: (assignees.map { $0.login ?? $0.username } + [assignee?.login ?? assignee?.username])
+                .compactMap { $0 }
+                .uniqued(),
+            labels: labels.compactMap(\.name),
+            milestone: milestone?.title,
+            htmlURL: try container.decodeIfPresent(String.self, forKey: .htmlURL),
+            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        )
+    }
+}
+
+extension GiteaPullRequestSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case number
+        case title
+        case state
+        case repository
+        case user
+        case assignee
+        case assignees
+        case labels
+        case milestone
+        case htmlURL = "html_url"
+        case updatedAt = "updated_at"
+    }
+
+    private struct Repository: Decodable {
+        var fullName: String?
+        var name: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case fullName = "full_name"
+            case name
+        }
+    }
+
+    private struct User: Decodable {
+        var login: String?
+        var username: String?
+    }
+
+    private struct Label: Decodable {
+        var name: String?
+    }
+
+    private struct Milestone: Decodable {
+        var title: String?
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let repository = try? container.decode(Repository.self, forKey: .repository)
+        let user = try? container.decode(User.self, forKey: .user)
+        let assignee = try? container.decode(User.self, forKey: .assignee)
+        let assignees = (try? container.decode([User].self, forKey: .assignees)) ?? []
+        let labels = (try? container.decode([Label].self, forKey: .labels)) ?? []
+        let milestone = try? container.decode(Milestone.self, forKey: .milestone)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            number: try container.decode(Int.self, forKey: .number),
+            title: try container.decode(String.self, forKey: .title),
+            state: try container.decode(String.self, forKey: .state),
+            repository: repository?.fullName ?? repository?.name,
+            author: user?.login ?? user?.username,
+            assignees: (assignees.map { $0.login ?? $0.username } + [assignee?.login ?? assignee?.username])
+                .compactMap { $0 }
+                .uniqued(),
+            labels: labels.compactMap(\.name),
+            milestone: milestone?.title,
+            htmlURL: try container.decodeIfPresent(String.self, forKey: .htmlURL),
+            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        )
+    }
+}
+
+extension GitLabProjectSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case pathWithNamespace = "path_with_namespace"
+        case description
+        case visibility
+        case defaultBranch = "default_branch"
+        case webURL = "web_url"
+        case lastActivityAt = "last_activity_at"
+        case archived
+    }
+}
+
+extension GitLabGroupSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case fullPath = "full_path"
+        case visibility
+        case webURL = "web_url"
+    }
+}
+
+extension GitLabUserSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case username
+        case name
+        case state
+        case webURL = "web_url"
+        case isAdmin = "is_admin"
+    }
+}
+
+extension GitLabMemberSummary {
+    private enum CodingKeys: String, CodingKey {
+        case userId = "id"
+        case username
+        case name
+        case state
+        case webURL = "web_url"
+        case accessLevel = "access_level"
+        case expiresAt = "expires_at"
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            scope: .project,
+            targetId: 0,
+            userId: try container.decode(Int64.self, forKey: .userId),
+            username: try container.decode(String.self, forKey: .username),
+            name: try container.decodeIfPresent(String.self, forKey: .name),
+            state: try container.decodeIfPresent(String.self, forKey: .state),
+            webURL: try container.decodeIfPresent(String.self, forKey: .webURL),
+            accessLevel: try container.decode(Int.self, forKey: .accessLevel),
+            expiresAt: try container.decodeIfPresent(String.self, forKey: .expiresAt),
+            createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        )
+    }
+}
+
+extension GitLabBranchSummary {
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case merged
+        case protected
+        case isDefault = "default"
+        case canPush = "can_push"
+        case webURL = "web_url"
+        case commit
+    }
+
+    private struct Commit: Decodable {
+        var shortID: String?
+        var title: String?
+        var committedDate: Date?
+
+        private enum CodingKeys: String, CodingKey {
+            case shortID = "short_id"
+            case title
+            case committedDate = "committed_date"
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let commit = try container.decodeIfPresent(Commit.self, forKey: .commit)
+        self.init(
+            projectId: 0,
+            name: try container.decode(String.self, forKey: .name),
+            merged: try container.decodeIfPresent(Bool.self, forKey: .merged),
+            protected: try container.decodeIfPresent(Bool.self, forKey: .protected) ?? false,
+            isDefault: try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false,
+            canPush: try container.decodeIfPresent(Bool.self, forKey: .canPush),
+            webURL: try container.decodeIfPresent(String.self, forKey: .webURL),
+            commitShortID: commit?.shortID,
+            commitTitle: commit?.title,
+            committedDate: commit?.committedDate
+        )
+    }
+}
+
+extension GitLabTagSummary {
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case message
+        case target
+        case protected
+        case commit
+        case createdAt = "created_at"
+    }
+
+    private struct Commit: Decodable {
+        var shortID: String?
+        var title: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case shortID = "short_id"
+            case title
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let commit = try container.decodeIfPresent(Commit.self, forKey: .commit)
+        self.init(
+            projectId: 0,
+            name: try container.decode(String.self, forKey: .name),
+            message: try container.decodeIfPresent(String.self, forKey: .message),
+            target: try container.decodeIfPresent(String.self, forKey: .target),
+            protected: try container.decodeIfPresent(Bool.self, forKey: .protected),
+            commitShortID: commit?.shortID,
+            commitTitle: commit?.title,
+            createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        )
+    }
+}
+
+extension GitLabIssueSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case iid
+        case title
+        case state
+        case projectId = "project_id"
+        case author
+        case assignee
+        case assignees
+        case labels
+        case milestone
+        case webURL = "web_url"
+        case updatedAt = "updated_at"
+    }
+
+    private struct User: Decodable {
+        var username: String?
+        var name: String?
+    }
+
+    private struct Milestone: Decodable {
+        var title: String?
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let author = try? container.decode(User.self, forKey: .author)
+        let assignee = try? container.decode(User.self, forKey: .assignee)
+        let assignees = (try? container.decode([User].self, forKey: .assignees)) ?? []
+        let milestone = try? container.decode(Milestone.self, forKey: .milestone)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            iid: try container.decode(Int.self, forKey: .iid),
+            title: try container.decode(String.self, forKey: .title),
+            state: try container.decode(String.self, forKey: .state),
+            projectId: try container.decodeIfPresent(Int64.self, forKey: .projectId),
+            author: author?.username ?? author?.name,
+            assignees: (assignees.map { $0.username ?? $0.name } + [assignee?.username ?? assignee?.name])
+                .compactMap { $0 }
+                .uniqued(),
+            labels: try container.decodeIfPresent([String].self, forKey: .labels) ?? [],
+            milestone: milestone?.title,
+            webURL: try container.decodeIfPresent(String.self, forKey: .webURL),
+            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        )
+    }
+}
+
+extension GitLabMergeRequestSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case iid
+        case title
+        case state
+        case sourceBranch = "source_branch"
+        case targetBranch = "target_branch"
+        case projectId = "project_id"
+        case author
+        case assignee
+        case assignees
+        case reviewers
+        case labels
+        case milestone
+        case webURL = "web_url"
+        case updatedAt = "updated_at"
+    }
+
+    private struct User: Decodable {
+        var username: String?
+        var name: String?
+    }
+
+    private struct Milestone: Decodable {
+        var title: String?
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let author = try? container.decode(User.self, forKey: .author)
+        let assignee = try? container.decode(User.self, forKey: .assignee)
+        let assignees = (try? container.decode([User].self, forKey: .assignees)) ?? []
+        let reviewers = (try? container.decode([User].self, forKey: .reviewers)) ?? []
+        let milestone = try? container.decode(Milestone.self, forKey: .milestone)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            iid: try container.decode(Int.self, forKey: .iid),
+            title: try container.decode(String.self, forKey: .title),
+            state: try container.decode(String.self, forKey: .state),
+            sourceBranch: try container.decodeIfPresent(String.self, forKey: .sourceBranch),
+            targetBranch: try container.decodeIfPresent(String.self, forKey: .targetBranch),
+            projectId: try container.decodeIfPresent(Int64.self, forKey: .projectId),
+            author: author?.username ?? author?.name,
+            assignees: (assignees.map { $0.username ?? $0.name } + [assignee?.username ?? assignee?.name])
+                .compactMap { $0 }
+                .uniqued(),
+            reviewers: reviewers.compactMap { $0.username ?? $0.name },
+            labels: try container.decodeIfPresent([String].self, forKey: .labels) ?? [],
+            milestone: milestone?.title,
+            webURL: try container.decodeIfPresent(String.self, forKey: .webURL),
+            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        )
+    }
+}
+
+extension GitLabPipelineSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case projectId = "project_id"
+        case ref
+        case sha
+        case status
+        case webURL = "web_url"
+        case updatedAt = "updated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            projectId: try container.decodeIfPresent(Int64.self, forKey: .projectId) ?? 0,
+            ref: try container.decodeIfPresent(String.self, forKey: .ref),
+            sha: try container.decodeIfPresent(String.self, forKey: .sha),
+            status: try container.decode(String.self, forKey: .status),
+            webURL: try container.decodeIfPresent(String.self, forKey: .webURL),
+            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        )
+    }
+}
+
+extension GitLabJobSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case projectId = "project_id"
+        case name
+        case stage
+        case ref
+        case status
+        case webURL = "web_url"
+        case duration
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            projectId: try container.decodeIfPresent(Int64.self, forKey: .projectId) ?? 0,
+            name: try container.decode(String.self, forKey: .name),
+            stage: try container.decodeIfPresent(String.self, forKey: .stage),
+            ref: try container.decodeIfPresent(String.self, forKey: .ref),
+            status: try container.decode(String.self, forKey: .status),
+            webURL: try container.decodeIfPresent(String.self, forKey: .webURL),
+            duration: try container.decodeIfPresent(Double.self, forKey: .duration),
+            startedAt: try container.decodeIfPresent(Date.self, forKey: .startedAt),
+            finishedAt: try container.decodeIfPresent(Date.self, forKey: .finishedAt)
+        )
+    }
+}
+
+extension GitLabPackageSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case projectId = "project_id"
+        case name
+        case version
+        case packageType = "package_type"
+        case status
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            projectId: try container.decodeIfPresent(Int64.self, forKey: .projectId) ?? 0,
+            name: try container.decode(String.self, forKey: .name),
+            version: try container.decodeIfPresent(String.self, forKey: .version),
+            packageType: try container.decode(String.self, forKey: .packageType),
+            status: try container.decodeIfPresent(String.self, forKey: .status),
+            createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt),
+            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        )
+    }
+}
+
+extension GitLabRunnerSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case description
+        case name
+        case status
+        case runnerType = "runner_type"
+        case isShared = "is_shared"
+        case active
+        case paused
+        case online
+        case tagList = "tag_list"
+        case version
+        case contactedAt = "contacted_at"
+    }
+}
+
+extension GitLabVariableSummary {
+    private enum CodingKeys: String, CodingKey {
+        case key
+        case variableType = "variable_type"
+        case environmentScope = "environment_scope"
+        case protected
+        case masked
+        case raw
+        case description
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            projectId: 0,
+            key: try container.decode(String.self, forKey: .key),
+            variableType: try container.decodeIfPresent(String.self, forKey: .variableType),
+            environmentScope: try container.decodeIfPresent(String.self, forKey: .environmentScope),
+            protected: try container.decodeIfPresent(Bool.self, forKey: .protected) ?? false,
+            masked: try container.decodeIfPresent(Bool.self, forKey: .masked) ?? false,
+            raw: try container.decodeIfPresent(Bool.self, forKey: .raw),
+            description: try container.decodeIfPresent(String.self, forKey: .description)
+        )
+    }
+}
+
+extension GitLabDeployKeySummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case key
+        case fingerprint
+        case canPush = "can_push"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            projectId: 0,
+            title: try container.decode(String.self, forKey: .title),
+            key: try container.decodeIfPresent(String.self, forKey: .key),
+            fingerprint: try container.decodeIfPresent(String.self, forKey: .fingerprint),
+            canPush: try container.decodeIfPresent(Bool.self, forKey: .canPush) ?? false,
+            createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt),
+            expiresAt: try container.decodeIfPresent(String.self, forKey: .expiresAt)
+        )
+    }
+}
+
+extension GitLabDeployTokenSummary {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case projectId = "project_id"
+        case name
+        case username
+        case scopes
+        case revoked
+        case expired
+        case active
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(Int64.self, forKey: .id),
+            projectId: try container.decodeIfPresent(Int64.self, forKey: .projectId) ?? 0,
+            name: try container.decode(String.self, forKey: .name),
+            username: try container.decodeIfPresent(String.self, forKey: .username),
+            scopes: try container.decodeIfPresent([String].self, forKey: .scopes) ?? [],
+            revoked: try container.decodeIfPresent(Bool.self, forKey: .revoked) ?? false,
+            expired: try container.decodeIfPresent(Bool.self, forKey: .expired) ?? false,
+            active: try container.decodeIfPresent(Bool.self, forKey: .active),
+            createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt),
+            expiresAt: try container.decodeIfPresent(String.self, forKey: .expiresAt)
+        )
+    }
+}
+
 struct PubHostedRepositoryDraft: Codable, Equatable, Hashable, Sendable {
     var hostedURL: String
     var packageName: String
@@ -1027,6 +3690,82 @@ enum RemoteOperationRiskFactory {
             recovery: "Use the inverse systemd action or inspect journal logs if the service fails.",
             auditTargetType: "systemd",
             auditAction: action.rawValue
+        )
+    }
+
+    static func databaseService(action: SystemdUnitAction, service: DatabaseService) -> RemoteOperationRisk {
+        let level: RemoteOperationRiskLevel = action == .stop || action == .restart ? .high : .medium
+        return RemoteOperationRisk(
+            id: "database-\(action.rawValue)-\(service.kind.rawValue)",
+            level: level,
+            title: "\(action.displayName) Database Service",
+            target: service.unitName ?? service.kind.displayName,
+            commandPreview: service.unitName.map { "systemctl \(action.rawValue) \($0)" },
+            impact: ["Database service state may change immediately and connected applications may be interrupted."],
+            recovery: "Use the inverse service action, inspect recent logs, and restore from backups if the database fails to start.",
+            auditTargetType: "database_service",
+            auditAction: action.rawValue
+        )
+    }
+
+    static func databaseBackup(service: DatabaseService, plan: DatabaseBackupRestorePlan) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "database-backup-\(service.kind.rawValue)-\(plan.backupPath)",
+            level: .medium,
+            title: "Create Database Backup",
+            target: service.unitName ?? service.kind.displayName,
+            commandPreview: plan.backupCommand,
+            impact: [
+                "A database backup command will run on the remote server.",
+                "The backup file will consume disk space at \(plan.backupPath)."
+            ],
+            recovery: "Review the generated backup file and delete it manually if it is not needed.",
+            auditTargetType: "database_service",
+            auditAction: "backup"
+        )
+    }
+
+    static func dockerContainer(action: DockerContainerAction, container: DockerContainer) -> RemoteOperationRisk {
+        let level: RemoteOperationRiskLevel = action == .start ? .medium : .high
+        return RemoteOperationRisk(
+            id: "docker-\(action.rawValue)-\(container.containerID)",
+            level: level,
+            title: "\(action.displayName) Docker Container",
+            target: container.displayName,
+            commandPreview: "docker \(action.rawValue) \(container.containerID)",
+            impact: ["The selected Docker container state will change on the remote server."],
+            recovery: "Use another Docker action after reviewing container status and logs.",
+            auditTargetType: "docker_container",
+            auditAction: action.rawValue
+        )
+    }
+
+    static func dockerImagePull(reference: String) -> RemoteOperationRisk {
+        let target = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        return RemoteOperationRisk(
+            id: "docker-image-pull-\(target)",
+            level: .medium,
+            title: "Pull Docker Image",
+            target: target,
+            commandPreview: "docker pull \(target)",
+            impact: ["The remote server will download image layers and consume disk space and network traffic."],
+            recovery: "Remove the image after reviewing dependent containers if the pull is not needed.",
+            auditTargetType: "docker_image",
+            auditAction: "pull"
+        )
+    }
+
+    static func dockerImageRemove(_ image: DockerImage) -> RemoteOperationRisk {
+        RemoteOperationRisk(
+            id: "docker-image-remove-\(image.imageID)",
+            level: .high,
+            title: "Remove Docker Image",
+            target: image.displayName,
+            commandPreview: "docker rmi \(image.imageID)",
+            impact: ["The selected Docker image will be removed if no running containers depend on it."],
+            recovery: "Pull the image again if it is needed later.",
+            auditTargetType: "docker_image",
+            auditAction: "remove"
         )
     }
 
@@ -2063,6 +4802,17 @@ private extension String {
 }
 
 extension CloudInstanceLink {
+    var inferredServerKind: ServerKind {
+        switch providerId {
+        case .tencentCloud:
+            .tencentCVM
+        case .alibabaCloud:
+            .alibabaECS
+        case .huaweiCloud:
+            .huaweiECS
+        }
+    }
+
     mutating func apply(instance: CloudProviderInstance, accountId: UUID, syncedAt: Date) {
         self.accountId = accountId
         providerId = instance.providerId

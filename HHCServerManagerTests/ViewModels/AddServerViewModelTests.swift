@@ -46,6 +46,7 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.validationError)
         XCTAssertEqual(viewModel.name, "Tencent")
         XCTAssertEqual(viewModel.authType, .password)
+        XCTAssertEqual(viewModel.serverKind, .manualSSH)
         XCTAssertTrue(viewModel.password.isEmpty)
     }
 
@@ -77,6 +78,7 @@ final class AddServerViewModelTests: XCTestCase {
         viewModel.host = "example.internal"
         viewModel.port = "22"
         viewModel.username = "root"
+        viewModel.serverKind = .tencentLighthouse
         viewModel.authType = .password
         viewModel.password = "secret"
         try viewModel.selectKnownHostsFile(knownHostsURL)
@@ -87,6 +89,7 @@ final class AddServerViewModelTests: XCTestCase {
         let trustedKeys = try repository.fetchTrustedHostKeys(serverId: profile.id)
         XCTAssertEqual(viewModel.knownHostsFileName, knownHostsURL.lastPathComponent)
         XCTAssertEqual(viewModel.knownHostsImportResult, KnownHostsImportResult(importedCount: 1, skippedCount: 1))
+        XCTAssertEqual(profile.serverKind, .tencentLighthouse)
         XCTAssertEqual(trustedKeys.count, 1)
         XCTAssertEqual(trustedKeys.first?.host, "example.internal")
         XCTAssertEqual(trustedKeys.first?.algorithm, "ssh-ed25519")
@@ -368,6 +371,7 @@ final class AddServerViewModelTests: XCTestCase {
         XCTAssertEqual(imported.name, "prod-web")
         XCTAssertEqual(imported.host, "203.0.113.20")
         XCTAssertEqual(imported.groupName, "Tencent Cloud")
+        XCTAssertEqual(imported.serverKind, .tencentCVM)
         XCTAssertEqual(try keychain.readPassword(keychainRef: imported.keychainRef), "cloud-secret")
         XCTAssertEqual(try repository.fetchCloudInstanceLinks().first { $0.instanceId == "ins-prod" }?.serverId, imported.id)
 

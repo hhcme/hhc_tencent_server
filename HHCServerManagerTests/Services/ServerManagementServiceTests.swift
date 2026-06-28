@@ -143,6 +143,7 @@ final class ServerManagementServiceTests: XCTestCase {
 
         let servers = try harness.repository.fetchServers()
         XCTAssertEqual(servers.map(\.id), [profile.id])
+        XCTAssertEqual(servers.first?.serverKind, .manualSSH)
         XCTAssertEqual(try harness.keychain.readPassword(keychainRef: profile.keychainRef), "secret")
     }
 
@@ -685,6 +686,23 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(plan.commandPreview.contains("cd '/srv/site' && npm ci && npm run build"))
     }
 
+    func testDeploymentProjectExtractsReferencedSystemdUnits() {
+        XCTAssertEqual(
+            DeploymentProject.referencedSystemdUnitNames(
+                in: #"sudo systemctl restart "api.service" && systemctl --user reload worker && systemctl restart -- api.service"#
+            ),
+            ["api.service", "worker.service"]
+        )
+        XCTAssertEqual(
+            DeploymentProject.referencedSystemdUnitNames(
+                in: "cd /srv/site && systemctl --no-block try-restart queue@prod.service"
+            ),
+            ["queue@prod.service"]
+        )
+        XCTAssertEqual(DeploymentProject.referencedSystemdUnitNames(in: "pm2 reload ecosystem.config.js"), [])
+        XCTAssertEqual(DeploymentProject.referencedSystemdUnitNames(in: nil), [])
+    }
+
     func testDeploymentCommandBuilderRejectsUnsafeConfiguration() {
         var project = DeploymentProject(
             id: UUID(),
@@ -1216,6 +1234,1391 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(result.externalURL, "http://git.example.internal:3000")
     }
 
+    func testGiteaAPIClientLoadsNativeSnapshotFromOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/user/repos": #"""
+            [{"id":1,"name":"app","full_name":"team/app","owner":{"login":"alice"},"private":true,"archived":false,"default_branch":"main","description":"backend","html_url":"http://git/team/app","updated_at":"2026-06-28T01:00:00Z","stars_count":2,"forks_count":1}]
+            """#,
+            "/api/v1/admin/users": #"""
+            [{"id":7,"login":"alice","full_name":"Alice","email":"alice@example.com","is_admin":true,"active":true,"last_login":"2026-06-28T02:00:00Z"}]
+            """#,
+            "/api/v1/user": #"""
+            {"id":7,"login":"alice","full_name":"Alice","email":"alice@example.com","is_admin":true,"active":true,"last_login":"2026-06-28T02:00:00Z"}
+            """#,
+            "/api/v1/user/keys": #"""
+            [{"id":33,"title":"deploy mac","key":"ssh-ed25519 AAAATEST deploy@example.com","fingerprint":"SHA256:test","url":"http://git/api/v1/user/keys/33","read_only":false,"created_at":"2026-06-28T01:30:00Z"}]
+            """#,
+            "/api/v1/users/alice/tokens": #"""
+            [{"id":44,"name":"hhc mac","scopes":["read:repository","read:user"],"sha1":"secret-token","token_last_eight":"abcd1234","created_at":"2026-06-28T01:40:00Z","last_used_at":"2026-06-28T02:40:00Z"}]
+            """#,
+            "/api/v1/packages/alice": #"""
+            [{"id":55,"owner":{"login":"alice"},"name":"@hhc/app","type":"npm","version":"1.0.0","repository":{"full_name":"team/app"},"html_url":"http://git/alice/-/packages/npm/@hhc/app/1.0.0","created_at":"2026-06-28T04:00:00Z"}]
+            """#,
+            "/api/v1/user/orgs": #"""
+            [{"id":3,"username":"team","full_name":"Team","description":"core team","website":"https://example.com"}]
+            """#,
+            "/api/v1/packages/team": #"""
+            [{"id":56,"owner":{"username":"team"},"name":"backend-sdk","type":"pub","version":"0.2.0","repository":{"full_name":"team/app"},"created_at":"2026-06-28T04:30:00Z"}]
+            """#,
+            "/api/v1/version": #"""
+            {"version":"1.24.2"}
+            """#,
+            "/api/v1/admin/cron": #"""
+            [{"name":"repo_health_check","schedule":"@every 24h","exec_times":8,"prev":"2026-06-28T00:00:00Z","next":"2026-06-29T00:00:00Z"}]
+            """#,
+            "/api/v1/orgs/team/teams": #"""
+            [{"id":12,"name":"Developers","description":"Ship code","organization":{"username":"team"},"permission":"write","includes_all_repositories":true,"can_create_org_repo":true,"units":["repo.code","repo.issues"]}]
+            """#,
+            "/api/v1/teams/12/members": #"""
+            [{"id":7,"login":"alice","full_name":"Alice","email":"alice@example.com","is_admin":true,"active":true,"last_login":"2026-06-28T02:00:00Z"}]
+            """#,
+            "/api/v1/teams/12/repos": #"""
+            [{"id":1,"name":"app","full_name":"team/app","owner":{"login":"team"},"private":true,"archived":false,"default_branch":"main","updated_at":"2026-06-28T01:00:00Z"}]
+            """#,
+            "/api/v1/repos/issues/search": #"""
+            [{"id":20,"number":5,"title":"Fix deploy","state":"open","repository":{"full_name":"team/app"},"user":{"login":"alice"},"assignees":[{"login":"deploybot"}],"labels":[{"name":"bug"},{"name":"deploy"}],"milestone":{"title":"v1.0"},"html_url":"http://git/team/app/issues/5","updated_at":"2026-06-28T03:00:00Z"}]
+            """#,
+        ])
+        let client = GiteaAPIClient(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let snapshot = try await client.loadSnapshot(baseURL: "http://git.example.com", token: "gitea-token")
+        let requests = transport.snapshotRequests()
+
+        XCTAssertEqual(snapshot.repositories.first?.fullName, "team/app")
+        XCTAssertEqual(snapshot.repositories.first?.owner, "alice")
+        XCTAssertEqual(snapshot.repositories.first?.isArchived, false)
+        XCTAssertEqual(snapshot.users.first?.username, "alice")
+        XCTAssertEqual(snapshot.organizations.first?.username, "team")
+        XCTAssertEqual(snapshot.teams.first?.name, "Developers")
+        XCTAssertEqual(snapshot.teams.first?.organization, "team")
+        XCTAssertEqual(snapshot.teamMembers.first?.teamId, 12)
+        XCTAssertEqual(snapshot.teamMembers.first?.username, "alice")
+        XCTAssertEqual(snapshot.teamRepositories.first?.teamId, 12)
+        XCTAssertEqual(snapshot.teamRepositories.first?.fullName, "team/app")
+        XCTAssertEqual(snapshot.keys.first?.title, "deploy mac")
+        XCTAssertEqual(snapshot.keys.first?.fingerprint, "SHA256:test")
+        XCTAssertEqual(snapshot.tokens.first?.username, "alice")
+        XCTAssertEqual(snapshot.tokens.first?.name, "hhc mac")
+        XCTAssertEqual(snapshot.tokens.first?.tokenLastEight, "abcd1234")
+        XCTAssertEqual(snapshot.packages.count, 2)
+        XCTAssertEqual(snapshot.packages.first?.owner, "alice")
+        XCTAssertEqual(snapshot.packages.first?.name, "@hhc/app")
+        XCTAssertEqual(snapshot.packages.first?.type, "npm")
+        XCTAssertEqual(snapshot.packages.first?.repository, "team/app")
+        XCTAssertEqual(snapshot.adminOverview.version, "1.24.2")
+        XCTAssertEqual(snapshot.adminOverview.cronTasks.first?.name, "repo_health_check")
+        XCTAssertEqual(snapshot.adminOverview.cronTasks.first?.schedule, "@every 24h")
+        XCTAssertEqual(snapshot.adminOverview.cronTasks.first?.execTimes, 8)
+        XCTAssertEqual(snapshot.issues.first?.repository, "team/app")
+        XCTAssertEqual(snapshot.issues.first?.assignees, ["deploybot"])
+        XCTAssertEqual(snapshot.issues.first?.labels, ["bug", "deploy"])
+        XCTAssertEqual(snapshot.issues.first?.milestone, "v1.0")
+        XCTAssertEqual(snapshot.issues.first?.htmlURL, "http://git/team/app/issues/5")
+        XCTAssertEqual(snapshot.pullRequests.first?.title, "Fix deploy")
+        XCTAssertEqual(snapshot.pullRequests.first?.assignees, ["deploybot"])
+        XCTAssertEqual(snapshot.pullRequests.first?.labels, ["bug", "deploy"])
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "token gitea-token" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/user/repos" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/user/keys" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/users/alice/tokens" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/packages/alice" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/packages/team" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/version" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/admin/cron" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/orgs/team/teams" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/teams/12/members" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v1/teams/12/repos" })
+    }
+
+    func testGitLabAPIClientLoadsNativeSnapshotFromOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects": #"""
+            [{"id":11,"name":"app","path_with_namespace":"team/app","visibility":"private","default_branch":"main","web_url":"http://gitlab/team/app","last_activity_at":"2026-06-28T01:00:00Z","archived":false}]
+            """#,
+            "/api/v4/groups": #"""
+            [{"id":2,"name":"team","full_path":"team","visibility":"private","web_url":"http://gitlab/groups/team"}]
+            """#,
+            "/api/v4/users": #"""
+            [{"id":99,"username":"deploybot","name":"Deploy Bot","state":"active","web_url":"http://gitlab/deploybot","is_admin":false}]
+            """#,
+            "/api/v4/projects/11/members/all": #"""
+            [{"id":99,"username":"deploybot","name":"Deploy Bot","state":"active","web_url":"http://gitlab/deploybot","access_level":30,"expires_at":"2026-12-31","created_at":"2026-06-28T00:00:00Z"}]
+            """#,
+            "/api/v4/groups/2/members/all": #"""
+            [{"id":99,"username":"deploybot","name":"Deploy Bot","state":"active","web_url":"http://gitlab/deploybot","access_level":40,"expires_at":null,"created_at":"2026-06-28T00:00:00Z"}]
+            """#,
+            "/api/v4/issues": #"""
+            [{"id":31,"iid":8,"title":"Fix deploy","state":"opened","project_id":11,"author":{"username":"alice"},"assignees":[{"username":"deploybot"}],"labels":["bug","deploy"],"milestone":{"title":"v1.0"},"web_url":"http://gitlab/team/app/-/issues/8","updated_at":"2026-06-28T02:00:00Z"}]
+            """#,
+            "/api/v4/merge_requests": #"""
+            [{"id":41,"iid":4,"title":"Deploy MR","state":"opened","source_branch":"feature","target_branch":"main","project_id":11,"author":{"username":"alice"},"assignees":[{"username":"deploybot"}],"reviewers":[{"username":"reviewer"}],"labels":["deploy"],"milestone":{"title":"v1.0"},"web_url":"http://gitlab/team/app/-/merge_requests/4","updated_at":"2026-06-28T03:00:00Z"}]
+            """#,
+            "/api/v4/projects/11/pipelines": #"""
+            [{"id":51,"ref":"main","sha":"abcdef123456","status":"success","web_url":"http://gitlab/team/app/-/pipelines/51","updated_at":"2026-06-28T04:00:00Z"}]
+            """#,
+            "/api/v4/projects/11/jobs": #"""
+            [{"id":71,"name":"deploy","stage":"deploy","ref":"main","status":"manual","web_url":"http://gitlab/team/app/-/jobs/71","duration":12.3,"started_at":"2026-06-28T04:30:00Z","finished_at":null}]
+            """#,
+            "/api/v4/projects/11/packages": #"""
+            [{"id":81,"name":"team-app","version":"1.0.0","package_type":"npm","status":"default","created_at":"2026-06-28T04:40:00Z","updated_at":"2026-06-28T04:45:00Z"}]
+            """#,
+            "/api/v4/projects/11/variables": #"""
+            [{"key":"DEPLOY_ENV","variable_type":"env_var","environment_scope":"production","protected":true,"masked":true,"raw":false,"description":"Deploy target"}]
+            """#,
+            "/api/v4/projects/11/deploy_keys": #"""
+            [{"id":61,"title":"deploy mac","key":"ssh-ed25519 AAAATEST deploy@example.com","fingerprint":"SHA256:test","can_push":true,"created_at":"2026-06-28T05:00:00Z","expires_at":"2027-06-28"}]
+            """#,
+            "/api/v4/projects/11/deploy_tokens": #"""
+            [{"id":62,"name":"registry deploy","username":"gitlab+deploy-token-62","scopes":["read_repository","read_package_registry"],"revoked":false,"expired":false,"active":true,"created_at":"2026-06-28T05:10:00Z","expires_at":"2027-06-28"}]
+            """#,
+            "/api/v4/projects/11/repository/branches": #"""
+            [{"name":"main","merged":false,"protected":true,"default":true,"can_push":false,"web_url":"http://gitlab/team/app/-/tree/main","commit":{"short_id":"abcdef12","title":"Initial commit","committed_date":"2026-06-28T05:30:00Z"}}]
+            """#,
+            "/api/v4/projects/11/repository/tags": #"""
+            [{"name":"v1.0.0","message":"release","target":"abcdef123456","protected":false,"commit":{"short_id":"abcdef12","title":"Initial commit"},"created_at":"2026-06-28T06:00:00Z"}]
+            """#,
+            "/api/v4/runners/all": #"""
+            [{"id":91,"description":"shell-runner","name":"runner-1","status":"online","runner_type":"instance_type","is_shared":true,"active":true,"paused":false,"online":true,"tag_list":["shell","deploy"],"version":"18.0.0","contacted_at":"2026-06-28T06:30:00Z"}]
+            """#,
+            "/api/v4/metadata": #"""
+            {"version":"18.0.1","revision":"abc123","enterprise":false}
+            """#,
+            "/api/v4/application/statistics": #"""
+            {"users":12,"active_users":9,"projects":5,"groups":2,"issues":20,"merge_requests":7}
+            """#,
+            "/api/v4/license": #"""
+            {"plan":"default","starts_at":"2026-01-01","expires_at":null,"expired":false,"user_limit":null,"active_users":9}
+            """#,
+            "/-/health": "GitLab OK",
+            "/-/readiness": "GitLab OK",
+            "/-/liveness": "GitLab OK",
+        ])
+        let client = GitLabAPIClient(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let snapshot = try await client.loadSnapshot(baseURL: "http://gitlab.example.com", token: "gitlab-token")
+        let requests = transport.snapshotRequests()
+
+        XCTAssertEqual(snapshot.projects.first?.pathWithNamespace, "team/app")
+        XCTAssertEqual(snapshot.groups.first?.fullPath, "team")
+        XCTAssertEqual(snapshot.users.first?.username, "deploybot")
+        XCTAssertEqual(snapshot.members.count, 2)
+        XCTAssertEqual(snapshot.members.first?.scope, .project)
+        XCTAssertEqual(snapshot.members.first?.targetId, 11)
+        XCTAssertEqual(snapshot.members.first?.userId, 99)
+        XCTAssertEqual(snapshot.members.last?.scope, .group)
+        XCTAssertEqual(snapshot.members.last?.targetId, 2)
+        XCTAssertEqual(snapshot.issues.first?.iid, 8)
+        XCTAssertEqual(snapshot.issues.first?.author, "alice")
+        XCTAssertEqual(snapshot.issues.first?.assignees, ["deploybot"])
+        XCTAssertEqual(snapshot.issues.first?.labels, ["bug", "deploy"])
+        XCTAssertEqual(snapshot.issues.first?.milestone, "v1.0")
+        XCTAssertEqual(snapshot.mergeRequests.first?.sourceBranch, "feature")
+        XCTAssertEqual(snapshot.mergeRequests.first?.author, "alice")
+        XCTAssertEqual(snapshot.mergeRequests.first?.assignees, ["deploybot"])
+        XCTAssertEqual(snapshot.mergeRequests.first?.reviewers, ["reviewer"])
+        XCTAssertEqual(snapshot.mergeRequests.first?.labels, ["deploy"])
+        XCTAssertEqual(snapshot.mergeRequests.first?.milestone, "v1.0")
+        XCTAssertEqual(snapshot.pipelines.first?.projectId, 11)
+        XCTAssertEqual(snapshot.pipelines.first?.status, "success")
+        XCTAssertEqual(snapshot.jobs.first?.projectId, 11)
+        XCTAssertEqual(snapshot.jobs.first?.name, "deploy")
+        XCTAssertEqual(snapshot.jobs.first?.status, "manual")
+        XCTAssertEqual(snapshot.packages.first?.projectId, 11)
+        XCTAssertEqual(snapshot.packages.first?.name, "team-app")
+        XCTAssertEqual(snapshot.packages.first?.packageType, "npm")
+        XCTAssertEqual(snapshot.runners.first?.description, "shell-runner")
+        XCTAssertEqual(snapshot.runners.first?.tagList, ["shell", "deploy"])
+        XCTAssertEqual(snapshot.variables.first?.projectId, 11)
+        XCTAssertEqual(snapshot.variables.first?.key, "DEPLOY_ENV")
+        XCTAssertEqual(snapshot.variables.first?.environmentScope, "production")
+        XCTAssertEqual(snapshot.variables.first?.masked, true)
+        XCTAssertEqual(snapshot.deployKeys.first?.projectId, 11)
+        XCTAssertEqual(snapshot.deployKeys.first?.title, "deploy mac")
+        XCTAssertEqual(snapshot.deployKeys.first?.canPush, true)
+        XCTAssertEqual(snapshot.deployTokens.first?.projectId, 11)
+        XCTAssertEqual(snapshot.deployTokens.first?.name, "registry deploy")
+        XCTAssertEqual(snapshot.deployTokens.first?.scopes, ["read_repository", "read_package_registry"])
+        XCTAssertEqual(snapshot.branches.first?.projectId, 11)
+        XCTAssertEqual(snapshot.branches.first?.name, "main")
+        XCTAssertEqual(snapshot.branches.first?.isDefault, true)
+        XCTAssertEqual(snapshot.branches.first?.protected, true)
+        XCTAssertEqual(snapshot.tags.first?.projectId, 11)
+        XCTAssertEqual(snapshot.tags.first?.name, "v1.0.0")
+        XCTAssertEqual(snapshot.tags.first?.message, "release")
+        XCTAssertEqual(snapshot.adminOverview.version, "18.0.1")
+        XCTAssertEqual(snapshot.adminOverview.revision, "abc123")
+        XCTAssertEqual(snapshot.adminOverview.enterprise, false)
+        XCTAssertEqual(snapshot.adminOverview.licensePlan, "default")
+        XCTAssertEqual(snapshot.adminOverview.userCount, 12)
+        XCTAssertEqual(snapshot.adminOverview.activeUserCount, 9)
+        XCTAssertEqual(snapshot.adminOverview.projectCount, 5)
+        XCTAssertEqual(snapshot.adminOverview.groupCount, 2)
+        XCTAssertEqual(snapshot.adminOverview.issueCount, 20)
+        XCTAssertEqual(snapshot.adminOverview.mergeRequestCount, 7)
+        XCTAssertEqual(snapshot.adminOverview.runnerCount, 1)
+        XCTAssertEqual(snapshot.adminOverview.healthStatus, "GitLab OK")
+        XCTAssertTrue(snapshot.adminOverview.unavailableReasons.isEmpty)
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "PRIVATE-TOKEN") == "gitlab-token" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/users" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/projects/11/members/all" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/groups/2/members/all" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/projects/11/pipelines" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/projects/11/jobs" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/projects/11/packages" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/runners/all" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/projects/11/variables" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/projects/11/deploy_keys" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/projects/11/deploy_tokens" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/projects/11/repository/branches" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/projects/11/repository/tags" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/metadata" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/application/statistics" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/api/v4/license" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/-/health" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/-/readiness" })
+        XCTAssertTrue(requests.contains { $0.url?.path == "/-/liveness" })
+    }
+
+    func testGiteaAPIClientCreatesAndDeletesRepositoryWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/user/repos": #"""
+            {"id":9,"name":"native-app","full_name":"alice/native-app","owner":{"login":"alice"},"private":true,"default_branch":"main","description":"Created from HHC","html_url":"http://git/alice/native-app","updated_at":"2026-06-28T01:00:00Z","stars_count":0,"forks_count":0}
+            """#,
+        ])
+        let client = GiteaAPIClient(transport: transport)
+
+        let repository = try await client.createRepository(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GitNativeRepositoryDraft(
+                name: "native-app",
+                description: "Created from HHC",
+                isPrivate: true,
+                autoInitialize: true
+            )
+        )
+        try await client.deleteRepository(baseURL: "http://git.example.com", token: "gitea-token", fullName: repository.fullName)
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.first?.httpMethod, "POST")
+        XCTAssertEqual(requests.first?.url?.path, "/api/v1/user/repos")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        let createBody = try XCTUnwrap(requests.first?.httpBody)
+        let createJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: createBody) as? [String: Any])
+        XCTAssertEqual(createJSON["name"] as? String, "native-app")
+        XCTAssertEqual(createJSON["description"] as? String, "Created from HHC")
+        XCTAssertEqual(createJSON["private"] as? Bool, true)
+        XCTAssertEqual(createJSON["auto_init"] as? Bool, true)
+        XCTAssertEqual(requests.last?.httpMethod, "DELETE")
+        XCTAssertEqual(requests.last?.url?.path, "/api/v1/repos/alice/native-app")
+    }
+
+    func testGiteaAPIClientUpdatesRepositorySettingsWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/repos/team/app": #"""
+            {"id":1,"name":"app","full_name":"team/app","owner":{"login":"alice"},"private":false,"archived":true,"default_branch":"release/v1","description":"updated backend","has_issues":false,"has_wiki":true,"has_pull_requests":false,"has_packages":true,"html_url":"http://git/team/app","updated_at":"2026-06-28T01:00:00Z","stars_count":2,"forks_count":1}
+            """#,
+        ])
+        let client = GiteaAPIClient(transport: transport)
+
+        let repository = try await client.updateRepository(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaRepositorySettingsDraft(
+                fullName: " team/app ",
+                description: " updated backend ",
+                isPrivate: false,
+                defaultBranch: " release/v1 ",
+                hasIssues: false,
+                hasWiki: true,
+                hasPullRequests: false,
+                hasPackages: true,
+                archived: true
+            )
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(repository.fullName, "team/app")
+        XCTAssertEqual(repository.isArchived, true)
+        XCTAssertEqual(repository.defaultBranch, "release/v1")
+        XCTAssertEqual(repository.hasIssues, false)
+        XCTAssertEqual(repository.hasWiki, true)
+        XCTAssertEqual(repository.hasPullRequests, false)
+        XCTAssertEqual(repository.hasPackages, true)
+        XCTAssertEqual(requests.first?.httpMethod, "PATCH")
+        XCTAssertEqual(requests.first?.url?.path, "/api/v1/repos/team/app")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        let body = try XCTUnwrap(requests.first?.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["description"] as? String, "updated backend")
+        XCTAssertEqual(json["private"] as? Bool, false)
+        XCTAssertEqual(json["default_branch"] as? String, "release/v1")
+        XCTAssertEqual(json["has_issues"] as? Bool, false)
+        XCTAssertEqual(json["has_wiki"] as? Bool, true)
+        XCTAssertEqual(json["has_pull_requests"] as? Bool, false)
+        XCTAssertEqual(json["has_packages"] as? Bool, true)
+        XCTAssertEqual(json["archived"] as? Bool, true)
+    }
+
+    func testGiteaAPIClientCreatesUpdatesAndDeletesUserWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/admin/users": #"""
+            {"id":18,"login":"deploybot","full_name":"Deploy Bot","email":"deploybot@example.com","is_admin":false,"active":true,"last_login":"2026-06-28T02:00:00Z"}
+            """#,
+            "/api/v1/admin/users/deploybot": #"""
+            {"id":18,"login":"deploybot","full_name":"Deploy Owner","email":"deploy-owner@example.com","is_admin":true,"active":false,"last_login":"2026-06-28T02:00:00Z"}
+            """#,
+        ])
+        let client = GiteaAPIClient(transport: transport)
+
+        let user = try await client.createUser(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaUserDraft(
+                username: " deploybot ",
+                email: " deploybot@example.com ",
+                password: "initial-password",
+                fullName: " Deploy Bot ",
+                mustChangePassword: true,
+                isActive: true,
+                isAdmin: false,
+                prohibitLogin: false,
+                restricted: true
+            )
+        )
+        let updatedUser = try await client.updateUser(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaUserDraft(
+                originalUsername: user.username,
+                username: " deploybot ",
+                email: " deploy-owner@example.com ",
+                password: "reset-password",
+                fullName: " Deploy Owner ",
+                mustChangePassword: true,
+                isActive: false,
+                isAdmin: true,
+                prohibitLogin: true,
+                restricted: false
+            )
+        )
+        try await client.deleteUser(baseURL: "http://git.example.com", token: "gitea-token", username: updatedUser.username)
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.count, 3)
+        XCTAssertEqual(user.username, "deploybot")
+        XCTAssertEqual(updatedUser.fullName, "Deploy Owner")
+
+        let createRequest = requests[0]
+        XCTAssertEqual(createRequest.httpMethod, "POST")
+        XCTAssertEqual(createRequest.url?.path, "/api/v1/admin/users")
+        XCTAssertEqual(createRequest.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        let body = try XCTUnwrap(createRequest.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["username"] as? String, "deploybot")
+        XCTAssertEqual(json["email"] as? String, "deploybot@example.com")
+        XCTAssertEqual(json["password"] as? String, "initial-password")
+        XCTAssertEqual(json["full_name"] as? String, "Deploy Bot")
+        XCTAssertEqual(json["must_change_password"] as? Bool, true)
+        XCTAssertEqual(json["admin"] as? Bool, false)
+        XCTAssertEqual(json["restricted"] as? Bool, true)
+
+        let updateRequest = requests[1]
+        XCTAssertEqual(updateRequest.httpMethod, "PATCH")
+        XCTAssertEqual(updateRequest.url?.path, "/api/v1/admin/users/deploybot")
+        let updateBody = try XCTUnwrap(updateRequest.httpBody)
+        let updateJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: updateBody) as? [String: Any])
+        XCTAssertEqual(updateJSON["source_id"] as? Int, 0)
+        XCTAssertEqual(updateJSON["login_name"] as? String, "deploybot")
+        XCTAssertEqual(updateJSON["email"] as? String, "deploy-owner@example.com")
+        XCTAssertEqual(updateJSON["password"] as? String, "reset-password")
+        XCTAssertEqual(updateJSON["full_name"] as? String, "Deploy Owner")
+        XCTAssertEqual(updateJSON["must_change_password"] as? Bool, true)
+        XCTAssertEqual(updateJSON["active"] as? Bool, false)
+        XCTAssertEqual(updateJSON["admin"] as? Bool, true)
+        XCTAssertEqual(updateJSON["prohibit_login"] as? Bool, true)
+        XCTAssertEqual(updateJSON["restricted"] as? Bool, false)
+
+        let deleteRequest = requests[2]
+        XCTAssertEqual(deleteRequest.httpMethod, "DELETE")
+        XCTAssertEqual(deleteRequest.url?.path, "/api/v1/admin/users/deploybot")
+    }
+
+    func testGiteaAPIClientCreatesUpdatesAndDeletesOrganizationWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/orgs": #"""
+            {"id":31,"username":"mobile-team","full_name":"Mobile Team","description":"iOS and Flutter apps","website":"https://example.com/mobile","visibility":"limited"}
+            """#,
+            "/api/v1/orgs/mobile-team": #"""
+            {"id":31,"username":"mobile-team","full_name":"Mobile Platform","description":"Native app group","website":"https://example.com/native","visibility":"private"}
+            """#,
+        ])
+        let client = GiteaAPIClient(transport: transport)
+
+        let organization = try await client.createOrganization(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaOrganizationDraft(
+                username: " mobile-team ",
+                fullName: " Mobile Team ",
+                description: " iOS and Flutter apps ",
+                website: " https://example.com/mobile ",
+                visibility: "limited"
+            )
+        )
+        let updatedOrganization = try await client.updateOrganization(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaOrganizationDraft(
+                originalUsername: organization.username,
+                username: " mobile-team ",
+                fullName: " Mobile Platform ",
+                description: " Native app group ",
+                website: " https://example.com/native ",
+                visibility: "private"
+            )
+        )
+        try await client.deleteOrganization(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            username: updatedOrganization.username
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.count, 3)
+        XCTAssertEqual(organization.username, "mobile-team")
+        XCTAssertEqual(organization.visibility, "limited")
+
+        let createRequest = requests[0]
+        XCTAssertEqual(createRequest.httpMethod, "POST")
+        XCTAssertEqual(createRequest.url?.path, "/api/v1/orgs")
+        XCTAssertEqual(createRequest.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        let createBody = try XCTUnwrap(createRequest.httpBody)
+        let createJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: createBody) as? [String: Any])
+        XCTAssertEqual(createJSON["username"] as? String, "mobile-team")
+        XCTAssertEqual(createJSON["full_name"] as? String, "Mobile Team")
+        XCTAssertEqual(createJSON["description"] as? String, "iOS and Flutter apps")
+        XCTAssertEqual(createJSON["website"] as? String, "https://example.com/mobile")
+        XCTAssertEqual(createJSON["visibility"] as? String, "limited")
+
+        let updateRequest = requests[1]
+        XCTAssertEqual(updatedOrganization.fullName, "Mobile Platform")
+        XCTAssertEqual(updatedOrganization.visibility, "private")
+        XCTAssertEqual(updateRequest.httpMethod, "PATCH")
+        XCTAssertEqual(updateRequest.url?.path, "/api/v1/orgs/mobile-team")
+        let updateBody = try XCTUnwrap(updateRequest.httpBody)
+        let updateJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: updateBody) as? [String: Any])
+        XCTAssertNil(updateJSON["username"])
+        XCTAssertEqual(updateJSON["full_name"] as? String, "Mobile Platform")
+        XCTAssertEqual(updateJSON["description"] as? String, "Native app group")
+        XCTAssertEqual(updateJSON["website"] as? String, "https://example.com/native")
+        XCTAssertEqual(updateJSON["visibility"] as? String, "private")
+
+        let deleteRequest = requests[2]
+        XCTAssertEqual(deleteRequest.httpMethod, "DELETE")
+        XCTAssertEqual(deleteRequest.url?.path, "/api/v1/orgs/mobile-team")
+    }
+
+    func testGiteaAPIClientCreatesUpdatesAndDeletesTeamWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/orgs/team/teams": #"""
+            {"id":34,"name":"Platform","description":"Native apps","permission":"write","includes_all_repositories":false,"can_create_org_repo":true,"units":["repo.code","repo.issues"],"organization":{"username":"team"}}
+            """#,
+            "/api/v1/teams/34": #"""
+            {"id":34,"name":"Platform Leads","description":"Release owners","permission":"admin","includes_all_repositories":true,"can_create_org_repo":true,"units":["repo.code","repo.pulls"],"organization":{"username":"team"}}
+            """#,
+        ])
+        let client = GiteaAPIClient(transport: transport)
+
+        let team = try await client.createTeam(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaTeamDraft(
+                organization: " team ",
+                name: " Platform ",
+                description: " Native apps ",
+                permission: "write",
+                includesAllRepositories: false,
+                canCreateOrgRepo: true,
+                units: ["repo.code", "repo.issues"]
+            )
+        )
+        let updatedTeam = try await client.updateTeam(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaTeamDraft(
+                teamId: team.id,
+                organization: " team ",
+                name: " Platform Leads ",
+                description: " Release owners ",
+                permission: "admin",
+                includesAllRepositories: true,
+                canCreateOrgRepo: true,
+                units: ["repo.code", "repo.pulls"]
+            )
+        )
+        try await client.deleteTeam(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            teamId: updatedTeam.id
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.count, 3)
+        XCTAssertEqual(team.organization, "team")
+        XCTAssertEqual(team.name, "Platform")
+        XCTAssertEqual(updatedTeam.name, "Platform Leads")
+
+        let createRequest = requests[0]
+        XCTAssertEqual(createRequest.httpMethod, "POST")
+        XCTAssertEqual(createRequest.url?.path, "/api/v1/orgs/team/teams")
+        XCTAssertEqual(createRequest.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        let createBody = try XCTUnwrap(createRequest.httpBody)
+        let createJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: createBody) as? [String: Any])
+        XCTAssertEqual(createJSON["name"] as? String, "Platform")
+        XCTAssertEqual(createJSON["description"] as? String, "Native apps")
+        XCTAssertEqual(createJSON["permission"] as? String, "write")
+        XCTAssertEqual(createJSON["includes_all_repositories"] as? Bool, false)
+        XCTAssertEqual(createJSON["can_create_org_repo"] as? Bool, true)
+        XCTAssertEqual(createJSON["units"] as? [String], ["repo.code", "repo.issues"])
+
+        let updateRequest = requests[1]
+        XCTAssertEqual(updateRequest.httpMethod, "PATCH")
+        XCTAssertEqual(updateRequest.url?.path, "/api/v1/teams/34")
+        let updateBody = try XCTUnwrap(updateRequest.httpBody)
+        let updateJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: updateBody) as? [String: Any])
+        XCTAssertEqual(updateJSON["name"] as? String, "Platform Leads")
+        XCTAssertEqual(updateJSON["description"] as? String, "Release owners")
+        XCTAssertEqual(updateJSON["permission"] as? String, "admin")
+        XCTAssertEqual(updateJSON["includes_all_repositories"] as? Bool, true)
+        XCTAssertEqual(updateJSON["can_create_org_repo"] as? Bool, true)
+        XCTAssertEqual(updateJSON["units"] as? [String], ["repo.code", "repo.pulls"])
+
+        let deleteRequest = requests[2]
+        XCTAssertEqual(deleteRequest.httpMethod, "DELETE")
+        XCTAssertEqual(deleteRequest.url?.path, "/api/v1/teams/34")
+    }
+
+    func testGiteaAPIClientAddsAndRemovesTeamMemberWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [:])
+        let client = GiteaAPIClient(transport: transport)
+
+        try await client.addTeamMember(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaTeamMemberDraft(teamId: 12, username: "alice")
+        )
+        try await client.removeTeamMember(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            teamId: 12,
+            username: "alice"
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.first?.httpMethod, "PUT")
+        XCTAssertEqual(requests.first?.url?.path, "/api/v1/teams/12/members/alice")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        XCTAssertEqual(requests.last?.httpMethod, "DELETE")
+        XCTAssertEqual(requests.last?.url?.path, "/api/v1/teams/12/members/alice")
+    }
+
+    func testGiteaAPIClientAddsAndRemovesTeamRepositoryWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [:])
+        let client = GiteaAPIClient(transport: transport)
+
+        try await client.addTeamRepository(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaTeamRepositoryDraft(teamId: 12, repositoryFullName: "team/app")
+        )
+        try await client.removeTeamRepository(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            teamId: 12,
+            repositoryFullName: "team/app"
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.first?.httpMethod, "PUT")
+        XCTAssertEqual(requests.first?.url?.path, "/api/v1/teams/12/repos/team/app")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        XCTAssertEqual(requests.last?.httpMethod, "DELETE")
+        XCTAssertEqual(requests.last?.url?.path, "/api/v1/teams/12/repos/team/app")
+    }
+
+    func testGiteaAPIClientCreatesAndDeletesKeyWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/user/keys": #"""
+            {"id":33,"title":"deploy mac","key":"ssh-ed25519 AAAATEST deploy@example.com","fingerprint":"SHA256:test","url":"http://git/api/v1/user/keys/33","read_only":true,"created_at":"2026-06-28T01:30:00Z"}
+            """#,
+        ])
+        let client = GiteaAPIClient(transport: transport)
+
+        let key = try await client.createKey(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaKeyDraft(
+                title: "deploy mac",
+                key: "ssh-ed25519 AAAATEST deploy@example.com",
+                isReadOnly: true
+            )
+        )
+        try await client.deleteKey(baseURL: "http://git.example.com", token: "gitea-token", keyId: key.id)
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(key.fingerprint, "SHA256:test")
+        XCTAssertEqual(requests.first?.httpMethod, "POST")
+        XCTAssertEqual(requests.first?.url?.path, "/api/v1/user/keys")
+        let body = try XCTUnwrap(requests.first?.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["title"] as? String, "deploy mac")
+        XCTAssertEqual(json["key"] as? String, "ssh-ed25519 AAAATEST deploy@example.com")
+        XCTAssertEqual(json["read_only"] as? Bool, true)
+        XCTAssertEqual(requests.last?.httpMethod, "DELETE")
+        XCTAssertEqual(requests.last?.url?.path, "/api/v1/user/keys/33")
+    }
+
+    func testGiteaAPIClientCreatesAndDeletesAccessTokenWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/users/alice/tokens": #"""
+            {"id":44,"name":"hhc mac","scopes":["read:repository","read:user"],"sha1":"secret-token","token_last_eight":"abcd1234","created_at":"2026-06-28T01:40:00Z","last_used_at":null}
+            """#,
+            "/api/v1/users/alice/tokens/44": "{}",
+        ])
+        let client = GiteaAPIClient(transport: transport)
+
+        let result = try await client.createAccessToken(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            draft: GiteaAccessTokenDraft(
+                username: " alice ",
+                name: " hhc mac ",
+                scopes: ["read:repository", "read:user"]
+            )
+        )
+        try await client.deleteAccessToken(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            username: "alice",
+            tokenId: result.token.id
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(result.secret, "secret-token")
+        XCTAssertEqual(result.token.username, "alice")
+        XCTAssertEqual(result.token.tokenLastEight, "abcd1234")
+
+        let createRequest = requests[0]
+        XCTAssertEqual(createRequest.httpMethod, "POST")
+        XCTAssertEqual(createRequest.url?.path, "/api/v1/users/alice/tokens")
+        XCTAssertEqual(createRequest.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        let body = try XCTUnwrap(createRequest.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["name"] as? String, "hhc mac")
+        XCTAssertEqual(json["scopes"] as? [String], ["read:repository", "read:user"])
+
+        let deleteRequest = requests[1]
+        XCTAssertEqual(deleteRequest.httpMethod, "DELETE")
+        XCTAssertEqual(deleteRequest.url?.path, "/api/v1/users/alice/tokens/44")
+    }
+
+    func testGiteaAPIClientDeletesPackageAndPackageVersionWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [:])
+        let client = GiteaAPIClient(transport: transport)
+
+        try await client.deletePackage(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            owner: "alice",
+            type: "npm",
+            name: "@hhc/app",
+            version: "1.0.0"
+        )
+        try await client.deletePackage(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            owner: "team",
+            type: "pub",
+            name: "backend_sdk",
+            version: nil
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.first?.httpMethod, "DELETE")
+        XCTAssertEqual(requests.first?.url?.path, "/api/v1/packages/alice/npm/@hhc%2Fapp/1.0.0")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        XCTAssertEqual(requests.last?.httpMethod, "DELETE")
+        XCTAssertEqual(requests.last?.url?.path, "/api/v1/packages/team/pub/backend_sdk")
+    }
+
+    func testGiteaAPIClientLoadsPackageDetailWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/packages/alice/npm/@hhc%2Fapp": #"""
+            [{"id":55,"owner":{"login":"alice"},"name":"@hhc/app","type":"npm","version":"1.0.0","repository":{"full_name":"team/app"},"html_url":"http://git/alice/-/packages/npm/@hhc/app/1.0.0","created_at":"2026-06-28T04:00:00Z"},{"id":56,"owner":{"login":"alice"},"name":"@hhc/app","type":"npm","version":"1.1.0","repository":{"full_name":"team/app"},"created_at":"2026-06-28T05:00:00Z"}]
+            """#,
+            "/api/v1/packages/alice/npm/@hhc%2Fapp/1.1.0": #"""
+            {"id":56,"owner":{"login":"alice"},"name":"@hhc/app","type":"npm","version":"1.1.0","repository":{"full_name":"team/app"},"html_url":"http://git/alice/-/packages/npm/@hhc/app/1.1.0","created_at":"2026-06-28T05:00:00Z"}
+            """#,
+            "/api/v1/packages/alice/npm/@hhc%2Fapp/1.1.0/files": #"""
+            [{"id":90,"name":"hhc-app-1.1.0.tgz","size":4096,"md5":"md5-test","sha1":"sha1-test","sha256":"sha256-test","sha512":"sha512-test"}]
+            """#,
+        ])
+        let client = GiteaAPIClient(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let detail = try await client.packageDetail(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            owner: "alice",
+            type: "npm",
+            name: "@hhc/app",
+            version: "1.1.0"
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(detail.owner, "alice")
+        XCTAssertEqual(detail.type, "npm")
+        XCTAssertEqual(detail.name, "@hhc/app")
+        XCTAssertEqual(detail.selectedVersion, "1.1.0")
+        XCTAssertEqual(detail.package?.version, "1.1.0")
+        XCTAssertEqual(detail.versions.map(\.version), ["1.0.0", "1.1.0"])
+        XCTAssertEqual(detail.files.first?.name, "hhc-app-1.1.0.tgz")
+        XCTAssertEqual(detail.files.first?.size, 4096)
+        XCTAssertEqual(detail.files.first?.sha256, "sha256-test")
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "token gitea-token" })
+        XCTAssertEqual(requests.map { $0.url?.path }, [
+            "/api/v1/packages/alice/npm/@hhc%2Fapp",
+            "/api/v1/packages/alice/npm/@hhc%2Fapp/1.1.0",
+            "/api/v1/packages/alice/npm/@hhc%2Fapp/1.1.0/files",
+        ])
+    }
+
+    func testGitLabAPIClientCreatesAndDeletesProjectWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects": #"""
+            {"id":15,"name":"native-app","path_with_namespace":"team/native-app","visibility":"internal","default_branch":"main","web_url":"http://gitlab/team/native-app","last_activity_at":"2026-06-28T01:00:00Z","archived":false}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        let project = try await client.createProject(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            draft: GitNativeRepositoryDraft(
+                name: "native-app",
+                description: "Created from HHC",
+                isPrivate: false,
+                autoInitialize: true
+            )
+        )
+        try await client.deleteProject(baseURL: "http://gitlab.example.com", token: "gitlab-token", projectId: project.id)
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.first?.httpMethod, "POST")
+        XCTAssertEqual(requests.first?.url?.path, "/api/v4/projects")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let createBody = try XCTUnwrap(requests.first?.httpBody)
+        let createJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: createBody) as? [String: Any])
+        XCTAssertEqual(createJSON["name"] as? String, "native-app")
+        XCTAssertEqual(createJSON["description"] as? String, "Created from HHC")
+        XCTAssertEqual(createJSON["visibility"] as? String, "internal")
+        XCTAssertEqual(createJSON["initialize_with_readme"] as? Bool, true)
+        XCTAssertEqual(requests.last?.httpMethod, "DELETE")
+        XCTAssertEqual(requests.last?.url?.path, "/api/v4/projects/15")
+    }
+
+    func testGitLabAPIClientUpdatesProjectSettingsWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/15": #"""
+            {"id":15,"name":"native-app","path_with_namespace":"team/native-app","description":"updated project","visibility":"public","default_branch":"release/v1","web_url":"http://gitlab/team/native-app","last_activity_at":"2026-06-28T01:00:00Z","archived":true}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        let project = try await client.updateProject(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            draft: GitLabProjectSettingsDraft(
+                projectId: 15,
+                pathWithNamespace: "team/native-app",
+                description: "updated project",
+                visibility: "public",
+                defaultBranch: "release/v1",
+                archived: true
+            )
+        )
+
+        let request = try XCTUnwrap(transport.snapshotRequests().first)
+        XCTAssertEqual(request.httpMethod, "PUT")
+        XCTAssertEqual(request.url?.path, "/api/v4/projects/15")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["description"] as? String, "updated project")
+        XCTAssertEqual(json["visibility"] as? String, "public")
+        XCTAssertEqual(json["default_branch"] as? String, "release/v1")
+        XCTAssertEqual(json["archived"] as? Bool, true)
+        XCTAssertEqual(project.description, "updated project")
+        XCTAssertEqual(project.visibility, "public")
+        XCTAssertEqual(project.defaultBranch, "release/v1")
+        XCTAssertEqual(project.archived, true)
+    }
+
+    func testGitLabAPIClientCreatesUpdatesAndDeletesGroupWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/groups": #"""
+            {"id":27,"name":"Mobile Team","full_path":"platform/mobile","visibility":"private","web_url":"http://gitlab/groups/platform/mobile"}
+            """#,
+            "/api/v4/groups/27": #"""
+            {"id":27,"name":"Mobile Platform","full_path":"platform/mobile-platform","visibility":"internal","web_url":"http://gitlab/groups/platform/mobile-platform"}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        let group = try await client.createGroup(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            draft: GitLabGroupDraft(
+                name: " Mobile Team ",
+                path: " mobile ",
+                description: "iOS and Flutter apps",
+                visibility: "private",
+                parentId: 9
+            )
+        )
+        let updatedGroup = try await client.updateGroup(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            draft: GitLabGroupDraft(
+                groupId: group.id,
+                name: " Mobile Platform ",
+                path: " mobile-platform ",
+                description: "Native app group",
+                visibility: "internal",
+                parentId: 9
+            )
+        )
+        try await client.deleteGroup(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            groupId: updatedGroup.id
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests.count, 3)
+        let request = requests[0]
+        XCTAssertEqual(group.id, 27)
+        XCTAssertEqual(group.fullPath, "platform/mobile")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.path, "/api/v4/groups")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["name"] as? String, "Mobile Team")
+        XCTAssertEqual(json["path"] as? String, "mobile")
+        XCTAssertEqual(json["description"] as? String, "iOS and Flutter apps")
+        XCTAssertEqual(json["visibility"] as? String, "private")
+        XCTAssertEqual(json["parent_id"] as? Int, 9)
+
+        let updateRequest = requests[1]
+        XCTAssertEqual(updatedGroup.id, 27)
+        XCTAssertEqual(updatedGroup.fullPath, "platform/mobile-platform")
+        XCTAssertEqual(updateRequest.httpMethod, "PUT")
+        XCTAssertEqual(updateRequest.url?.path, "/api/v4/groups/27")
+        XCTAssertEqual(updateRequest.value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let updateBody = try XCTUnwrap(updateRequest.httpBody)
+        let updateJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: updateBody) as? [String: Any])
+        XCTAssertEqual(updateJSON["name"] as? String, "Mobile Platform")
+        XCTAssertEqual(updateJSON["path"] as? String, "mobile-platform")
+        XCTAssertEqual(updateJSON["description"] as? String, "Native app group")
+        XCTAssertEqual(updateJSON["visibility"] as? String, "internal")
+        XCTAssertNil(updateJSON["parent_id"])
+
+        let deleteRequest = requests[2]
+        XCTAssertEqual(deleteRequest.httpMethod, "DELETE")
+        XCTAssertEqual(deleteRequest.url?.path, "/api/v4/groups/27")
+        XCTAssertEqual(deleteRequest.value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+    }
+
+    func testGiteaAPIClientUpdatesIssueStateWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v1/repos/team/app/issues/5": #"""
+            {"id":20,"number":5,"title":"Fix deploy","state":"closed","repository":{"full_name":"team/app"},"user":{"login":"alice"},"updated_at":"2026-06-28T03:00:00Z"}
+            """#,
+        ])
+        let client = GiteaAPIClient(transport: transport)
+
+        let issue = try await client.updateIssueState(
+            baseURL: "http://git.example.com",
+            token: "gitea-token",
+            repositoryFullName: "team/app",
+            issueNumber: 5,
+            action: .close
+        )
+
+        let request = try XCTUnwrap(transport.snapshotRequests().first)
+        XCTAssertEqual(issue.state, "closed")
+        XCTAssertEqual(request.httpMethod, "PATCH")
+        XCTAssertEqual(request.url?.path, "/api/v1/repos/team/app/issues/5")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "token gitea-token")
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["state"] as? String, "closed")
+    }
+
+    func testGitLabAPIClientUpdatesIssueAndMergeRequestStateWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/issues/8": #"""
+            {"id":31,"iid":8,"title":"Fix deploy","state":"closed","project_id":11,"web_url":"http://gitlab/team/app/-/issues/8","updated_at":"2026-06-28T02:00:00Z"}
+            """#,
+            "/api/v4/projects/11/merge_requests/4": #"""
+            {"id":41,"iid":4,"title":"Deploy MR","state":"reopened","source_branch":"feature","target_branch":"main","project_id":11,"web_url":"http://gitlab/team/app/-/merge_requests/4","updated_at":"2026-06-28T03:00:00Z"}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        let issue = try await client.updateIssueState(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            issueIid: 8,
+            action: .close
+        )
+        let mergeRequest = try await client.updateMergeRequestState(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            mergeRequestIid: 4,
+            action: .reopen
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(issue.state, "closed")
+        XCTAssertEqual(mergeRequest.state, "reopened")
+        XCTAssertEqual(requests.first?.httpMethod, "PUT")
+        XCTAssertEqual(requests.first?.url?.path, "/api/v4/projects/11/issues/8")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let issueBody = try XCTUnwrap(requests.first?.httpBody)
+        let issueJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: issueBody) as? [String: Any])
+        XCTAssertEqual(issueJSON["state_event"] as? String, "close")
+        XCTAssertEqual(requests.last?.httpMethod, "PUT")
+        XCTAssertEqual(requests.last?.url?.path, "/api/v4/projects/11/merge_requests/4")
+        let mergeBody = try XCTUnwrap(requests.last?.httpBody)
+        let mergeJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: mergeBody) as? [String: Any])
+        XCTAssertEqual(mergeJSON["state_event"] as? String, "reopen")
+    }
+
+    func testGitLabAPIClientRetriesAndCancelsPipelineWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/pipelines/51/retry": #"""
+            {"id":51,"ref":"main","sha":"abcdef123456","status":"pending","project_id":11,"web_url":"http://gitlab/team/app/-/pipelines/51","updated_at":"2026-06-28T04:00:00Z"}
+            """#,
+            "/api/v4/projects/11/pipelines/51/cancel": #"""
+            {"id":51,"ref":"main","sha":"abcdef123456","status":"canceled","project_id":11,"web_url":"http://gitlab/team/app/-/pipelines/51","updated_at":"2026-06-28T04:05:00Z"}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        let retried = try await client.retryPipeline(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            pipelineId: 51
+        )
+        let canceled = try await client.cancelPipeline(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            pipelineId: 51
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(retried.status, "pending")
+        XCTAssertEqual(canceled.status, "canceled")
+        XCTAssertEqual(requests.first?.httpMethod, "POST")
+        XCTAssertEqual(requests.first?.url?.path, "/api/v4/projects/11/pipelines/51/retry")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        XCTAssertNil(requests.first?.httpBody)
+        XCTAssertEqual(requests.last?.httpMethod, "POST")
+        XCTAssertEqual(requests.last?.url?.path, "/api/v4/projects/11/pipelines/51/cancel")
+        XCTAssertNil(requests.last?.httpBody)
+    }
+
+    func testGitLabAPIClientRetriesCancelsAndPlaysJobWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/jobs/71/retry": #"""
+            {"id":71,"name":"deploy","stage":"deploy","ref":"main","status":"pending","web_url":"http://gitlab/team/app/-/jobs/71","duration":null,"started_at":null,"finished_at":null}
+            """#,
+            "/api/v4/projects/11/jobs/71/cancel": #"""
+            {"id":71,"name":"deploy","stage":"deploy","ref":"main","status":"canceled","web_url":"http://gitlab/team/app/-/jobs/71","duration":12.3,"started_at":"2026-06-28T04:30:00Z","finished_at":"2026-06-28T04:31:00Z"}
+            """#,
+            "/api/v4/projects/11/jobs/71/play": #"""
+            {"id":71,"name":"deploy","stage":"deploy","ref":"main","status":"running","web_url":"http://gitlab/team/app/-/jobs/71","duration":null,"started_at":"2026-06-28T04:32:00Z","finished_at":null}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        let retried = try await client.retryJob(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            jobId: 71
+        )
+        let canceled = try await client.cancelJob(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            jobId: 71
+        )
+        let played = try await client.playJob(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            jobId: 71
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(retried.projectId, 11)
+        XCTAssertEqual(retried.status, "pending")
+        XCTAssertEqual(canceled.status, "canceled")
+        XCTAssertEqual(played.status, "running")
+        XCTAssertEqual(requests[0].httpMethod, "POST")
+        XCTAssertEqual(requests[0].url?.path, "/api/v4/projects/11/jobs/71/retry")
+        XCTAssertEqual(requests[1].httpMethod, "POST")
+        XCTAssertEqual(requests[1].url?.path, "/api/v4/projects/11/jobs/71/cancel")
+        XCTAssertEqual(requests[2].httpMethod, "POST")
+        XCTAssertEqual(requests[2].url?.path, "/api/v4/projects/11/jobs/71/play")
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "PRIVATE-TOKEN") == "gitlab-token" })
+    }
+
+    func testGitLabAPIClientLoadsJobTraceWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/jobs/71/trace": """
+            section_start:deploy
+            $ echo deploy
+            success
+            """,
+        ])
+        let client = GitLabAPIClient(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let trace = try await client.jobTrace(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            jobId: 71
+        )
+
+        let request = try XCTUnwrap(transport.snapshotRequests().first)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/v4/projects/11/jobs/71/trace")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        XCTAssertEqual(trace.projectId, 11)
+        XCTAssertEqual(trace.jobId, 71)
+        XCTAssertTrue(trace.text.contains("echo deploy"))
+        XCTAssertEqual(trace.capturedAt, Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    func testGitLabAPIClientCreatesUpdatesAndDeletesVariableWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/variables": #"""
+            {"key":"DEPLOY_ENV","variable_type":"env_var","environment_scope":"production","protected":true,"masked":true,"raw":false,"description":"Deploy target"}
+            """#,
+            "/api/v4/projects/11/variables/DEPLOY_ENV": #"""
+            {"key":"DEPLOY_ENV","variable_type":"env_var","environment_scope":"production","protected":true,"masked":false,"raw":true,"description":"Deploy target"}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+        let createDraft = GitLabVariableDraft(
+            projectId: 11,
+            key: "DEPLOY_ENV",
+            value: "prod-secret",
+            environmentScope: "production",
+            variableType: "env_var",
+            protected: true,
+            masked: true,
+            raw: false
+        )
+        let updateDraft = GitLabVariableDraft(
+            projectId: 11,
+            key: "DEPLOY_ENV",
+            value: "new-secret",
+            environmentScope: "production",
+            variableType: "env_var",
+            protected: true,
+            masked: false,
+            raw: true
+        )
+
+        let created = try await client.createVariable(baseURL: "http://gitlab.example.com", token: "gitlab-token", draft: createDraft)
+        let updated = try await client.updateVariable(baseURL: "http://gitlab.example.com", token: "gitlab-token", draft: updateDraft)
+        try await client.deleteVariable(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            key: "DEPLOY_ENV",
+            environmentScope: "production"
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(created.projectId, 11)
+        XCTAssertEqual(updated.projectId, 11)
+        XCTAssertEqual(updated.raw, true)
+        XCTAssertEqual(requests[0].httpMethod, "POST")
+        XCTAssertEqual(requests[0].url?.path, "/api/v4/projects/11/variables")
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let createBody = try XCTUnwrap(requests[0].httpBody)
+        let createJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: createBody) as? [String: Any])
+        XCTAssertEqual(createJSON["key"] as? String, "DEPLOY_ENV")
+        XCTAssertEqual(createJSON["value"] as? String, "prod-secret")
+        XCTAssertEqual(createJSON["environment_scope"] as? String, "production")
+        XCTAssertEqual(createJSON["protected"] as? Bool, true)
+        XCTAssertEqual(createJSON["masked"] as? Bool, true)
+
+        XCTAssertEqual(requests[1].httpMethod, "PUT")
+        XCTAssertEqual(requests[1].url?.path, "/api/v4/projects/11/variables/DEPLOY_ENV")
+        XCTAssertEqual(requests[1].url?.query, "filter%5Benvironment_scope%5D=production")
+        let updateBody = try XCTUnwrap(requests[1].httpBody)
+        let updateJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: updateBody) as? [String: Any])
+        XCTAssertEqual(updateJSON["value"] as? String, "new-secret")
+        XCTAssertEqual(updateJSON["masked"] as? Bool, false)
+        XCTAssertEqual(updateJSON["raw"] as? Bool, true)
+
+        XCTAssertEqual(requests[2].httpMethod, "DELETE")
+        XCTAssertEqual(requests[2].url?.path, "/api/v4/projects/11/variables/DEPLOY_ENV")
+        XCTAssertEqual(requests[2].url?.query, "filter%5Benvironment_scope%5D=production")
+    }
+
+    func testGitLabAPIClientCreatesAndDeletesDeployKeyWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/deploy_keys": #"""
+            {"id":61,"title":"deploy mac","key":"ssh-ed25519 AAAATEST deploy@example.com","fingerprint":"SHA256:test","can_push":true,"created_at":"2026-06-28T05:00:00Z","expires_at":"2027-06-28"}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        let deployKey = try await client.createDeployKey(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            draft: GitLabDeployKeyDraft(
+                projectId: 11,
+                title: "deploy mac",
+                key: "ssh-ed25519 AAAATEST deploy@example.com",
+                canPush: true
+            )
+        )
+        try await client.deleteDeployKey(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            keyId: deployKey.id
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(deployKey.projectId, 11)
+        XCTAssertEqual(deployKey.fingerprint, "SHA256:test")
+        XCTAssertEqual(deployKey.canPush, true)
+        XCTAssertEqual(requests[0].httpMethod, "POST")
+        XCTAssertEqual(requests[0].url?.path, "/api/v4/projects/11/deploy_keys")
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let body = try XCTUnwrap(requests[0].httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["title"] as? String, "deploy mac")
+        XCTAssertEqual(json["key"] as? String, "ssh-ed25519 AAAATEST deploy@example.com")
+        XCTAssertEqual(json["can_push"] as? Bool, true)
+        XCTAssertEqual(requests[1].httpMethod, "DELETE")
+        XCTAssertEqual(requests[1].url?.path, "/api/v4/projects/11/deploy_keys/61")
+    }
+
+    func testGitLabAPIClientDeletesDeployTokenWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/deploy_tokens/62": "{}",
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        try await client.deleteDeployToken(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            tokenId: 62
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests[0].httpMethod, "DELETE")
+        XCTAssertEqual(requests[0].url?.path, "/api/v4/projects/11/deploy_tokens/62")
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+    }
+
+    func testGitLabAPIClientCreatesDeployTokenWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/deploy_tokens": #"""
+            {"id":62,"name":"registry deploy","username":"gitlab+deploy-token-62","token":"glpat-secret","scopes":["read_repository","read_package_registry"],"revoked":false,"expired":false,"active":true,"created_at":"2026-06-28T05:10:00Z","expires_at":"2027-06-28"}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        let result = try await client.createDeployToken(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            draft: GitLabDeployTokenDraft(
+                projectId: 11,
+                name: "registry deploy",
+                username: "deploybot",
+                expiresAt: "2027-06-28",
+                readRepository: true,
+                readRegistry: false,
+                writeRegistry: false,
+                readPackageRegistry: true,
+                writePackageRegistry: false
+            )
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(result.deployToken.projectId, 11)
+        XCTAssertEqual(result.deployToken.name, "registry deploy")
+        XCTAssertEqual(result.token, "glpat-secret")
+        XCTAssertEqual(requests[0].httpMethod, "POST")
+        XCTAssertEqual(requests[0].url?.path, "/api/v4/projects/11/deploy_tokens")
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let body = try XCTUnwrap(requests[0].httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["name"] as? String, "registry deploy")
+        XCTAssertEqual(json["username"] as? String, "deploybot")
+        XCTAssertEqual(json["expires_at"] as? String, "2027-06-28")
+        XCTAssertEqual(json["scopes"] as? [String], ["read_repository", "read_package_registry"])
+    }
+
+    func testGitLabAPIClientDeletesPackageWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/packages/81": "{}",
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        try await client.deletePackage(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            packageId: 81
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(requests[0].httpMethod, "DELETE")
+        XCTAssertEqual(requests[0].url?.path, "/api/v4/projects/11/packages/81")
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+    }
+
+    func testGitLabAPIClientCreatesAndDeletesTagWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/repository/tags": #"""
+            {"name":"v1.0.0","message":"release","target":"abcdef123456","protected":false,"commit":{"short_id":"abcdef12","title":"Initial commit"},"created_at":"2026-06-28T06:00:00Z"}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+
+        let tag = try await client.createTag(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            draft: GitLabTagDraft(
+                projectId: 11,
+                name: "v1.0.0",
+                ref: "main",
+                message: "release"
+            )
+        )
+        try await client.deleteTag(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            projectId: 11,
+            tagName: tag.name
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(tag.projectId, 11)
+        XCTAssertEqual(tag.name, "v1.0.0")
+        XCTAssertEqual(tag.commitShortID, "abcdef12")
+        XCTAssertEqual(requests[0].httpMethod, "POST")
+        XCTAssertEqual(requests[0].url?.path, "/api/v4/projects/11/repository/tags")
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let body = try XCTUnwrap(requests[0].httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["tag_name"] as? String, "v1.0.0")
+        XCTAssertEqual(json["ref"] as? String, "main")
+        XCTAssertEqual(json["message"] as? String, "release")
+        XCTAssertEqual(requests[1].httpMethod, "DELETE")
+        XCTAssertEqual(requests[1].url?.path, "/api/v4/projects/11/repository/tags/v1.0.0")
+    }
+
+    func testGitLabAPIClientAddsUpdatesAndDeletesMemberWithOfficialAPIShape() async throws {
+        let transport = MockGitServiceHTTPTransport(responses: [
+            "/api/v4/projects/11/members": #"""
+            {"id":99,"username":"deploybot","name":"Deploy Bot","state":"active","web_url":"http://gitlab/deploybot","access_level":30,"expires_at":"2026-12-31","created_at":"2026-06-28T00:00:00Z"}
+            """#,
+            "/api/v4/projects/11/members/99": #"""
+            {"id":99,"username":"deploybot","name":"Deploy Bot","state":"active","web_url":"http://gitlab/deploybot","access_level":40,"expires_at":"2027-01-31","created_at":"2026-06-28T00:00:00Z"}
+            """#,
+        ])
+        let client = GitLabAPIClient(transport: transport)
+        let addDraft = GitLabMemberDraft(
+            scope: .project,
+            targetId: 11,
+            userId: 99,
+            accessLevel: 30,
+            expiresAt: "2026-12-31"
+        )
+        let updateDraft = GitLabMemberDraft(
+            scope: .project,
+            targetId: 11,
+            userId: 99,
+            accessLevel: 40,
+            expiresAt: "2027-01-31"
+        )
+
+        let added = try await client.addMember(baseURL: "http://gitlab.example.com", token: "gitlab-token", draft: addDraft)
+        let updated = try await client.updateMember(baseURL: "http://gitlab.example.com", token: "gitlab-token", draft: updateDraft)
+        try await client.deleteMember(
+            baseURL: "http://gitlab.example.com",
+            token: "gitlab-token",
+            scope: .group,
+            targetId: 2,
+            userId: 99
+        )
+
+        let requests = transport.snapshotRequests()
+        XCTAssertEqual(added.scope, .project)
+        XCTAssertEqual(added.targetId, 11)
+        XCTAssertEqual(added.accessLevel, 30)
+        XCTAssertEqual(updated.accessLevel, 40)
+        XCTAssertEqual(requests[0].httpMethod, "POST")
+        XCTAssertEqual(requests[0].url?.path, "/api/v4/projects/11/members")
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "PRIVATE-TOKEN"), "gitlab-token")
+        let addBody = try XCTUnwrap(requests[0].httpBody)
+        let addJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: addBody) as? [String: Any])
+        XCTAssertEqual(addJSON["user_id"] as? Int, 99)
+        XCTAssertEqual(addJSON["access_level"] as? Int, 30)
+        XCTAssertEqual(addJSON["expires_at"] as? String, "2026-12-31")
+        XCTAssertEqual(requests[1].httpMethod, "PUT")
+        XCTAssertEqual(requests[1].url?.path, "/api/v4/projects/11/members/99")
+        let updateBody = try XCTUnwrap(requests[1].httpBody)
+        let updateJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: updateBody) as? [String: Any])
+        XCTAssertEqual(updateJSON["access_level"] as? Int, 40)
+        XCTAssertEqual(updateJSON["expires_at"] as? String, "2027-01-31")
+        XCTAssertEqual(requests[2].httpMethod, "DELETE")
+        XCTAssertEqual(requests[2].url?.path, "/api/v4/groups/2/members/99")
+    }
+
     func testVerdaccioConfigurationBuilderGeneratesPinnedConfigAndService() throws {
         let draft = VerdaccioInstallDraft(
             name: "Team Registry",
@@ -1363,6 +2766,149 @@ final class ServerManagementServiceTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? RegistryConfigurationError, .invalidProxyBodySize)
         }
+    }
+
+    func testNginxReverseProxyConfigurationBuilderGeneratesConfig() throws {
+        let draft = NginxReverseProxyDraft(
+            serverName: "api.example.com",
+            upstreamURL: "http://127.0.0.1:8080",
+            configPath: "/etc/nginx/conf.d/api-proxy.conf",
+            clientMaxBodySize: "100m",
+            enableWebSocket: true
+        )
+
+        let config = try NginxReverseProxyConfigurationBuilder.config(for: draft)
+        let file = try NginxReverseProxyConfigurationBuilder.configFile(for: draft)
+
+        XCTAssertEqual(file.path, "/etc/nginx/conf.d/api-proxy.conf")
+        XCTAssertTrue(config.contains("server_name api.example.com;"))
+        XCTAssertTrue(config.contains("client_max_body_size 100m;"))
+        XCTAssertTrue(config.contains("proxy_pass http://127.0.0.1:8080;"))
+        XCTAssertTrue(config.contains("proxy_set_header Upgrade $http_upgrade;"))
+        XCTAssertTrue(config.contains("HTTPS is intentionally not managed here"))
+    }
+
+    func testNginxReverseProxyConfigurationBuilderRejectsUnsafeDrafts() {
+        XCTAssertThrowsError(
+            try NginxReverseProxyConfigurationBuilder.config(
+                for: NginxReverseProxyDraft(
+                    serverName: "api.example.com;rm",
+                    upstreamURL: "http://127.0.0.1:8080",
+                    configPath: "/etc/nginx/conf.d/api-proxy.conf"
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? NginxReverseProxyConfigurationError, .invalidServerName)
+        }
+
+        XCTAssertThrowsError(
+            try NginxReverseProxyConfigurationBuilder.config(
+                for: NginxReverseProxyDraft(
+                    serverName: "api.example.com",
+                    upstreamURL: "http://user:pass@127.0.0.1:8080",
+                    configPath: "/etc/nginx/conf.d/api-proxy.conf"
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? NginxReverseProxyConfigurationError, .invalidUpstreamURL)
+        }
+
+        XCTAssertThrowsError(
+            try NginxReverseProxyConfigurationBuilder.config(
+                for: NginxReverseProxyDraft(
+                    serverName: "api.example.com",
+                    upstreamURL: "http://127.0.0.1:8080",
+                    configPath: "/etc/nginx/conf.d/api-proxy.conf",
+                    clientMaxBodySize: "0m"
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? NginxReverseProxyConfigurationError, .invalidBodySize)
+        }
+
+        XCTAssertThrowsError(
+            try NginxReverseProxyConfigurationBuilder.configFile(
+                for: NginxReverseProxyDraft(
+                    serverName: "api.example.com",
+                    upstreamURL: "http://127.0.0.1:8080",
+                    configPath: "/tmp/api-proxy.conf"
+                )
+            )
+        )
+    }
+
+    func testDockerManagerParsesSnapshot() {
+        let snapshot = DockerManager.parseSnapshot("""
+        __HHC_DOCKER_VERSION__\t26.1.4
+        __HHC_DOCKER_CONTAINER__\t{"ID":"abc123","Image":"nginx:latest","Command":"\\"nginx -g daemon off;\\"","CreatedAt":"2026-06-28 01:00:00 +0800 CST","RunningFor":"2 hours ago","Ports":"0.0.0.0:80->80/tcp","Status":"Up 2 hours","State":"running","Names":"web","Size":"1.2kB"}
+        __HHC_DOCKER_CONTAINER__\t{"ID":"def456","Image":"redis:7","Command":"\\"docker-entrypoint.sh redis-server\\"","CreatedAt":"2026-06-28 00:00:00 +0800 CST","RunningFor":"3 hours ago","Ports":"6379/tcp","Status":"Exited (0) 1 hour ago","State":"exited","Names":"redis","Size":"0B"}
+        __HHC_DOCKER_IMAGE__\t{"ID":"sha256:111","Repository":"nginx","Tag":"latest","Digest":"<none>","CreatedAt":"2026-06-20 00:00:00 +0800 CST","CreatedSince":"8 days ago","Size":"192MB"}
+        """, capturedAt: Date(timeIntervalSince1970: 1_700_000_000))
+
+        XCTAssertTrue(snapshot.isAvailable)
+        XCTAssertEqual(snapshot.version, "26.1.4")
+        XCTAssertEqual(snapshot.containers.count, 2)
+        XCTAssertEqual(snapshot.containers.first?.names, "web")
+        XCTAssertEqual(snapshot.runningContainerCount, 1)
+        XCTAssertEqual(snapshot.images.first?.displayName, "nginx:latest")
+    }
+
+    func testDockerManagerParsesUnavailableSnapshot() {
+        let snapshot = DockerManager.parseSnapshot("""
+        __HHC_DOCKER_UNAVAILABLE__\tDocker CLI not found
+        """)
+
+        XCTAssertFalse(snapshot.isAvailable)
+        XCTAssertEqual(snapshot.unavailableReason, "Docker CLI not found")
+        XCTAssertTrue(snapshot.containers.isEmpty)
+        XCTAssertTrue(snapshot.images.isEmpty)
+    }
+
+    func testDockerManagerPerformsContainerActionsAndReadsLogs() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "web\n", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: "2026-06-28T00:00:00Z ready\n", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = DockerManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        try await manager.perform(.restart, containerID: "web", profile: profile, sshClient: client)
+        let log = try await manager.readLogs(containerID: "web", limit: 50, profile: profile, sshClient: client)
+
+        XCTAssertEqual(client.commands.first, "docker restart 'web'")
+        XCTAssertEqual(client.commands.last, "docker logs --tail 50 --timestamps 'web' 2>&1")
+        XCTAssertEqual(log.containerID, "web")
+        XCTAssertTrue(log.text.contains("ready"))
+    }
+
+    func testDockerManagerPullsAndRemovesImages() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "Pulled\n", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: "Untagged: nginx:latest\nDeleted: sha256:111\n", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = DockerManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let pull = try await manager.pullImage(reference: "nginx:latest", profile: profile, sshClient: client)
+        let remove = try await manager.removeImage(imageID: "sha256:111", profile: profile, sshClient: client)
+
+        XCTAssertEqual(client.commands.first, "docker pull 'nginx:latest'")
+        XCTAssertEqual(client.commands.last, "docker rmi 'sha256:111'")
+        XCTAssertEqual(pull.reference, "nginx:latest")
+        XCTAssertTrue(remove.output.contains("Deleted"))
+    }
+
+    func testDockerManagerRejectsUnsafeContainerReferences() {
+        XCTAssertThrowsError(try DockerManager.validatedContainerReference("web;rm"))
+        XCTAssertThrowsError(try DockerManager.validatedContainerReference("../web"))
+    }
+
+    func testDockerManagerRejectsUnsafeImageReferences() {
+        XCTAssertThrowsError(try DockerManager.validatedImageReference("nginx;rm"))
+        XCTAssertThrowsError(try DockerManager.validatedImageReference("../nginx"))
+        XCTAssertThrowsError(try DockerManager.validatedImageReference("registry.example.com//nginx:latest"))
+        XCTAssertEqual(try DockerManager.validatedImageReference("registry.example.com/team/nginx:1.25"), "registry.example.com/team/nginx:1.25")
+        XCTAssertEqual(try DockerManager.validatedImageReference("nginx@sha256:abcdef"), "nginx@sha256:abcdef")
     }
 
     func testPubRegistryResearchHarnessKeepsSelfHostedPubAsResearchOnly() {
@@ -1968,6 +3514,48 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(packages[0].modifiedAt, Date(timeIntervalSince1970: 1_700_000_002))
     }
 
+    func testVerdaccioManagerParsesPackageDetail() throws {
+        let detail = try VerdaccioManager.parsePackageDetail(
+            Data("""
+            {
+              "name": "@team/ui",
+              "dist-tags": { "latest": "1.1.0", "beta": "1.2.0-beta.1" },
+              "readme": "# UI\\nPrivate package",
+              "time": { "1.0.0": "2026-06-28T01:00:00Z", "1.1.0": "2026-06-28T02:00:00Z" },
+              "_attachments": {
+                "ui-1.0.0.tgz": { "length": 1024 },
+                "ui-1.1.0.tgz": { "length": 2048 }
+              },
+              "versions": {
+                "1.0.0": {
+                  "description": "Initial",
+                  "dependencies": { "lodash": "^4.17.21" },
+                  "dist": { "tarball": "http://127.0.0.1:4873/@team/ui/-/ui-1.0.0.tgz" }
+                },
+                "1.1.0": {
+                  "description": "Stable",
+                  "dependencies": { "dayjs": "^1.11.0" },
+                  "dist": { "tarball": "http://127.0.0.1:4873/@team/ui/-/ui-1.1.0.tgz" }
+                }
+              }
+            }
+            """.utf8),
+            fallbackName: "@team/ui",
+            registryURL: "http://127.0.0.1:4873",
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        XCTAssertEqual(detail.name, "@team/ui")
+        XCTAssertEqual(detail.latestVersion, "1.1.0")
+        XCTAssertEqual(detail.distTags["beta"], "1.2.0-beta.1")
+        XCTAssertEqual(detail.versions.map(\.version), ["1.1.0", "1.0.0"])
+        XCTAssertEqual(detail.versions.first?.dependencies["dayjs"], "^1.11.0")
+        XCTAssertEqual(detail.versions.first?.sizeBytes, 2048)
+        XCTAssertEqual(detail.readme, "# UI\nPrivate package")
+        XCTAssertEqual(detail.installCommand, "npm install @team/ui@1.1.0 --registry http://127.0.0.1:4873")
+        XCTAssertEqual(detail.capturedAt, Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
     func testVerdaccioManagerListsPackagesFromStorage() async throws {
         let profile = makeServiceTestProfile()
         let client = RecordingSSHClient(responses: [
@@ -1993,6 +3581,57 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertEqual(packages.map(\.name), ["@team/ui", "api-client"])
         XCTAssertTrue(client.commands[0].contains("find \"$data_path\" -mindepth 1 -maxdepth 3 -type f -name package.json"))
         XCTAssertTrue(client.commands[0].contains("printf '%s\\t%s\\t%s\\t%s\\t%s\\n'"))
+    }
+
+    func testVerdaccioManagerReadsPackageDetailFromStorage() async throws {
+        let profile = makeServiceTestProfile()
+        let metadata = Data("""
+        {"name":"@team/ui","dist-tags":{"latest":"1.1.0"},"versions":{"1.1.0":{"description":"Stable"}}}
+        """.utf8).base64EncodedString()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: metadata, stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let detail = try await manager.packageDetail(
+            draft: VerdaccioInstallDraft(),
+            packageName: "@team/ui",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(detail.name, "@team/ui")
+        XCTAssertEqual(detail.latestVersion, "1.1.0")
+        XCTAssertEqual(detail.installCommand, "npm install @team/ui@1.1.0 --registry http://127.0.0.1:4873")
+        XCTAssertTrue(client.commands[0].contains("relative_path='@team/ui/package.json'"))
+        XCTAssertTrue(client.commands[0].contains("base64 < \"$package_json\""))
+    }
+
+    func testVerdaccioManagerDeletesPackageWithBackupRestartAndHealthCheck() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "__HHC_VERDACCIO_PACKAGE_BACKUP__/srv/verdaccio/backups/verdaccio-package-team-ui-20260628-120000.tar.gz\n", stderr: "", exitCode: 0, duration: 0),
+            CommandResult(command: "", stdout: "ok\n", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let manager = VerdaccioManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await manager.deletePackage(
+            draft: VerdaccioInstallDraft(),
+            packageName: "@team/ui",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(result.packageName, "@team/ui")
+        XCTAssertTrue(result.backupPath.hasPrefix("/srv/verdaccio/backups/verdaccio-package-team-ui-"))
+        XCTAssertEqual(result.healthCheckOutput, "ok")
+        XCTAssertTrue(client.commands[0].contains("relative_path='@team/ui'"))
+        XCTAssertTrue(client.commands[0].contains("install -d -m 0750 \"$backup_dir\""))
+        XCTAssertTrue(client.commands[0].contains("tar -czf \"$backup_path\""))
+        XCTAssertTrue(client.commands[0].contains("rm -rf -- \"$package_dir\""))
+        XCTAssertTrue(client.commands[0].contains("systemctl restart"))
+        XCTAssertTrue(client.commands[0].contains("'verdaccio.service'"))
+        XCTAssertTrue(client.commands[1].contains("127.0.0.1:4873/-/ping"))
     }
 
     func testVerdaccioManagerCreatesRegistryBackupArchive() async throws {
@@ -2219,13 +3858,30 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(DashboardService.parseYesNo("yes\n"))
         XCTAssertEqual(DashboardService.parseLoadAverage("0.10 0.20 0.30 1/100 12345"), "0.10 / 0.20 / 0.30")
         XCTAssertEqual(DashboardService.parseCPUCount("4\n"), "4")
+        XCTAssertEqual(DashboardService.parseUptime("up 2 weeks, 3 days, 4 hours\n"), "2 weeks, 3 days, 4 hours")
+        XCTAssertEqual(DashboardService.parseUptime("1d 2h 3m\n"), "1d 2h 3m")
         XCTAssertEqual(DashboardService.parseProcessSummary("total=120 running=2 sleeping=117 stopped=0 zombie=1\n"), "120 / 2 / 1")
         XCTAssertEqual(DashboardService.parseNetworkTotals("""
             Inter-|   Receive                                                |  Transmit
              face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
                 lo: 1000 0 0 0 0 0 0 0 2000 0 0 0 0 0 0 0
               eth0: 1048576 0 0 0 0 0 0 0 2097152 0 0 0 0 0 0 0
-        """), "1.0 MiB / 2.0 MiB")
+              ens5: 524288 0 0 0 0 0 0 0 1048576 0 0 0 0 0 0 0
+        """), "1.5 MiB / 3.0 MiB")
+        XCTAssertEqual(DashboardService.parsePrimaryNetworkInterface("""
+            Inter-|   Receive                                                |  Transmit
+             face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+                lo: 9999999 0 0 0 0 0 0 0 9999999 0 0 0 0 0 0 0
+              eth0: 1048576 0 0 0 0 0 0 0 1048576 0 0 0 0 0 0 0
+              ens5: 524288 0 0 0 0 0 0 0 4194304 0 0 0 0 0 0 0
+        """), "ens5 512.0 KiB / 4.0 MiB")
+        XCTAssertEqual(DashboardService.parseNetworkInterfaceBreakdown("""
+            Inter-|   Receive                                                |  Transmit
+             face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+                lo: 9999999 0 0 0 0 0 0 0 9999999 0 0 0 0 0 0 0
+              eth0: 1048576 0 0 0 0 0 0 0 1048576 0 0 0 0 0 0 0
+              ens5: 524288 0 0 0 0 0 0 0 4194304 0 0 0 0 0 0 0
+        """), "ens5 512.0 KiB / 4.0 MiB; eth0 1.0 MiB / 1.0 MiB")
 
         let memory = DashboardService.parseMemoryUsage("""
         MemTotal:        2048000 kB
@@ -2235,6 +3891,43 @@ final class ServerManagementServiceTests: XCTestCase {
 
         let disk = DashboardService.parseRootDiskUsage("/dev/vda1 20971520 10485760 10485760 50% /")
         XCTAssertEqual(disk, "10.0 GiB / 20.0 GiB")
+    }
+
+    func testNetworkTrafficInspectorParsesAndSummarizesInterfaces() {
+        let interfaces = NetworkTrafficInspector.parseInterfaceBreakdown(
+            "eth0 1.0 MiB / 3.0 MiB; ens5 2.0 MiB / 1.0 MiB; invalid; enp1s0 512.0 KiB / 512.0 KiB"
+        )
+
+        XCTAssertEqual(interfaces.map(\.name), ["eth0", "ens5", "enp1s0"])
+        XCTAssertEqual(interfaces[0].receivedBytes, 1_048_576, accuracy: 1)
+        XCTAssertEqual(interfaces[0].transmittedBytes, 3_145_728, accuracy: 1)
+
+        let summary = NetworkTrafficInspector.summary(for: interfaces)
+        XCTAssertEqual(summary.interfaceCount, 3)
+        XCTAssertEqual(summary.receivedBytes, 3_670_016, accuracy: 1)
+        XCTAssertEqual(summary.transmittedBytes, 4_718_592, accuracy: 1)
+        XCTAssertEqual(summary.busiestInterface?.name, "eth0")
+        XCTAssertEqual(
+            NetworkTrafficInspector.trafficShare(for: interfaces[0], in: summary),
+            0.5,
+            accuracy: 0.001
+        )
+    }
+
+    func testNetworkTrafficInspectorFlagsSingleInterfaceDominance() {
+        let interfaces = NetworkTrafficInspector.parseInterfaceBreakdown(
+            "eth0 9.0 GiB / 1.0 GiB; ens5 256.0 MiB / 128.0 MiB"
+        )
+        let summary = NetworkTrafficInspector.summary(for: interfaces)
+
+        let messages = NetworkTrafficInspector.attentionMessages(for: summary)
+
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertTrue(messages[0].contains("eth0"))
+        XCTAssertTrue(messages[0].contains("90%"))
+        XCTAssertEqual(NetworkTrafficInspector.attentionMessages(for: NetworkTrafficInspector.summary(for: [])), [
+            "未解析到非 lo 网卡明细，无法判断单网卡流量分布。",
+        ])
     }
 
     func testDashboardServiceParsesCommonOSReleaseVariants() {
@@ -2300,6 +3993,205 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertThrowsError(try SystemdServiceManager.validatedUnitName("nginx.socket"))
     }
 
+    func testSystemdServiceClassifierSummarizesAndRecognizesApplications() throws {
+        let units = [
+            SystemdUnit(
+                name: "nginx.service",
+                loadState: "loaded",
+                activeState: "active",
+                subState: "running",
+                description: "A high performance web server"
+            ),
+            SystemdUnit(
+                name: "verdaccio.service",
+                loadState: "loaded",
+                activeState: "inactive",
+                subState: "dead",
+                description: "Private npm registry"
+            ),
+            SystemdUnit(
+                name: "broken-worker.service",
+                loadState: "loaded",
+                activeState: "failed",
+                subState: "failed",
+                description: "Background job"
+            ),
+            SystemdUnit(
+                name: "ssh.service",
+                loadState: "loaded",
+                activeState: "active",
+                subState: "running",
+                description: "OpenBSD Secure Shell server"
+            ),
+        ]
+
+        let summary = SystemdServiceClassifier.summary(for: units)
+        XCTAssertEqual(summary.total, 4)
+        XCTAssertEqual(summary.running, 2)
+        XCTAssertEqual(summary.stopped, 1)
+        XCTAssertEqual(summary.failed, 1)
+        XCTAssertEqual(summary.commonApplications, 2)
+        XCTAssertEqual(SystemdServiceClassifier.commonApplicationName(for: units[0]), "Nginx")
+        XCTAssertEqual(SystemdServiceClassifier.commonApplicationName(for: units[1]), "Verdaccio")
+        XCTAssertTrue(SystemdServiceClassifier.isFailed(units[2]))
+        XCTAssertFalse(SystemdServiceClassifier.isCommonApplication(units[3]))
+    }
+
+    func testDatabaseServiceManagerParsesSnapshotAndFillsMissingKinds() throws {
+        let log = Data("2026-06-28T01:00:00 mysql started\n".utf8).base64EncodedString()
+        let services = DatabaseServiceManager.parseSnapshot("""
+        __HHC_DB_ROW__\tmysql\tmysqld.service\tactive\trunning\tyes\tmysql  Ver 8.0.42\t0.0.0.0:3306\t/var/lib/mysql\t\(log)
+        __HHC_DB_ROW__\tredis\t\tunknown\tunknown\tno\t\t\t\t
+        """)
+
+        XCTAssertEqual(services.map(\.kind), DatabaseServiceKind.allCases)
+        let mysql = try XCTUnwrap(services.first { $0.kind == .mysql })
+        XCTAssertEqual(mysql.unitName, "mysqld.service")
+        XCTAssertTrue(mysql.isRunning)
+        XCTAssertEqual(mysql.version, "mysql  Ver 8.0.42")
+        XCTAssertEqual(mysql.listenEndpoints, ["0.0.0.0:3306"])
+        XCTAssertEqual(mysql.dataPath, "/var/lib/mysql")
+        XCTAssertTrue(mysql.recentLog?.contains("mysql started") == true)
+
+        let redis = try XCTUnwrap(services.first { $0.kind == .redis })
+        XCTAssertFalse(redis.isInstalled)
+        XCTAssertNil(redis.unitName)
+
+        let postgresql = try XCTUnwrap(services.first { $0.kind == .postgresql })
+        XCTAssertFalse(postgresql.isInstalled)
+        XCTAssertEqual(postgresql.statusText, "not found")
+    }
+
+    func testDatabaseServiceManagerBuildsBackupRestorePlans() throws {
+        let mysql = DatabaseService(
+            kind: .mysql,
+            unitName: "mysqld.service",
+            activeState: "active",
+            subState: "running",
+            isInstalled: true,
+            version: "mysql  Ver 8.0.42",
+            listenEndpoints: ["127.0.0.1:3306"],
+            dataPath: "/var/lib/mysql",
+            recentLog: nil
+        )
+        let mysqlPlan = DatabaseServiceManager.backupRestorePlan(for: mysql, timestamp: "20260628-120000")
+
+        XCTAssertEqual(mysqlPlan.backupPath, "~/hhc-db-backups/mysql-20260628-120000.sql.gz")
+        XCTAssertTrue(mysqlPlan.backupCommand.contains("mysqldump --single-transaction"))
+        XCTAssertTrue(mysqlPlan.restoreCommand.contains("gunzip -c ~/hhc-db-backups/mysql-20260628-120000.sql.gz | mysql"))
+        XCTAssertTrue(mysqlPlan.warnings.contains { $0.contains("恢复会覆盖") })
+
+        let postgresql = DatabaseService(
+            kind: .postgresql,
+            unitName: "postgresql.service",
+            activeState: "active",
+            subState: "running",
+            isInstalled: true,
+            version: "psql (PostgreSQL) 15.8",
+            listenEndpoints: ["127.0.0.1:5432"],
+            dataPath: "/var/lib/postgresql",
+            recentLog: nil
+        )
+        let postgresqlPlan = DatabaseServiceManager.backupRestorePlan(for: postgresql, timestamp: "20260628-120000")
+
+        XCTAssertTrue(postgresqlPlan.backupCommand.contains("sudo -u postgres pg_dumpall"))
+        XCTAssertTrue(postgresqlPlan.restoreCommand.contains("sudo -u postgres psql"))
+
+        let redis = DatabaseService(
+            kind: .redis,
+            unitName: "redis-server.service",
+            activeState: "active",
+            subState: "running",
+            isInstalled: true,
+            version: "Redis server v=7.2.0",
+            listenEndpoints: ["127.0.0.1:6379"],
+            dataPath: "/srv/redis",
+            recentLog: nil
+        )
+        let redisPlan = DatabaseServiceManager.backupRestorePlan(for: redis, timestamp: "20260628-120000")
+
+        XCTAssertTrue(redisPlan.backupCommand.contains("redis-cli BGSAVE"))
+        XCTAssertTrue(redisPlan.backupCommand.contains("/srv/redis/dump.rdb"))
+        XCTAssertTrue(redisPlan.restoreCommand.contains("systemctl stop redis-server.service"))
+        XCTAssertTrue(redisPlan.restoreCommand.contains("systemctl start redis-server.service"))
+    }
+
+    func testDatabaseServiceInspectorSummarizesAndFiltersServices() {
+        let services = [
+            DatabaseService(
+                kind: .mysql,
+                unitName: "mysql.service",
+                activeState: "active",
+                subState: "running",
+                isInstalled: true,
+                version: "mysql 8",
+                listenEndpoints: ["127.0.0.1:3306"],
+                dataPath: "/var/lib/mysql",
+                recentLog: nil
+            ),
+            DatabaseService(
+                kind: .postgresql,
+                unitName: "postgresql.service",
+                activeState: "inactive",
+                subState: "dead",
+                isInstalled: true,
+                version: "psql 15",
+                listenEndpoints: [],
+                dataPath: "/var/lib/postgresql",
+                recentLog: nil
+            ),
+            DatabaseService(
+                kind: .redis,
+                unitName: nil,
+                activeState: "missing",
+                subState: "missing",
+                isInstalled: false,
+                version: nil,
+                listenEndpoints: [],
+                dataPath: nil,
+                recentLog: nil
+            ),
+        ]
+
+        let summary = DatabaseServiceInspector.summary(for: services)
+
+        XCTAssertEqual(summary.total, 3)
+        XCTAssertEqual(summary.installed, 2)
+        XCTAssertEqual(summary.running, 1)
+        XCTAssertEqual(summary.attention, 1)
+        XCTAssertEqual(summary.missing, 1)
+        XCTAssertEqual(DatabaseServiceInspector.filter(services, by: .installed).map(\.kind), [.mysql, .postgresql])
+        XCTAssertEqual(DatabaseServiceInspector.filter(services, by: .running).map(\.kind), [.mysql])
+        XCTAssertEqual(DatabaseServiceInspector.filter(services, by: .attention).map(\.kind), [.postgresql])
+        XCTAssertEqual(DatabaseServiceInspector.filter(services, by: .missing).map(\.kind), [.redis])
+    }
+
+    func testDatabaseServiceManagerCreatesBackup() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient(responses: [
+            CommandResult(command: "", stdout: "backup complete\n", stderr: "", exitCode: 0, duration: 0),
+        ])
+        let service = DatabaseService(
+            kind: .mysql,
+            unitName: "mysqld.service",
+            activeState: "active",
+            subState: "running",
+            isInstalled: true,
+            version: "mysql  Ver 8.0.42",
+            listenEndpoints: ["127.0.0.1:3306"],
+            dataPath: "/var/lib/mysql",
+            recentLog: nil
+        )
+        let manager = DatabaseServiceManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let result = try await manager.createBackup(service: service, profile: profile, sshClient: client)
+
+        XCTAssertEqual(result.serviceKind, .mysql)
+        XCTAssertEqual(result.backupPath, "~/hhc-db-backups/mysql-20231114-221320.sql.gz")
+        XCTAssertTrue(result.output.contains("backup complete"))
+        XCTAssertEqual(client.commands.first, "mkdir -p ~/hhc-db-backups && mysqldump --single-transaction --routines --events --all-databases | gzip > ~/hhc-db-backups/mysql-20231114-221320.sql.gz")
+    }
+
     func testSystemdServiceManagerListsActsAndReadsJournal() async throws {
         let profile = makeServiceTestProfile()
         let client = RecordingSystemdSSHClient()
@@ -2340,6 +4232,16 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertNil(snapshot.entries[0].sourcePath)
         XCTAssertEqual(snapshot.entries[1].sourcePath, "/etc/cron.d/hhc-system")
         XCTAssertEqual(snapshot.entries[1].runAsUser, "root")
+        let cronSummary = CronEntryClassifier.summary(for: snapshot.entries)
+        XCTAssertEqual(cronSummary.total, 2)
+        XCTAssertEqual(cronSummary.enabled, 2)
+        XCTAssertEqual(cronSummary.disabled, 0)
+        XCTAssertEqual(cronSummary.userEntries, 1)
+        XCTAssertEqual(cronSummary.systemEntries, 1)
+        XCTAssertEqual(CronEntryClassifier.sourceTitle(for: snapshot.entries[0]), "User crontab")
+        XCTAssertEqual(CronEntryClassifier.runAsTitle(for: snapshot.entries[0]), "SSH user")
+        XCTAssertEqual(CronEntryClassifier.sourceTitle(for: snapshot.entries[1]), "/etc/cron.d/hhc-system")
+        XCTAssertEqual(CronEntryClassifier.runAsTitle(for: snapshot.entries[1]), "root")
         do {
             try await manager.perform(.delete, entry: snapshot.entries[1], profile: profile, sshClient: client)
             XCTFail("Expected system cron entry mutation to fail.")
@@ -2385,6 +4287,42 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertThrowsError(try NginxConfigManager.validatedConfigPath("/etc/passwd"))
         XCTAssertThrowsError(try NginxConfigManager.validatedConfigPath("/etc/nginx/../passwd"))
 
+        let sites = NginxConfigManager.parseSites(in: """
+        server {
+            listen 80;
+            server_name example.com www.example.com;
+            root /var/www/example;
+        }
+        server {
+            listen 443 ssl http2;
+            server_name api.example.com;
+            # proxy_pass http://ignored.internal;
+            location / {
+                proxy_pass http://127.0.0.1:3000;
+            }
+            ssl_certificate /etc/letsencrypt/live/api/fullchain.pem;
+        }
+        """, configPath: "/etc/nginx/conf.d/example.conf")
+        XCTAssertEqual(sites.count, 2)
+        XCTAssertEqual(sites[0].serverNames, ["example.com", "www.example.com"])
+        XCTAssertEqual(sites[0].listen, ["80"])
+        XCTAssertEqual(sites[0].root, "/var/www/example")
+        XCTAssertFalse(sites[0].hasSSL)
+        XCTAssertEqual(sites[1].serverNames, ["api.example.com"])
+        XCTAssertEqual(sites[1].listen, ["443 ssl http2"])
+        XCTAssertTrue(sites[1].hasSSL)
+        XCTAssertEqual(sites[1].sslCertificatePaths, ["/etc/letsencrypt/live/api/fullchain.pem"])
+        XCTAssertEqual(sites[1].proxyPasses, ["http://127.0.0.1:3000"])
+        let certificates = NginxConfigManager.parseCertificateInspections("""
+        __HHC_NGINX_CERT__\t/etc/letsencrypt/live/api/fullchain.pem
+        __HHC_NGINX_CERT_NOT_AFTER__\tJun 20 12:00:00 2027 GMT
+        __HHC_NGINX_CERT_SUBJECT__\tCN=api.example.com
+        __HHC_NGINX_CERT_ISSUER__\tCN=R3
+        """)
+        let certificateExpiry = Date(timeIntervalSince1970: 1_813_492_800)
+        XCTAssertEqual(certificates["/etc/letsencrypt/live/api/fullchain.pem"]?.notAfter, certificateExpiry)
+        XCTAssertEqual(certificates["/etc/letsencrypt/live/api/fullchain.pem"]?.subject, "CN=api.example.com")
+
         let list = try await manager.listConfigs(profile: profile, sshClient: client)
         XCTAssertEqual(list.files.map(\.path), ["/www/server/nginx/conf/nginx.conf", "/www/server/nginx/conf/vhost/site.conf"])
         XCTAssertTrue(client.commands.contains { $0.contains("nginx -V") })
@@ -2392,6 +4330,12 @@ final class ServerManagementServiceTests: XCTestCase {
         let content = try await manager.readConfig(file: list.files[0], profile: profile, sshClient: client)
         XCTAssertEqual(content.content, "user www-data;\n")
         XCTAssertTrue(client.commands.contains { $0.contains("base64 < '/www/server/nginx/conf/nginx.conf'") })
+
+        let siteList = try await manager.listSites(profile: profile, sshClient: client)
+        let sslSite = try XCTUnwrap(siteList.sites.first { $0.primaryName == "api.example.com" })
+        XCTAssertEqual(sslSite.sslCertificatePaths, ["/etc/letsencrypt/live/api/fullchain.pem"])
+        XCTAssertEqual(sslSite.sslCertificates.first?.notAfter, certificateExpiry)
+        XCTAssertTrue(client.commands.contains { $0.contains("openssl x509") })
 
         let test = try await manager.testConfig(profile: profile, sshClient: client)
         XCTAssertTrue(test.succeeded)
@@ -2423,6 +4367,71 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(rolledBack.rolledBack)
         XCTAssertFalse(rolledBack.testResult.succeeded)
         XCTAssertEqual(client.configs["/www/server/nginx/conf/nginx.conf"], "user nginx;\n")
+    }
+
+    func testNginxSiteInspectorSummarizesAndFiltersSites() {
+        let staticSite = NginxSite(
+            configPath: "/etc/nginx/conf.d/static.conf",
+            blockIndex: 0,
+            serverNames: ["example.com"],
+            listen: ["80"],
+            root: "/var/www/example",
+            hasSSL: false,
+            sslCertificatePaths: [],
+            sslCertificates: [],
+            proxyPasses: []
+        )
+        let proxySite = NginxSite(
+            configPath: "/etc/nginx/conf.d/api.conf",
+            blockIndex: 0,
+            serverNames: ["api.example.com"],
+            listen: ["443 ssl"],
+            root: nil,
+            hasSSL: true,
+            sslCertificatePaths: ["/etc/letsencrypt/live/api/fullchain.pem"],
+            sslCertificates: [
+                NginxSSLCertificate(
+                    path: "/etc/letsencrypt/live/api/fullchain.pem",
+                    subject: "CN=api.example.com",
+                    issuer: "CN=R3",
+                    notAfter: Date(timeIntervalSince1970: 2_000_000_000),
+                    inspectionError: nil
+                ),
+            ],
+            proxyPasses: ["http://127.0.0.1:3000"]
+        )
+        let brokenSSL = NginxSite(
+            configPath: "/etc/nginx/conf.d/broken.conf",
+            blockIndex: 0,
+            serverNames: ["broken.example.com"],
+            listen: ["443 ssl"],
+            root: "/var/www/broken",
+            hasSSL: true,
+            sslCertificatePaths: ["/etc/ssl/missing.pem"],
+            sslCertificates: [
+                NginxSSLCertificate(
+                    path: "/etc/ssl/missing.pem",
+                    subject: nil,
+                    issuer: nil,
+                    notAfter: nil,
+                    inspectionError: "cannot read certificate"
+                ),
+            ],
+            proxyPasses: []
+        )
+        let sites = [staticSite, proxySite, brokenSSL]
+
+        let summary = NginxSiteInspector.summary(for: sites)
+
+        XCTAssertEqual(summary.total, 3)
+        XCTAssertEqual(summary.sslEnabled, 2)
+        XCTAssertEqual(summary.reverseProxy, 1)
+        XCTAssertEqual(summary.staticSites, 2)
+        XCTAssertEqual(summary.certificateIssues, 1)
+        XCTAssertEqual(NginxSiteInspector.filter(sites, by: .ssl).map(\.primaryName), ["api.example.com", "broken.example.com"])
+        XCTAssertEqual(NginxSiteInspector.filter(sites, by: .reverseProxy).map(\.primaryName), ["api.example.com"])
+        XCTAssertEqual(NginxSiteInspector.filter(sites, by: .staticSite).map(\.primaryName), ["example.com", "broken.example.com"])
+        XCTAssertEqual(NginxSiteInspector.filter(sites, by: .certificateIssues).map(\.primaryName), ["broken.example.com"])
     }
 
     func testNginxConfigManagerUpsertsVerdaccioProxyConfigAndReloads() async throws {
@@ -2588,6 +4597,26 @@ final class ServerManagementServiceTests: XCTestCase {
         let client = RecordingEnvironmentSSHClient()
         let manager = EnvironmentFileManager(now: { Date(timeIntervalSince1970: 1_700_000_000) })
 
+        let analysis = EnvironmentVariableInspector.analyze("""
+        # comment
+        APP_ENV=prod
+        export API_TOKEN=secret
+        DATABASE_PASSWORD="hidden"
+        invalid-key=value
+        """)
+        XCTAssertEqual(analysis.keys, ["API_TOKEN", "APP_ENV", "DATABASE_PASSWORD"])
+        XCTAssertEqual(analysis.sensitiveKeys, ["API_TOKEN", "DATABASE_PASSWORD"])
+        XCTAssertEqual(EnvironmentVariableInspector.maskedKeyList(analysis.sensitiveKeys), "API_TOKEN, DATABASE_PASSWORD")
+
+        let changes = EnvironmentVariableInspector.changeSummary(
+            from: "APP_ENV=prod\nOLD_KEY=1\nUNCHANGED=yes\n",
+            to: "APP_ENV=staging\nNEW_KEY=2\nUNCHANGED=yes\n"
+        )
+        XCTAssertEqual(changes.addedKeys, ["NEW_KEY"])
+        XCTAssertEqual(changes.changedKeys, ["APP_ENV"])
+        XCTAssertEqual(changes.removedKeys, ["OLD_KEY"])
+        XCTAssertEqual(changes.allChangedKeys, ["APP_ENV", "NEW_KEY", "OLD_KEY"])
+
         let parsed = EnvironmentFileManager.parseFileListing("""
         /var/www/app/.env\t30\t1700000000.5\tapp
         /etc/default/nginx\t20\t1700000001.0\tos
@@ -2738,6 +4767,37 @@ final class ServerManagementServiceTests: XCTestCase {
         XCTAssertTrue(trashPath.hasSuffix("-index.html"))
     }
 
+    func testRemoteFileServiceCreatesFilesAndDirectoriesWithoutOverwrite() async throws {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let service = RemoteFileService(now: { Date(timeIntervalSince1970: 1_700_000_000) })
+
+        let file = try await service.createItem(
+            named: "notes.txt",
+            kind: .file,
+            inDirectoryPath: "/var/www",
+            profile: profile,
+            sshClient: client
+        )
+        let directory = try await service.createItem(
+            named: "assets",
+            kind: .directory,
+            inDirectoryPath: "/var/www",
+            profile: profile,
+            sshClient: client
+        )
+
+        XCTAssertEqual(file.path, "/var/www/notes.txt")
+        XCTAssertEqual(file.kind, .file)
+        XCTAssertEqual(file.size, 0)
+        XCTAssertEqual(directory.path, "/var/www/assets")
+        XCTAssertEqual(directory.kind, .directory)
+        XCTAssertEqual(client.commands, [
+            "set -e; test ! -e '/var/www/notes.txt'; : > '/var/www/notes.txt'",
+            "mkdir -- '/var/www/assets'",
+        ])
+    }
+
     func testRemoteFileServiceRejectsUnsafeRenameTargets() async {
         let profile = makeServiceTestProfile()
         let client = RecordingSSHClient()
@@ -2754,6 +4814,26 @@ final class ServerManagementServiceTests: XCTestCase {
         do {
             try await service.rename(entry: entry, to: "../bad", profile: profile, sshClient: client)
             XCTFail("Expected invalid rename target.")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "File name cannot be empty, '.', '..', or contain '/'.")
+            XCTAssertTrue(client.commands.isEmpty)
+        }
+    }
+
+    func testRemoteFileServiceRejectsUnsafeCreateTargets() async {
+        let profile = makeServiceTestProfile()
+        let client = RecordingSSHClient()
+        let service = RemoteFileService()
+
+        do {
+            _ = try await service.createItem(
+                named: "../bad",
+                kind: .file,
+                inDirectoryPath: "/var/www",
+                profile: profile,
+                sshClient: client
+            )
+            XCTFail("Expected invalid create target.")
         } catch {
             XCTAssertEqual(error.localizedDescription, "File name cannot be empty, '.', '..', or contain '/'.")
             XCTAssertTrue(client.commands.isEmpty)
@@ -6675,7 +8755,13 @@ private final class RecordingNginxSSHClient: SSHClient, @unchecked Sendable {
     private(set) var commands: [String] = []
     var configs = [
         "/www/server/nginx/conf/nginx.conf": "user www-data;\n",
-        "/www/server/nginx/conf/vhost/site.conf": "server { server_name example.com; }\n",
+        "/www/server/nginx/conf/vhost/site.conf": """
+        server {
+            listen 443 ssl;
+            server_name api.example.com;
+            ssl_certificate /etc/letsencrypt/live/api/fullchain.pem;
+        }
+        """,
     ]
     var testSucceeds = true
 
@@ -6701,6 +8787,29 @@ private final class RecordingNginxSSHClient: SSHClient, @unchecked Sendable {
             return CommandResult(
                 command: command,
                 stdout: Data((configs["/www/server/nginx/conf/nginx.conf"] ?? "").utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("base64 < '/www/server/nginx/conf/vhost/site.conf'") {
+            return CommandResult(
+                command: command,
+                stdout: Data((configs["/www/server/nginx/conf/vhost/site.conf"] ?? "").utf8).base64EncodedString(),
+                stderr: "",
+                exitCode: 0,
+                duration: 0
+            )
+        }
+        if command.contains("openssl x509") {
+            return CommandResult(
+                command: command,
+                stdout: """
+                __HHC_NGINX_CERT__\t/etc/letsencrypt/live/api/fullchain.pem
+                __HHC_NGINX_CERT_NOT_AFTER__\tJun 20 12:00:00 2027 GMT
+                __HHC_NGINX_CERT_SUBJECT__\tCN=api.example.com
+                __HHC_NGINX_CERT_ISSUER__\tCN=R3
+                """,
                 stderr: "",
                 exitCode: 0,
                 duration: 0
@@ -7013,6 +9122,35 @@ private final class MockHuaweiCloudTransport: HuaweiCloudHTTPTransport, @uncheck
             headerFields: [:]
         )!
         return (Data(body.utf8), response)
+    }
+}
+
+private final class MockGitServiceHTTPTransport: GitServiceHTTPTransport, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "MockGitServiceHTTPTransport")
+    private var responses: [String: String]
+    private var requests: [URLRequest] = []
+
+    init(responses: [String: String]) {
+        self.responses = responses
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let body = queue.sync {
+            requests.append(request)
+            return responses[request.url?.path ?? ""] ?? "[]"
+        }
+
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: [:]
+        )!
+        return (Data(body.utf8), response)
+    }
+
+    func snapshotRequests() -> [URLRequest] {
+        queue.sync { requests }
     }
 }
 

@@ -3,6 +3,8 @@
 - [macOS MVP 本地设计快照](assets/design/macos-mvp-v0.2/README.md)
 - [macOS MVP 设计稿说明](superpowers/specs/2026-06-25-macos-mvp-design.md)
 - [项目设计文档](superpowers/specs/2026-06-25-server-manager-design.md)
+- [宝塔类产品定位与功能补充](superpowers/specs/2026-06-28-panel-product-positioning-and-features.md)
+- [开发服务原生管理工作台改版](superpowers/specs/2026-06-28-development-services-native-workbench.md)
 - [云厂商 API 增强层设计](superpowers/specs/2026-06-25-cloud-provider-integration.md)
 - [Windows 原生版技术选型](superpowers/specs/2026-06-25-windows-native-client-strategy.md)
 - [全部 Phase 实施计划](superpowers/plans/README.md)

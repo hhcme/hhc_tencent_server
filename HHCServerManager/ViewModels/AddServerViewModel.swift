@@ -8,6 +8,7 @@ final class AddServerViewModel: ObservableObject {
     @Published var port = "22"
     @Published var username = "root"
     @Published var groupName = ""
+    @Published var serverKind: ServerKind = .manualSSH
     @Published var authType: SSHAuthType = .privateKey
     @Published var password = ""
     @Published var privateKeyData: Data?
@@ -61,6 +62,7 @@ final class AddServerViewModel: ObservableObject {
         port = "\(profile.port)"
         username = profile.username
         groupName = profile.groupName ?? ""
+        serverKind = profile.serverKind
         authType = profile.authType
         password = ""
         privateKeyData = nil
@@ -150,6 +152,7 @@ final class AddServerViewModel: ObservableObject {
                 username: username.trimmingCharacters(in: .whitespacesAndNewlines),
                 groupName: groupName,
                 authType: authType,
+                serverKind: serverKind,
                 credentialUpdate: update
             )
         } else {
@@ -168,6 +171,7 @@ final class AddServerViewModel: ObservableObject {
                 username: username.trimmingCharacters(in: .whitespacesAndNewlines),
                 groupName: groupName,
                 authType: authType,
+                serverKind: serverKind,
                 credential: credential
             )
         }

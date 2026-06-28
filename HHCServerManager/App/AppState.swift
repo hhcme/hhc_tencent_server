@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class AppState: ObservableObject {
     let repository: ServerRepository
+    let keychain: KeychainService
     let serverManagementService: ServerManagementService
     let cloudAccountService: CloudAccountService
     let cloudInstanceSyncService: CloudInstanceSyncService
@@ -11,6 +12,8 @@ final class AppState: ObservableObject {
     let cloudSecurityGroupService: CloudSecurityGroupService
     let dashboardService: DashboardService
     let systemdServiceManager: SystemdServiceManager
+    let databaseServiceManager: DatabaseServiceManager
+    let dockerManager: DockerManager
     let cronManager: CronManager
     let nginxConfigManager: NginxConfigManager
     let firewallManager: FirewallManager
@@ -24,6 +27,8 @@ final class AppState: ObservableObject {
     let verdaccioManager: VerdaccioManager
     let gitLabInstaller: GitLabInstaller
     let gitLabManager: GitLabManager
+    let giteaAPIClient: GiteaAPIClient
+    let gitLabAPIClient: GitLabAPIClient
     let sshClient: OpenSSHClient
 
     @Published var servers: [ServerProfile] = []
@@ -43,6 +48,7 @@ final class AppState: ObservableObject {
         ])
     ) {
         self.repository = repository
+        self.keychain = keychain
         serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
         cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
         cloudProviderRegistry = registry
@@ -50,6 +56,8 @@ final class AppState: ObservableObject {
         cloudSecurityGroupService = CloudSecurityGroupService(repository: repository, keychain: keychain, registry: registry)
         dashboardService = DashboardService()
         systemdServiceManager = SystemdServiceManager()
+        databaseServiceManager = DatabaseServiceManager()
+        dockerManager = DockerManager()
         cronManager = CronManager()
         nginxConfigManager = NginxConfigManager()
         firewallManager = FirewallManager()
@@ -61,6 +69,8 @@ final class AppState: ObservableObject {
         verdaccioManager = VerdaccioManager()
         gitLabInstaller = GitLabInstaller()
         gitLabManager = GitLabManager()
+        giteaAPIClient = GiteaAPIClient()
+        gitLabAPIClient = GitLabAPIClient()
         deploymentWebhookService = DeploymentWebhookService(
             repository: repository,
             keychain: keychain,
@@ -92,6 +102,7 @@ final class AppState: ObservableObject {
                 HuaweiCloudAdapter(),
             ])
             self.repository = repository
+            self.keychain = keychain
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
             cloudProviderRegistry = registry
@@ -99,6 +110,8 @@ final class AppState: ObservableObject {
             cloudSecurityGroupService = CloudSecurityGroupService(repository: repository, keychain: keychain, registry: registry)
             dashboardService = DashboardService()
             systemdServiceManager = SystemdServiceManager()
+            databaseServiceManager = DatabaseServiceManager()
+            dockerManager = DockerManager()
             cronManager = CronManager()
             nginxConfigManager = NginxConfigManager()
             firewallManager = FirewallManager()
@@ -110,6 +123,8 @@ final class AppState: ObservableObject {
             verdaccioManager = VerdaccioManager()
             gitLabInstaller = GitLabInstaller()
             gitLabManager = GitLabManager()
+            giteaAPIClient = GiteaAPIClient()
+            gitLabAPIClient = GitLabAPIClient()
             deploymentWebhookService = DeploymentWebhookService(
                 repository: repository,
                 keychain: keychain,
@@ -139,6 +154,7 @@ final class AppState: ObservableObject {
                 HuaweiCloudAdapter(),
             ])
             self.repository = repository
+            self.keychain = keychain
             serverManagementService = ServerManagementService(repository: repository, keychain: keychain)
             cloudAccountService = CloudAccountService(repository: repository, keychain: keychain)
             cloudProviderRegistry = registry
@@ -146,6 +162,8 @@ final class AppState: ObservableObject {
             cloudSecurityGroupService = CloudSecurityGroupService(repository: repository, keychain: keychain, registry: registry)
             dashboardService = DashboardService()
             systemdServiceManager = SystemdServiceManager()
+            databaseServiceManager = DatabaseServiceManager()
+            dockerManager = DockerManager()
             cronManager = CronManager()
             nginxConfigManager = NginxConfigManager()
             firewallManager = FirewallManager()
@@ -157,6 +175,8 @@ final class AppState: ObservableObject {
             verdaccioManager = VerdaccioManager()
             gitLabInstaller = GitLabInstaller()
             gitLabManager = GitLabManager()
+            giteaAPIClient = GiteaAPIClient()
+            gitLabAPIClient = GitLabAPIClient()
             deploymentWebhookService = DeploymentWebhookService(
                 repository: repository,
                 keychain: keychain,

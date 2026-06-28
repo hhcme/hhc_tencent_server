@@ -10,7 +10,7 @@ final class ServerRepository: @unchecked Sendable {
 
     func fetchServers() throws -> [ServerProfile] {
         try database.query("""
-            SELECT id, name, host, port, username, auth_type, keychain_ref, group_name, created_at, updated_at
+            SELECT id, name, host, port, username, auth_type, server_kind, keychain_ref, group_name, created_at, updated_at
             FROM server_profiles
             ORDER BY updated_at DESC
         """) { statement in
@@ -21,14 +21,15 @@ final class ServerRepository: @unchecked Sendable {
     func upsert(_ profile: ServerProfile) throws {
         try database.execute("""
             INSERT INTO server_profiles (
-                id, name, host, port, username, auth_type, keychain_ref, group_name, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, name, host, port, username, auth_type, server_kind, keychain_ref, group_name, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 host = excluded.host,
                 port = excluded.port,
                 username = excluded.username,
                 auth_type = excluded.auth_type,
+                server_kind = excluded.server_kind,
                 keychain_ref = excluded.keychain_ref,
                 group_name = excluded.group_name,
                 updated_at = excluded.updated_at
@@ -39,6 +40,7 @@ final class ServerRepository: @unchecked Sendable {
             .int(profile.port),
             .text(profile.username),
             .text(profile.authType.rawValue),
+            .text(profile.serverKind.rawValue),
             .text(profile.keychainRef),
             profile.groupName.map(SQLiteValue.text) ?? .null,
             .text(AppDatabase.string(from: profile.createdAt)),
@@ -211,6 +213,22 @@ final class ServerRepository: @unchecked Sendable {
         ]) { statement in
             try self.mapDashboardSnapshot(statement)
         }.first
+    }
+
+    func fetchDashboardSnapshots(serverId: UUID, limit: Int = 24) throws -> [ServerDashboardSnapshot] {
+        try database.query("""
+            SELECT capabilities_json, metrics_json, warnings_json, captured_at
+            FROM dashboard_snapshots
+            WHERE server_id = ?
+            ORDER BY captured_at DESC
+            LIMIT ?
+        """, bindings: [
+            .text(serverId.uuidString),
+            .int(max(1, limit)),
+        ]) { statement in
+            try self.mapDashboardSnapshot(statement)
+        }
+        .reversed()
     }
 
     func upsertRemoteFileTransferJob(_ job: RemoteFileTransferJob, serverId: UUID) throws {
@@ -985,6 +1003,7 @@ final class ServerRepository: @unchecked Sendable {
     private static func mapServer(_ statement: OpaquePointer) throws -> ServerProfile {
         let id = UUID(uuidString: string(statement, 0)) ?? UUID()
         let authType = SSHAuthType(rawValue: string(statement, 5)) ?? .privateKey
+        let serverKind = ServerKind(rawValue: string(statement, 6)) ?? .manualSSH
         return ServerProfile(
             id: id,
             name: string(statement, 1),
@@ -992,10 +1011,11 @@ final class ServerRepository: @unchecked Sendable {
             port: Int(sqlite3_column_int(statement, 3)),
             username: string(statement, 4),
             authType: authType,
-            keychainRef: string(statement, 6),
-            groupName: optionalString(statement, 7),
-            createdAt: date(statement, 8),
-            updatedAt: date(statement, 9)
+            serverKind: serverKind,
+            keychainRef: string(statement, 7),
+            groupName: optionalString(statement, 8),
+            createdAt: date(statement, 9),
+            updatedAt: date(statement, 10)
         )
     }
 

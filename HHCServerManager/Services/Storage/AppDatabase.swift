@@ -134,6 +134,7 @@ final class AppDatabase: @unchecked Sendable {
                 updated_at TEXT NOT NULL
             )
         """)
+        try addColumnIfMissing(table: "server_profiles", column: "server_kind", definition: "TEXT NOT NULL DEFAULT 'manualSSH'")
         try execute("""
             CREATE TABLE IF NOT EXISTS trusted_host_keys (
                 id TEXT PRIMARY KEY NOT NULL,

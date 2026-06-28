@@ -546,6 +546,59 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.deploymentCommandPlan?.commandPreview.contains("systemctl restart api.service") == true)
     }
 
+    func testDeploymentProjectFindsProjectsReferencingSystemdUnit() {
+        let serverId = UUID()
+        let apiProject = DeploymentProject(
+            id: UUID(),
+            serverId: serverId,
+            name: "API",
+            repositoryURL: "git@gitlab.com:hhc/api.git",
+            branch: "main",
+            deployPath: "/srv/api",
+            buildCommand: "npm ci",
+            restartCommand: "systemctl restart api",
+            healthCheckCommand: nil,
+            webhookEnabled: false,
+            webhookSecretRef: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let workerProject = DeploymentProject(
+            id: UUID(),
+            serverId: serverId,
+            name: "Worker",
+            repositoryURL: "git@gitlab.com:hhc/worker.git",
+            branch: "main",
+            deployPath: "/srv/worker",
+            buildCommand: nil,
+            restartCommand: "systemctl reload worker.service",
+            healthCheckCommand: nil,
+            webhookEnabled: false,
+            webhookSecretRef: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let unrelatedProject = DeploymentProject(
+            id: UUID(),
+            serverId: serverId,
+            name: "Static",
+            repositoryURL: "git@gitlab.com:hhc/static.git",
+            branch: "main",
+            deployPath: "/srv/static",
+            buildCommand: nil,
+            restartCommand: nil,
+            healthCheckCommand: nil,
+            webhookEnabled: false,
+            webhookSecretRef: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let projects = [apiProject, workerProject, unrelatedProject]
+
+        XCTAssertEqual(DeploymentProject.projects(projects, referencing: "api.service").map(\.name), ["API"])
+        XCTAssertEqual(DeploymentProject.projects(projects, referencing: "worker").map(\.name), ["Worker"])
+    }
+
     func testDeploymentRunRiskUsesCurrentDraftAndRefreshesPreview() {
         let profile = makeProfile()
         let viewModel = ServerWorkspaceViewModel()
@@ -936,6 +989,56 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.persistedCommandHistory.map(\.command), ["uptime"])
     }
 
+    func testCommandHistoryInspectorSummarizesAndFiltersEntries() {
+        let serverId = UUID()
+        let entries = [
+            CommandHistoryEntry(
+                id: UUID(),
+                serverId: serverId,
+                command: "uptime",
+                exitCode: 0,
+                duration: 0.5,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_100)
+            ),
+            CommandHistoryEntry(
+                id: UUID(),
+                serverId: serverId,
+                command: "systemctl status nginx",
+                exitCode: 3,
+                duration: 1.5,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_200)
+            ),
+            CommandHistoryEntry(
+                id: UUID(),
+                serverId: serverId,
+                command: "cat /root/secret",
+                exitCode: nil,
+                duration: nil,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_300)
+            ),
+        ]
+
+        let summary = CommandHistoryInspector.summary(for: entries)
+        XCTAssertEqual(summary.total, 3)
+        XCTAssertEqual(summary.succeeded, 1)
+        XCTAssertEqual(summary.failed, 2)
+        XCTAssertEqual(summary.averageDuration, 1.0)
+        XCTAssertEqual(summary.lastRunAt, Date(timeIntervalSince1970: 1_700_000_300))
+
+        XCTAssertEqual(
+            CommandHistoryInspector.filter(entries, query: "nginx", status: .all).map(\.command),
+            ["systemctl status nginx"]
+        )
+        XCTAssertEqual(
+            CommandHistoryInspector.filter(entries, query: "", status: .succeeded).map(\.command),
+            ["uptime"]
+        )
+        XCTAssertEqual(
+            CommandHistoryInspector.filter(entries, query: "", status: .failed).map(\.command),
+            ["systemctl status nginx", "cat /root/secret"]
+        )
+    }
+
     func testClearCommandHistoryRemovesPersistedEntriesForCurrentServer() throws {
         let profile = makeProfile()
         var otherProfile = makeProfile()
@@ -1107,7 +1210,7 @@ final class ServerWorkspaceViewModelTests: XCTestCase {
         XCTAssertTrue(snapshot.capabilities.hasProc)
         XCTAssertTrue(snapshot.capabilities.hasSystemd)
         XCTAssertTrue(snapshot.capabilities.hasSFTP)
-        XCTAssertEqual(snapshot.metrics.map(\.name), ["Load Average", "Memory", "Root Disk", "CPU Cores", "Network", "Processes"])
+        XCTAssertEqual(snapshot.metrics.map(\.name), ["Load Average", "Memory", "Root Disk", "CPU Cores", "Network", "Active Network Interface", "Network Interfaces", "Processes"])
         XCTAssertTrue(snapshot.warnings.isEmpty)
         XCTAssertNil(viewModel.dashboardErrorMessage)
         XCTAssertEqual(try repository.fetchLatestDashboardSnapshot(serverId: profile.id), snapshot)

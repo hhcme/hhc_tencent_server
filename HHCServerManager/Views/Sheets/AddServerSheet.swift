@@ -26,6 +26,11 @@ struct AddServerSheet: View {
                     TextField("Port", text: $viewModel.port)
                     TextField("Username", text: $viewModel.username)
                     TextField("Group", text: $viewModel.groupName)
+                    Picker("Type", selection: $viewModel.serverKind) {
+                        ForEach(ServerKind.allCases) { kind in
+                            Text(kind.displayName).tag(kind)
+                        }
+                    }
                 }
 
                 Section("Authentication") {

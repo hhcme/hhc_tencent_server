@@ -103,46 +103,109 @@ final class KeychainService: ServerCredentialStore, @unchecked Sendable {
         delete(account: "deployment_webhook_secret_\(keychainRef)")
     }
 
+    func saveDevelopmentServiceToken(_ token: String, keychainRef: String) throws {
+        try save(Data(token.utf8), account: "development_service_token_\(keychainRef)")
+    }
+
+    func readDevelopmentServiceToken(keychainRef: String) throws -> String? {
+        guard let data = try readData(account: "development_service_token_\(keychainRef)") else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func deleteDevelopmentServiceToken(keychainRef: String) {
+        delete(account: "development_service_token_\(keychainRef)")
+    }
+
     private func save(_ data: Data, account: String) throws {
         delete(account: account)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-        ]
-        let status = SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(addQuery(data: data, account: account, usesDataProtectionKeychain: true) as CFDictionary, nil)
+        if status == errSecMissingEntitlement || status == errSecParam {
+            try addLegacyItem(data, account: account)
+            return
+        }
         guard status == errSecSuccess else {
             throw KeychainError.unexpectedStatus(status)
         }
     }
 
     private func readData(account: String) throws -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound {
+        let primaryResult = copyMatchingData(account: account, usesDataProtectionKeychain: true)
+        if primaryResult.status == errSecSuccess {
+            return primaryResult.data
+        }
+        if primaryResult.status != errSecItemNotFound,
+           primaryResult.status != errSecMissingEntitlement,
+           primaryResult.status != errSecParam {
+            throw KeychainError.unexpectedStatus(primaryResult.status)
+        }
+
+        let legacyResult = copyMatchingData(account: account, usesDataProtectionKeychain: false)
+        if legacyResult.status == errSecItemNotFound {
             return nil
         }
-        guard status == errSecSuccess else {
-            throw KeychainError.unexpectedStatus(status)
+        guard legacyResult.status == errSecSuccess else {
+            throw KeychainError.unexpectedStatus(legacyResult.status)
         }
-        return result as? Data
+
+        if let data = legacyResult.data {
+            migrateLegacyItem(data, account: account)
+            return data
+        }
+        return nil
     }
 
     private func delete(account: String) {
-        let query: [String: Any] = [
+        SecItemDelete(baseQuery(account: account, usesDataProtectionKeychain: true) as CFDictionary)
+        SecItemDelete(baseQuery(account: account, usesDataProtectionKeychain: false) as CFDictionary)
+    }
+
+    private func addLegacyItem(_ data: Data, account: String) throws {
+        let status = SecItemAdd(addQuery(data: data, account: account, usesDataProtectionKeychain: false) as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    private func migrateLegacyItem(_ data: Data, account: String) {
+        let status = SecItemAdd(addQuery(data: data, account: account, usesDataProtectionKeychain: true) as CFDictionary, nil)
+        if status == errSecSuccess {
+            SecItemDelete(baseQuery(account: account, usesDataProtectionKeychain: false) as CFDictionary)
+        }
+    }
+
+    private func copyMatchingData(
+        account: String,
+        usesDataProtectionKeychain: Bool
+    ) -> (status: OSStatus, data: Data?) {
+        var query = baseQuery(account: account, usesDataProtectionKeychain: usesDataProtectionKeychain)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        return (status, result as? Data)
+    }
+
+    private func addQuery(
+        data: Data,
+        account: String,
+        usesDataProtectionKeychain: Bool
+    ) -> [String: Any] {
+        var query = baseQuery(account: account, usesDataProtectionKeychain: usesDataProtectionKeychain)
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return query
+    }
+
+    private func baseQuery(account: String, usesDataProtectionKeychain: Bool) -> [String: Any] {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(query as CFDictionary)
+        if usesDataProtectionKeychain {
+            query[kSecUseDataProtectionKeychain as String] = true
+        }
+        return query
     }
 }
