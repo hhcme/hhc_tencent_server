@@ -84,6 +84,7 @@ struct ServerWorkspaceView: View {
     @State private var developmentServiceCategory: DevelopmentServiceCategory = .git
     @State private var selectedGitWorkbenchService: GitWorkbenchService = .gitea
     @State private var gitNativeManagementTab: GitNativeManagementTab = .overview
+    @State private var npmManagementTab: NpmManagementTab = .overview
     @State private var gitIssueStateFilter: GitIssueStateFilter = .all
     @State private var securityGroupDraftDirection: CloudSecurityGroupRuleDirection = .ingress
     @State private var securityGroupDraftProtocol = "TCP"
@@ -490,10 +491,12 @@ struct ServerWorkspaceView: View {
                 .tag("securityGroups")
             Label(L10n.string("Project Deployments"), systemImage: "arrow.down.doc")
                 .tag("deployments")
-            Label(L10n.string("Development Services"), systemImage: "hammer")
-                .tag("gitlab")
-            Label(L10n.string("Registries"), systemImage: "shippingbox")
-                .tag("registries")
+            Label("Git", systemImage: "point.3.connected.trianglepath.dotted")
+                .tag("devGit")
+            Label("npm", systemImage: "shippingbox")
+                .tag("devNpm")
+            Label("pub", systemImage: "paperplane")
+                .tag("devPub")
             Label(L10n.string("Audit"), systemImage: "list.bullet.rectangle")
                 .tag("audit")
             Label(L10n.string("Environment"), systemImage: "slider.horizontal.3")
@@ -538,10 +541,8 @@ struct ServerWorkspaceView: View {
             securityGroupsPanel
         case "deployments":
             deploymentsPanel
-        case "gitlab":
-            developmentServicesPanel
-        case "registries":
-            developmentServicesPanel(defaultCategory: .npm)
+        case "devGit", "devNpm", "devPub":
+            developmentServicesPanel(defaultCategory: devServiceCategoryFromSection)
         case "audit":
             auditPanel
         case "environment":
@@ -1982,54 +1983,51 @@ struct ServerWorkspaceView: View {
         return normalized == "failed" || normalized == "failure" || normalized.contains("error")
     }
 
-    private var developmentServicesPanel: some View {
-        developmentServicesPanel(defaultCategory: nil)
-    }
-
-    private func developmentServicesPanel(defaultCategory: DevelopmentServiceCategory?) -> some View {
+    private func developmentServicesPanel(defaultCategory: DevelopmentServiceCategory) -> some View {
         VStack(spacing: 0) {
             developmentServicesHeader(defaultCategory: defaultCategory)
             Divider()
 
-            switch developmentServiceCategory {
-            case .git:
-                gitNativeWorkbenchPanel
-            case .npm:
-                npmNativeWorkbenchPanel
-            case .pub:
-                pubNativeWorkbenchPanel
-            }
+            developmentServiceContent
         }
         .onAppear {
-            if let defaultCategory {
-                developmentServiceCategory = defaultCategory
-            }
+            developmentServiceCategory = defaultCategory
             viewModel.loadGitLabServiceInstance(profile: profile, repository: appState.repository)
             viewModel.loadGitNativeTokenState(profile: profile, keychain: appState.keychain)
         }
     }
 
-    private func developmentServicesHeader(defaultCategory: DevelopmentServiceCategory?) -> some View {
+    private var devServiceCategoryFromSection: DevelopmentServiceCategory {
+        switch selectedSection {
+        case "devNpm": .npm
+        case "devPub": .pub
+        default: .git
+        }
+    }
+
+    @ViewBuilder
+    private var developmentServiceContent: some View {
+        if developmentServiceCategory == .git {
+            gitNativeWorkbenchPanel
+        } else if developmentServiceCategory == .npm {
+            npmNativeWorkbenchPanel
+        } else {
+            pubNativeWorkbenchPanel
+        }
+    }
+
+    private func developmentServicesHeader(defaultCategory: DevelopmentServiceCategory) -> some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("开发服务")
+                Text(defaultCategory.title)
                     .font(.title2.weight(.semibold))
-                Text("在本地原生管理 Git、npm 和 Dart/Flutter pub 服务；Web 后台只作为兜底入口。")
+                Text(defaultCategory.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
 
             Spacer()
-
-            Picker("开发服务类型", selection: $developmentServiceCategory) {
-                ForEach(DevelopmentServiceCategory.allCases) { category in
-                    Label(category.title, systemImage: category.systemImage)
-                        .tag(category)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 320)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
@@ -2038,106 +2036,78 @@ struct ServerWorkspaceView: View {
     private var gitNativeWorkbenchPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                gitServiceSwitcherSection
+                gitServiceSegmentedPicker
 
-                switch selectedGitWorkbenchService {
-                case .gitea:
-                    giteaNativeServicePanel
-                case .gitLab:
-                    gitLabNativeServicePanel
-                }
+                gitPageContent
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private var gitServiceSwitcherSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Git 服务")
-                    .font(.headline)
-                Spacer()
-                Text("Gitea 和 GitLab 可共存，切换只影响当前详情。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            LazyVGrid(columns: [GridItem(.flexible(minimum: 260), spacing: 12), GridItem(.flexible(minimum: 260), spacing: 12)], spacing: 12) {
-                gitServiceCard(.gitea)
-                gitServiceCard(.gitLab)
-            }
+    @ViewBuilder
+    private var gitPageContent: some View {
+        if activeGitPageState == .notInstalled {
+            gitInstallWizard
+        } else {
+            gitManagementPanel
         }
     }
 
-    private func gitServiceCard(_ service: GitWorkbenchService) -> some View {
-        let isSelected = selectedGitWorkbenchService == service
-        return Button {
-            selectedGitWorkbenchService = service
-        } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
+    private var gitServiceSegmentedPicker: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Picker("Git 服务", selection: $selectedGitWorkbenchService) {
+                ForEach(GitWorkbenchService.allCases) { service in
                     Label(service.title, systemImage: service.systemImage)
-                        .font(.headline)
-                    Spacer()
-                    Text(gitServiceStateTitle(service))
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(gitServiceStateColor(service).opacity(0.16), in: Capsule())
-                        .foregroundStyle(gitServiceStateColor(service))
+                        .tag(service)
                 }
-
-                Text(service.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
-                    GridRow {
-                        Text("地址").foregroundStyle(.secondary)
-                        Text(gitServiceURL(service))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    GridRow {
-                        Text("版本").foregroundStyle(.secondary)
-                        Text(gitServiceVersion(service))
-                    }
-                    GridRow {
-                        Text("授权").foregroundStyle(.secondary)
-                        Text(gitServiceAuthHint(service))
-                    }
-                }
-                .font(.caption)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 142, alignment: .topLeading)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
-            }
+            .pickerStyle(.segmented)
+            .frame(width: 320)
+
+            Spacer()
+
+            Text(gitServiceStateTitle(selectedGitWorkbenchService))
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(gitServiceStateColor(selectedGitWorkbenchService).opacity(0.16), in: Capsule())
+                .foregroundStyle(gitServiceStateColor(selectedGitWorkbenchService))
         }
-        .buttonStyle(.plain)
     }
 
-    private var giteaNativeServicePanel: some View {
+    // MARK: - Git Install Wizard (pre-install)
+
+    @ViewBuilder
+    private var gitInstallWizard: some View {
+        switch selectedGitWorkbenchService {
+        case .gitea:
+            giteaInstallWizard
+        case .gitLab:
+            gitLabInstallWizard
+        }
+    }
+
+    private var giteaInstallWizard: some View {
         VStack(alignment: .leading, spacing: 16) {
-            gitNativeServiceHeader(
-                title: "Gitea 原生管理",
-                subtitle: "轻量 Git 托管，适合轻量应用服务器和个人/小团队使用。",
-                service: .gitea
-            ) {
+            if viewModel.isInstallingGitea && !viewModel.giteaInstallSteps.isEmpty {
+                InstallProgressView(steps: viewModel.giteaInstallSteps, title: "正在安装 Gitea")
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Gitea", systemImage: "leaf")
+                        .font(.title3.weight(.semibold))
+                    Text("轻量私有 Git 托管，适合轻量应用服务器和个人/小团队。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                giteaInstallSummarySection
+
                 HStack(spacing: 8) {
                     Button {
                         pendingGiteaInstall = true
                     } label: {
-                        if viewModel.isInstallingGitea {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("安装 Gitea", systemImage: "arrow.down.circle")
-                        }
+                        Label("安装 Gitea", systemImage: "arrow.down.circle")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(viewModel.isInstallingGitea)
@@ -2151,18 +2121,46 @@ struct ServerWorkspaceView: View {
                 }
             }
 
-            giteaInstallSummarySection
-            gitNativeManagementWorkbench(service: .gitea)
+            if let error = viewModel.giteaErrorMessage {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(10)
+                    .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
         }
     }
 
-    private var gitLabNativeServicePanel: some View {
+    private var gitLabInstallWizard: some View {
         VStack(alignment: .leading, spacing: 16) {
-            gitNativeServiceHeader(
-                title: "GitLab 原生管理",
-                subtitle: "完整 DevOps 平台，适合资源充足的服务器；轻量机器需先通过预检。",
-                service: .gitLab
-            ) {
+            if viewModel.isInstallingGitLab && !viewModel.gitLabInstallSteps.isEmpty {
+                InstallProgressView(steps: viewModel.gitLabInstallSteps, title: "正在安装 GitLab CE")
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("GitLab CE", systemImage: "square.stack.3d.up")
+                        .font(.title3.weight(.semibold))
+                    Text("完整 DevOps 平台，适合资源充足的服务器；轻量机器需先通过预检。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                gitLabFeedbackBanner
+
+                HStack(alignment: .top, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        developmentServiceRecommendationsSection
+                        gitLabInstallSettingsSection
+                        gitLabPreflightSection
+                    }
+                    .frame(minWidth: 420, maxWidth: .infinity, alignment: .topLeading)
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        gitLabStatusSection
+                        gitLabServiceActionsSection
+                    }
+                    .frame(minWidth: 340, idealWidth: 420, maxWidth: 520, alignment: .topLeading)
+                }
+
                 HStack(spacing: 8) {
                     Button {
                         viewModel.runGitLabPreflight(
@@ -2182,14 +2180,71 @@ struct ServerWorkspaceView: View {
                     Button {
                         pendingGitLabInstall = true
                     } label: {
-                        if viewModel.isInstallingGitLab {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label(viewModel.gitLabPreflightReport?.isReady == false ? "强制安装" : "安装", systemImage: "arrow.down.circle")
-                        }
+                        Label(viewModel.gitLabPreflightReport?.isReady == false ? "强制安装" : "安装", systemImage: "arrow.down.circle")
                     }
                     .disabled(isGitLabBusy || !isGitLabDraftValid || !hasGitLabPreflightReport)
 
+                    Button {
+                        viewModel.openGitLabInBrowser()
+                    } label: {
+                        Label("打开后台", systemImage: "safari")
+                    }
+                    .disabled(!isGitLabDraftValid)
+                }
+            }
+
+            if let error = viewModel.gitLabErrorMessage {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(10)
+                    .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+
+    // MARK: - Git Management Panel (post-install)
+
+    @ViewBuilder
+    private var gitManagementPanel: some View {
+        switch selectedGitWorkbenchService {
+        case .gitea:
+            giteaManagementPanel
+        case .gitLab:
+            gitLabManagementPanel
+        }
+    }
+
+    private var giteaManagementPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            gitNativeServiceHeader(
+                title: "Gitea 原生管理",
+                subtitle: "轻量 Git 托管，适合轻量应用服务器和个人/小团队使用。",
+                service: .gitea
+            ) {
+                HStack(spacing: 8) {
+                    Button {
+                        viewModel.openGiteaInBrowser()
+                    } label: {
+                        Label("打开后台", systemImage: "safari")
+                    }
+                    .disabled((viewModel.giteaInstallResult?.externalURL ?? viewModel.giteaDraft.externalURL).trimmingCharacters(in: .whitespacesAndNewlines) == "http://")
+                }
+            }
+
+            giteaInstallSummarySection
+            gitNativeManagementWorkbench(service: .gitea)
+        }
+    }
+
+    private var gitLabManagementPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            gitNativeServiceHeader(
+                title: "GitLab 原生管理",
+                subtitle: "完整 DevOps 平台，覆盖项目、组、成员、MR、CI/CD。",
+                service: .gitLab
+            ) {
+                HStack(spacing: 8) {
                     Button {
                         viewModel.loadGitLabStatus(
                             profile: profile,
@@ -2218,12 +2273,6 @@ struct ServerWorkspaceView: View {
             gitLabFeedbackBanner
 
             HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 14) {
-                    gitLabInstallSettingsSection
-                    gitLabPreflightSection
-                }
-                .frame(minWidth: 420, maxWidth: .infinity, alignment: .topLeading)
-
                 VStack(alignment: .leading, spacing: 14) {
                     gitLabStatusSection
                     gitLabServiceActionsSection
@@ -4906,6 +4955,41 @@ struct ServerWorkspaceView: View {
         }
     }
 
+    // MARK: - Development Service Page State
+
+    private var giteaPageState: DevelopmentServicePageState {
+        if viewModel.giteaErrorMessage != nil { return .error }
+        let isInstalled = viewModel.giteaInstallResult != nil
+        if !isInstalled { return .notInstalled }
+        if viewModel.isGiteaTokenBound { return .ready }
+        return .installedNeedsToken
+    }
+
+    private var gitLabPageState: DevelopmentServicePageState {
+        if viewModel.gitLabErrorMessage != nil { return .error }
+        let isInstalled = viewModel.gitLabInstallResult != nil
+            || viewModel.gitLabServiceInstance != nil
+            || viewModel.gitLabStatusSnapshot?.installed == true
+        if !isInstalled { return .notInstalled }
+        if viewModel.isGitLabTokenBound { return .ready }
+        return .installedNeedsToken
+    }
+
+    private var verdaccioPageState: DevelopmentServicePageState {
+        if viewModel.registryErrorMessage != nil { return .error }
+        let isInstalled = viewModel.verdaccioInstallResult != nil
+            || viewModel.verdaccioStatusSnapshot != nil
+        if !isInstalled { return .notInstalled }
+        return .ready
+    }
+
+    private var activeGitPageState: DevelopmentServicePageState {
+        switch selectedGitWorkbenchService {
+        case .gitea: giteaPageState
+        case .gitLab: gitLabPageState
+        }
+    }
+
     private func gitNativeServiceKind(_ service: GitWorkbenchService) -> GitNativeServiceKind {
         switch service {
         case .gitea:
@@ -5437,9 +5521,185 @@ struct ServerWorkspaceView: View {
 
     private var npmNativeWorkbenchPanel: some View {
         ScrollView {
-            npmRegistryWorkbenchContent
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 18) {
+                npmPageContent
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var npmPageContent: some View {
+        if verdaccioPageState == .notInstalled {
+            npmInstallWizard
+        } else {
+            npmManagementPanel
+        }
+    }
+
+    // MARK: - npm Install Wizard (pre-install)
+
+    private var npmInstallWizard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("npm 私有仓库")
+                    .font(.title2.weight(.semibold))
+                Text("安装 Verdaccio 私有 npm 仓库到当前服务器。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let message = viewModel.registryActionMessage {
+                Label(message, systemImage: "checkmark.circle")
+                    .foregroundStyle(.green)
+            }
+            if let error = viewModel.registryErrorMessage {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+            }
+
+            verdaccioInstallSettingsSection
+            registryPreflightSection
+
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.runRegistryPreflight(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        registryPreflightChecker: appState.registryPreflightChecker
+                    )
+                } label: {
+                    if viewModel.isRunningRegistryPreflight {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("预检", systemImage: "checklist")
+                    }
+                }
+                .disabled(isRegistryBusy || !isRegistryDraftValid)
+
+                Button {
+                    pendingVerdaccioInstall = true
+                } label: {
+                    if viewModel.isInstallingVerdaccio {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("安装 Verdaccio", systemImage: "arrow.down.circle")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isRegistryBusy || !isRegistryDraftValid || !isRegistryPreflightReady)
+            }
+        }
+    }
+
+    // MARK: - npm Management Panel (post-install)
+
+    private var npmManagementPanel: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            npmManagementHeader
+            npmManagementTabBar
+
+            switch npmManagementTab {
+            case .overview:
+                npmOverviewTab
+            case .packages:
+                verdaccioPackagesSection
+            case .users:
+                verdaccioUsersSection
+            case .policy:
+                verdaccioAccessPolicySection
+            case .backup:
+                verdaccioBackupSection
+            case .proxy:
+                verdaccioProxySection
+            }
+        }
+    }
+
+    private var npmManagementHeader: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("npm 私有仓库")
+                    .font(.title2.weight(.semibold))
+                Text("Verdaccio · \(viewModel.registryDraft.listenHost):\(viewModel.registryDraft.listenPort)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.loadVerdaccioStatus(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        verdaccioManager: appState.verdaccioManager
+                    )
+                } label: {
+                    if viewModel.isLoadingVerdaccioStatus {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("刷新状态", systemImage: "arrow.clockwise")
+                    }
+                }
+                .disabled(isRegistryBusy)
+
+                Button {
+                    viewModel.loadVerdaccioPackages(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        verdaccioManager: appState.verdaccioManager
+                    )
+                } label: {
+                    if viewModel.isLoadingVerdaccioPackages {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("刷新包", systemImage: "shippingbox")
+                    }
+                }
+                .disabled(isRegistryBusy)
+
+                Button {
+                    viewModel.createVerdaccioBackup(
+                        profile: profile,
+                        sshClient: appState.sshClient,
+                        verdaccioManager: appState.verdaccioManager,
+                        repository: appState.repository
+                    )
+                } label: {
+                    if viewModel.isCreatingVerdaccioBackup {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("备份", systemImage: "archivebox")
+                    }
+                }
+                .disabled(isRegistryBusy)
+            }
+        }
+    }
+
+    private var npmManagementTabBar: some View {
+        Picker("npm 管理", selection: $npmManagementTab) {
+            ForEach(NpmManagementTab.allCases) { tab in
+                Label(tab.title, systemImage: tab.systemImage)
+                    .tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var npmOverviewTab: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if let message = viewModel.registryActionMessage {
+                Label(message, systemImage: "checkmark.circle")
+                    .foregroundStyle(.green)
+            }
+            if let error = viewModel.registryErrorMessage {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+            }
+
+            verdaccioStatusSection
+            verdaccioServiceSection
         }
     }
 
@@ -5517,110 +5777,6 @@ struct ServerWorkspaceView: View {
         }
     }
 
-    private var gitLabServicePanel: some View {
-        ViewThatFits(in: .vertical) {
-            gitLabCompactPanel
-            gitLabScrollableFallbackPanel
-        }
-        .onAppear {
-            viewModel.loadGitLabServiceInstance(profile: profile, repository: appState.repository)
-        }
-    }
-
-    private var gitLabCompactPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            gitLabHeaderBar
-            gitLabFeedbackBanner
-
-            HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 14) {
-                    developmentServiceRecommendationsSection
-                    gitLabInstallSettingsSection
-                    gitLabPreflightSection
-                }
-                .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                VStack(alignment: .leading, spacing: 14) {
-                    gitLabStatusSection
-                    gitLabServiceActionsSection
-                    gitLabBackupPreviewSection
-                }
-                .frame(minWidth: 340, idealWidth: 420, maxWidth: 500, maxHeight: .infinity, alignment: .topLeading)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var gitLabHeaderBar: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.string("Development Services"))
-                    .font(.title2.weight(.semibold))
-                Text(viewModel.gitLabDraft.externalURL)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                Text(L10n.string("Choose code hosting, automation, and package services based on this server. Recommendations explain risk; deployment remains your decision."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            Spacer()
-            HStack(spacing: 8) {
-                Button {
-                    viewModel.runGitLabPreflight(
-                        profile: profile,
-                        sshClient: appState.sshClient,
-                        gitLabInstaller: appState.gitLabInstaller
-                    )
-                } label: {
-                    if viewModel.isRunningGitLabPreflight {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label(L10n.string("Preflight"), systemImage: "checklist")
-                    }
-                }
-                .disabled(isGitLabBusy || !isGitLabDraftValid)
-
-                Button {
-                    pendingGitLabInstall = true
-                } label: {
-                    if viewModel.isInstallingGitLab {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label(viewModel.gitLabPreflightReport?.isReady == false ? L10n.string("Force Install") : L10n.string("Install"), systemImage: "arrow.down.circle")
-                    }
-                }
-                .disabled(isGitLabBusy || !isGitLabDraftValid || !hasGitLabPreflightReport)
-
-                Button {
-                    viewModel.loadGitLabStatus(
-                        profile: profile,
-                        sshClient: appState.sshClient,
-                        gitLabManager: appState.gitLabManager,
-                        repository: appState.repository
-                    )
-                } label: {
-                    if viewModel.isLoadingGitLabStatus {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label(L10n.string("Refresh"), systemImage: "arrow.clockwise")
-                    }
-                }
-                .disabled(isGitLabBusy || !isGitLabDraftValid)
-
-                Button {
-                    viewModel.openGitLabInBrowser()
-                } label: {
-                    Label(L10n.string("Open"), systemImage: "safari")
-                }
-                .disabled(!isGitLabDraftValid)
-            }
-        }
-    }
-
     @ViewBuilder
     private var gitLabFeedbackBanner: some View {
         if let message = viewModel.gitLabActionMessage {
@@ -5632,23 +5788,6 @@ struct ServerWorkspaceView: View {
             Label(error, systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
                 .font(.caption)
-        }
-    }
-
-    private var gitLabScrollableFallbackPanel: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                gitLabHeaderBar
-                gitLabFeedbackBanner
-                developmentServiceRecommendationsSection
-                gitLabInstallSettingsSection
-                gitLabPreflightSection
-                gitLabStatusSection
-                gitLabServiceActionsSection
-                gitLabBackupPreviewSection
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -6006,121 +6145,6 @@ struct ServerWorkspaceView: View {
         }
     }
 
-    private var registriesPanel: some View {
-        ScrollView {
-            npmRegistryWorkbenchContent
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var npmRegistryWorkbenchContent: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("npm 私有仓库")
-                        .font(.title2.weight(.semibold))
-                    Text("Verdaccio · \(viewModel.registryDraft.listenHost):\(viewModel.registryDraft.listenPort)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                HStack(spacing: 8) {
-                    Button {
-                        viewModel.runRegistryPreflight(
-                            profile: profile,
-                            sshClient: appState.sshClient,
-                            registryPreflightChecker: appState.registryPreflightChecker
-                        )
-                    } label: {
-                        if viewModel.isRunningRegistryPreflight {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Preflight", systemImage: "checklist")
-                        }
-                    }
-                    .disabled(isRegistryBusy || !isRegistryDraftValid)
-
-                    Button {
-                        pendingVerdaccioInstall = true
-                    } label: {
-                        if viewModel.isInstallingVerdaccio {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Install", systemImage: "arrow.down.circle")
-                        }
-                    }
-                    .disabled(isRegistryBusy || !isRegistryDraftValid || !isRegistryPreflightReady)
-
-                    Button {
-                        viewModel.loadVerdaccioStatus(
-                            profile: profile,
-                            sshClient: appState.sshClient,
-                            verdaccioManager: appState.verdaccioManager
-                        )
-                    } label: {
-                        if viewModel.isLoadingVerdaccioStatus {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Status", systemImage: "waveform.path.ecg")
-                        }
-                    }
-                    .disabled(isRegistryBusy)
-
-                    Button {
-                        viewModel.loadVerdaccioPackages(
-                            profile: profile,
-                            sshClient: appState.sshClient,
-                            verdaccioManager: appState.verdaccioManager
-                        )
-                    } label: {
-                        if viewModel.isLoadingVerdaccioPackages {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Packages", systemImage: "shippingbox")
-                        }
-                    }
-                    .disabled(isRegistryBusy)
-
-                    Button {
-                        viewModel.createVerdaccioBackup(
-                            profile: profile,
-                            sshClient: appState.sshClient,
-                            verdaccioManager: appState.verdaccioManager,
-                            repository: appState.repository
-                        )
-                    } label: {
-                        if viewModel.isCreatingVerdaccioBackup {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Backup", systemImage: "archivebox")
-                        }
-                    }
-                    .disabled(isRegistryBusy)
-                }
-            }
-
-            if let message = viewModel.registryActionMessage {
-                Label(message, systemImage: "checkmark.circle")
-                    .foregroundStyle(.green)
-            }
-            if let error = viewModel.registryErrorMessage {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
-            }
-
-            verdaccioInstallSettingsSection
-
-            registryPreflightSection
-            verdaccioStatusSection
-            verdaccioServiceSection
-            verdaccioAccessPolicySection
-            verdaccioUsersSection
-            verdaccioBackupSection
-            verdaccioProxySection
-            verdaccioPackagesSection
-        }
-    }
 
     private var verdaccioInstallSettingsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -11353,17 +11377,16 @@ struct ServerWorkspaceView: View {
     }
 
     private func installGitLab() {
-        viewModel.installGitLab(
+        viewModel.installGitLabWithProgress(
             profile: profile,
             sshClient: appState.sshClient,
             gitLabInstaller: appState.gitLabInstaller,
-            gitLabManager: appState.gitLabManager,
             repository: appState.repository
         )
     }
 
     private func installGitea() {
-        viewModel.installGitea(
+        viewModel.installGiteaWithProgress(
             profile: profile,
             sshClient: appState.sshClient,
             repository: appState.repository
@@ -12579,6 +12602,114 @@ private struct RegistryStatusTile: View {
     }
 }
 
+// MARK: - Install Progress View
+
+private struct InstallProgressView: View {
+    let steps: [InstallStep]
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title)
+                .font(.title3.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                    HStack(alignment: .top, spacing: 14) {
+                        // Step indicator
+                        VStack(spacing: 0) {
+                            Circle()
+                                .fill(indicatorColor(for: step.status))
+                                .frame(width: 28, height: 28)
+                                .overlay {
+                                    indicatorIcon(for: step.status)
+                                }
+                            if index < steps.count - 1 {
+                                Rectangle()
+                                    .fill(lineColor(for: step.status))
+                                    .frame(width: 2, height: 24)
+                            }
+                        }
+
+                        // Step content
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(step.title)
+                                .font(.body.weight(step.status == .running ? .semibold : .regular))
+                                .foregroundStyle(step.status == .running ? .primary : .secondary)
+
+                            Text(statusText(for: step.status))
+                                .font(.caption)
+                                .foregroundStyle(statusColor(for: step.status))
+                                .lineLimit(2)
+                        }
+                        .padding(.bottom, index < steps.count - 1 ? 16 : 0)
+
+                        Spacer()
+                    }
+                }
+            }
+            .padding(16)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    @ViewBuilder
+    private func indicatorIcon(for status: InstallStepStatus) -> some View {
+        switch status {
+        case .pending:
+            Image(systemName: "clock")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        case .running:
+            ProgressView()
+                .controlSize(.mini)
+        case .completed:
+            Image(systemName: "checkmark")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+        case .failed:
+            Image(systemName: "xmark")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private func indicatorColor(for status: InstallStepStatus) -> Color {
+        switch status {
+        case .pending: return .secondary.opacity(0.3)
+        case .running: return .accentColor
+        case .completed: return .green
+        case .failed: return .red
+        }
+    }
+
+    private func lineColor(for status: InstallStepStatus) -> Color {
+        switch status {
+        case .completed: return .green.opacity(0.4)
+        case .failed: return .red.opacity(0.3)
+        default: return .secondary.opacity(0.2)
+        }
+    }
+
+    private func statusText(for status: InstallStepStatus) -> String {
+        switch status {
+        case .pending: return "等待中"
+        case .running: return "执行中..."
+        case .completed(let msg): return msg.isEmpty ? "已完成" : msg
+        case .failed(let msg): return msg
+        }
+    }
+
+    private func statusColor(for status: InstallStepStatus) -> Color {
+        switch status {
+        case .pending: return .secondary
+        case .running: return .accentColor
+        case .completed: return .green
+        case .failed: return .red
+        }
+    }
+}
+
 private struct PubHostedRepositoryCheckTile: View {
     let check: PubHostedRepositoryCheck
 
@@ -12838,6 +12969,57 @@ private enum DevelopmentServiceCategory: String, CaseIterable, Identifiable {
             "shippingbox"
         case .pub:
             "paperplane"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .git:
+            "管理 Gitea 和 GitLab CE，覆盖代码托管、用户、仓库和基础 Issue/MR。"
+        case .npm:
+            "管理 Verdaccio 私有 npm 仓库，覆盖包、用户、策略和备份。"
+        case .pub:
+            "Dart/Flutter custom hosted repository 配置助手。"
+        }
+    }
+}
+
+private enum DevelopmentServicePageState {
+    case notInstalled
+    case installedNeedsToken
+    case ready
+    case error
+}
+
+private enum NpmManagementTab: String, CaseIterable, Identifiable {
+    case overview
+    case packages
+    case users
+    case policy
+    case backup
+    case proxy
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overview: "总览"
+        case .packages: "包管理"
+        case .users: "用户"
+        case .policy: "策略"
+        case .backup: "备份"
+        case .proxy: "代理"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .overview: "rectangle.grid.2x2"
+        case .packages: "shippingbox"
+        case .users: "person.2"
+        case .policy: "lock.shield"
+        case .backup: "archivebox"
+        case .proxy: "network"
         }
     }
 }
@@ -14474,17 +14656,16 @@ private struct DevelopmentServiceAlertsModifier: ViewModifier {
     }
 
     private func installGitLab() {
-        viewModel.installGitLab(
+        viewModel.installGitLabWithProgress(
             profile: profile,
             sshClient: appState.sshClient,
             gitLabInstaller: appState.gitLabInstaller,
-            gitLabManager: appState.gitLabManager,
             repository: appState.repository
         )
     }
 
     private func installGitea() {
-        viewModel.installGitea(
+        viewModel.installGiteaWithProgress(
             profile: profile,
             sshClient: appState.sshClient,
             repository: appState.repository

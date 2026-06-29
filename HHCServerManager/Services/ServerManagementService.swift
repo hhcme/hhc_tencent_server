@@ -1944,9 +1944,102 @@ final class GitLabInstaller: @unchecked Sendable {
         )
     }
 
+    // MARK: - Step-by-step installation
+
+    static func installStepDefinitions(draft: GitLabInstallDraft) -> [InstallStep] {
+        [
+            InstallStep(id: "preflight", title: "预检", detail: "检查 OS、内存、磁盘、端口"),
+            InstallStep(id: "install_deps", title: "安装依赖", detail: "安装 curl、ca-certificates 等前置包"),
+            InstallStep(id: "add_repo", title: "添加仓库", detail: "添加 GitLab CE 官方仓库"),
+            InstallStep(id: "install_package", title: "安装 GitLab", detail: "安装 \(draft.edition.packageName)"),
+            InstallStep(id: "verify", title: "验证服务", detail: "检查 GitLab 服务状态"),
+        ]
+    }
+
+    func executeStep(
+        _ stepId: String,
+        draft: GitLabInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        context: inout GitLabInstallContext
+    ) async throws -> String {
+        let externalURL = draft.externalURL.trimmed
+        let packageName = draft.edition.packageName
+        let sudo = "if [ \"$(id -u)\" -eq 0 ]; then sudo_cmd=''; elif sudo -n true >/dev/null 2>&1; then sudo_cmd='sudo -n'; else echo 'Root or passwordless sudo is required.' >&2; exit 2; fi"
+
+        let command: String
+        let timeout: TimeInterval
+
+        switch stepId {
+        case "preflight":
+            let report = try await runPreflight(draft: draft, profile: profile, sshClient: sshClient)
+            context.preflightReport = report
+            guard report.isReady else {
+                throw SSHClientError.processFailed("Preflight failed: \(report.checks.filter { $0.status == .failed }.map(\.title).joined(separator: ", "))")
+            }
+            return "Preflight passed"
+        case "install_deps":
+            command = """
+            \(sudo); \
+            if command -v apt-get >/dev/null 2>&1; then \
+              $sudo_cmd apt-get update; \
+              $sudo_cmd DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates tzdata openssh-server; \
+            elif command -v dnf >/dev/null 2>&1; then \
+              $sudo_cmd dnf install -y curl ca-certificates policycoreutils openssh-server; \
+            elif command -v yum >/dev/null 2>&1; then \
+              $sudo_cmd yum install -y curl ca-certificates policycoreutils openssh-server; \
+            else \
+              echo 'apt-get, dnf, or yum is required.' >&2; exit 3; \
+            fi
+            """
+            timeout = 120
+        case "add_repo":
+            command = """
+            \(sudo); \
+            if command -v apt-get >/dev/null 2>&1; then \
+              curl -fsSL https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh | $sudo_cmd bash; \
+            else \
+              curl -fsSL https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.rpm.sh | $sudo_cmd bash; \
+            fi
+            """
+            timeout = 60
+        case "install_package":
+            let firewallCmd = draft.openFirewallPorts ? Self.firewallOpenCommand() : "true"
+            command = """
+            \(sudo); \
+            if command -v apt-get >/dev/null 2>&1; then \
+              $sudo_cmd env EXTERNAL_URL="\(externalURL)" apt-get install -y "\(packageName)"; \
+            elif command -v dnf >/dev/null 2>&1; then \
+              $sudo_cmd env EXTERNAL_URL="\(externalURL)" dnf install -y "\(packageName)"; \
+            elif command -v yum >/dev/null 2>&1; then \
+              $sudo_cmd env EXTERNAL_URL="\(externalURL)" yum install -y "\(packageName)"; \
+            fi; \
+            \(firewallCmd)
+            """
+            timeout = 900
+        case "verify":
+            command = "$sudo_cmd gitlab-ctl status 2>/dev/null || sudo gitlab-ctl status"
+            timeout = 30
+        default:
+            throw SSHClientError.processFailed("Unknown step: \(stepId)")
+        }
+
+        let result = try await CloudProviderRequestRunner.withTimeout(timeout) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Step '\(stepId)' failed."))
+        }
+        return result.stdout.trimmed
+    }
+
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
+}
+
+struct GitLabInstallContext: Sendable {
+    var preflightReport: GitLabPreflightReport?
 }
 
 final class GitLabManager: @unchecked Sendable {
@@ -2158,6 +2251,138 @@ final class GiteaInstaller: @unchecked Sendable {
         return Self.parseInstallResult(output: result.stdout, draft: draft)
     }
 
+    // MARK: - Step-by-step installation
+
+    static func installStepDefinitions(draft: GiteaInstallDraft) -> [InstallStep] {
+        [
+            InstallStep(id: "env_check", title: "环境检查", detail: "检查系统架构和 curl 可用性"),
+            InstallStep(id: "get_version", title: "获取版本", detail: "从 GitHub 获取最新 Gitea 版本"),
+            InstallStep(id: "download", title: "下载安装", detail: "下载二进制并安装到 \(draft.installPath.trimmed)"),
+            InstallStep(id: "create_user", title: "创建用户和目录", detail: "创建 git 系统用户和数据目录"),
+            InstallStep(id: "write_config", title: "写入配置", detail: "生成 app.ini 和 systemd 服务"),
+            InstallStep(id: "start_service", title: "启动服务", detail: "启用并启动 Gitea 服务"),
+        ]
+    }
+
+    func executeStep(
+        _ stepId: String,
+        draft: GiteaInstallDraft,
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        context: inout GiteaInstallContext
+    ) async throws -> String {
+        let externalURL = draft.externalURL.trimmed
+        let installPath = draft.installPath.trimmed
+        let dataPath = draft.dataPath.trimmed
+        let serviceName = draft.serviceName.trimmed
+        let listenPort = String(draft.listenPort)
+        let sudo = "if [ \"$(id -u)\" -eq 0 ]; then sudo_cmd=''; elif sudo -n true >/dev/null 2>&1; then sudo_cmd='sudo -n'; else echo 'Root or passwordless sudo is required.' >&2; exit 2; fi"
+
+        let command: String
+        let timeout: TimeInterval
+
+        switch stepId {
+        case "env_check":
+            command = """
+            \(sudo); \
+            arch=$(uname -m); case "$arch" in x86_64|amd64) gitea_arch=amd64 ;; aarch64|arm64) gitea_arch=arm64 ;; *) echo "Unsupported architecture: $arch" >&2; exit 3 ;; esac; \
+            command -v curl >/dev/null 2>&1 || { echo 'curl is required.' >&2; exit 4; }; \
+            echo "arch=$gitea_arch"
+            """
+            timeout = 15
+        case "get_version":
+            command = """
+            version=$(curl -fsSL https://api.github.com/repos/go-gitea/gitea/releases/latest | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\\([^"]*\\)".*/\\1/p' | head -n 1); \
+            [ -n "$version" ] || { echo 'Unable to resolve latest Gitea version.' >&2; exit 5; }; \
+            echo "version=$version"
+            """
+            timeout = 30
+        case "download":
+            guard let version = context.version else { throw SSHClientError.processFailed("Version not resolved.") }
+            let arch = context.architecture
+            command = """
+            \(sudo); \
+            tmp_file=$(mktemp); \
+            curl -fL "https://dl.gitea.com/gitea/\(version)/gitea-\(version)-linux-\(arch)" -o "$tmp_file"; \
+            $sudo_cmd install -m 0755 "$tmp_file" "\(installPath)"; rm -f "$tmp_file"; \
+            echo "installed=\(installPath)"
+            """
+            timeout = 120
+        case "create_user":
+            command = """
+            \(sudo); \
+            if ! id git >/dev/null 2>&1; then $sudo_cmd useradd --system --create-home --home-dir "\(dataPath)" --shell /bin/bash git; fi; \
+            $sudo_cmd mkdir -p "\(dataPath)"/{custom,data,log} /etc/gitea; \
+            $sudo_cmd chown -R git:git "\(dataPath)"; $sudo_cmd chmod -R 750 "\(dataPath)"
+            """
+            timeout = 30
+        case "write_config":
+            let domain = externalURL.replacingOccurrences(of: "^https?://([^/:]+).*", with: "$1", options: .regularExpression)
+            command = """
+            \(sudo); \
+            $sudo_cmd tee /etc/gitea/app.ini >/dev/null <<'APPEOF'
+            APP_NAME = Gitea
+            RUN_USER = git
+            WORK_PATH = \(dataPath)
+
+            [server]
+            APP_DATA_PATH = \(dataPath)/data
+            DOMAIN = \(domain)
+            HTTP_PORT = \(listenPort)
+            ROOT_URL = \(externalURL)
+            DISABLE_SSH = false
+            SSH_PORT = 22
+
+            [database]
+            DB_TYPE = sqlite3
+            PATH = \(dataPath)/data/gitea.db
+
+            [service]
+            DISABLE_REGISTRATION = true
+            APPEOF
+            $sudo_cmd chown root:git /etc/gitea/app.ini; $sudo_cmd chmod 640 /etc/gitea/app.ini; \
+            $sudo_cmd tee "/etc/systemd/system/\(serviceName).service" >/dev/null <<'SVCEOF'
+            [Unit]
+            Description=Gitea
+            After=network.target
+
+            [Service]
+            Type=simple
+            User=git
+            Group=git
+            WorkingDirectory=\(dataPath)
+            ExecStart=\(installPath) web --config /etc/gitea/app.ini
+            Restart=always
+            RestartSec=2s
+
+            [Install]
+            WantedBy=multi-user.target
+            SVCEOF
+            """
+            timeout = 30
+        case "start_service":
+            command = """
+            \(sudo); \
+            $sudo_cmd systemctl daemon-reload; $sudo_cmd systemctl enable --now "\(serviceName).service"; \
+            status=$($sudo_cmd systemctl is-active "\(serviceName).service" 2>/dev/null || true); \
+            printf '__HHC_GITEA_VERSION__%s\\n' "\(context.version ?? "")"; \
+            printf '__HHC_GITEA_STATUS__%s\\n' "$status"; \
+            printf '__HHC_GITEA_URL__%s\\n' "\(externalURL)"
+            """
+            timeout = 30
+        default:
+            throw SSHClientError.processFailed("Unknown step: \(stepId)")
+        }
+
+        let result = try await CloudProviderRequestRunner.withTimeout(timeout) {
+            try await sshClient.execute(command, profile: profile)
+        }
+        guard result.exitCode == 0 else {
+            throw SSHClientError.processFailed(Self.redactedOutput(from: result, fallback: "Step '\(stepId)' failed."))
+        }
+        return result.stdout.trimmed
+    }
+
     static func validate(_ draft: GiteaInstallDraft) throws {
         guard let components = URLComponents(string: draft.externalURL.trimmed),
               ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
@@ -2272,6 +2497,11 @@ final class GiteaInstaller: @unchecked Sendable {
     private static func shellQuote(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
+}
+
+struct GiteaInstallContext: Sendable {
+    var architecture: String = ""
+    var version: String?
 }
 
 protocol GitServiceHTTPTransport: Sendable {

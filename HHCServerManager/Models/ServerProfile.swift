@@ -1677,6 +1677,22 @@ struct GiteaInstallResult: Codable, Equatable, Hashable, Sendable {
     var status: String
 }
 
+// MARK: - Install Step Progress
+
+enum InstallStepStatus: Equatable, Sendable {
+    case pending
+    case running
+    case completed(String)
+    case failed(String)
+}
+
+struct InstallStep: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let detail: String
+    var status: InstallStepStatus = .pending
+}
+
 enum GitNativeServiceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case gitea
     case gitLab

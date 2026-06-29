@@ -193,6 +193,8 @@ final class ServerWorkspaceViewModel: ObservableObject {
     @Published var gitLabActionMessage: String?
     @Published var giteaErrorMessage: String?
     @Published var giteaActionMessage: String?
+    @Published var giteaInstallSteps: [InstallStep] = []
+    @Published var gitLabInstallSteps: [InstallStep] = []
     @Published var giteaNativeSnapshot: GiteaNativeSnapshot?
     @Published var gitLabNativeSnapshot: GitLabNativeSnapshot?
     @Published var selectedGiteaPackageDetail: GiteaPackageDetail?
@@ -3910,6 +3912,173 @@ final class ServerWorkspaceViewModel: ObservableObject {
                     self.giteaErrorMessage = error.localizedDescription
                     self.isInstallingGitea = false
                 }
+            }
+        }
+    }
+
+    func installGiteaWithProgress(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        repository: ServerRepository
+    ) {
+        guard !isInstallingGitea else { return }
+        do {
+            try GiteaInstaller.validate(giteaDraft)
+        } catch {
+            giteaErrorMessage = error.localizedDescription
+            return
+        }
+        isInstallingGitea = true
+        giteaErrorMessage = nil
+        giteaActionMessage = nil
+        giteaInstallSteps = GiteaInstaller.installStepDefinitions(draft: giteaDraft)
+
+        Task {
+            let installer = GiteaInstaller()
+            var context = GiteaInstallContext()
+            var lastOutput = ""
+
+            for (index, step) in giteaInstallSteps.enumerated() {
+                await MainActor.run { self.giteaInstallSteps[index].status = .running }
+                do {
+                    let output = try await installer.executeStep(
+                        step.id,
+                        draft: giteaDraft,
+                        profile: profile,
+                        sshClient: sshClient,
+                        context: &context
+                    )
+                    lastOutput = output
+                    // Parse context from output
+                    if step.id == "env_check", let archMatch = output.range(of: "arch=(\\S+)", options: .regularExpression) {
+                        context.architecture = String(output[archMatch]).replacingOccurrences(of: "arch=", with: "")
+                    }
+                    if step.id == "get_version", let verMatch = output.range(of: "version=(\\S+)", options: .regularExpression) {
+                        context.version = String(output[verMatch]).replacingOccurrences(of: "version=", with: "")
+                    }
+                    await MainActor.run { self.giteaInstallSteps[index].status = .completed(output) }
+                } catch {
+                    await MainActor.run {
+                        self.giteaInstallSteps[index].status = .failed(error.localizedDescription)
+                        // Mark remaining steps as failed
+                        for i in (index + 1)..<self.giteaInstallSteps.count {
+                            self.giteaInstallSteps[i].status = .failed("已跳过")
+                        }
+                        self.giteaErrorMessage = error.localizedDescription
+                        self.isInstallingGitea = false
+                    }
+                    return
+                }
+            }
+
+            // Build result from context
+            let result = GiteaInstallResult(
+                externalURL: self.giteaDraft.externalURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                version: context.version,
+                status: "active"
+            )
+            self.saveRemoteChangeLog(
+                repository: repository,
+                profile: profile,
+                targetType: "code_hosting",
+                targetId: result.externalURL,
+                action: "install_gitea",
+                beforeSnapshot: nil,
+                afterSnapshot: "url=\(result.externalURL)\nversion=\(result.version ?? "")\nstatus=\(result.status)",
+                status: "success",
+                message: "Installed Gitea. Status: \(result.status)."
+            )
+            await MainActor.run {
+                self.giteaInstallResult = result
+                self.giteaActionMessage = "Installed Gitea. Open \(result.externalURL) in a browser to finish setup."
+                self.isInstallingGitea = false
+            }
+        }
+    }
+
+    func installGitLabWithProgress(
+        profile: ServerProfile,
+        sshClient: SSHClient,
+        gitLabInstaller: GitLabInstaller,
+        repository: ServerRepository
+    ) {
+        guard !isInstallingGitLab else { return }
+        do {
+            try GitLabInstaller.validate(gitLabDraft)
+        } catch {
+            gitLabErrorMessage = error.localizedDescription
+            return
+        }
+        isInstallingGitLab = true
+        gitLabErrorMessage = nil
+        gitLabActionMessage = nil
+        gitLabInstallSteps = GitLabInstaller.installStepDefinitions(draft: gitLabDraft)
+
+        Task {
+            var context = GitLabInstallContext()
+
+            for (index, step) in gitLabInstallSteps.enumerated() {
+                await MainActor.run { self.gitLabInstallSteps[index].status = .running }
+                do {
+                    let output = try await gitLabInstaller.executeStep(
+                        step.id,
+                        draft: gitLabDraft,
+                        profile: profile,
+                        sshClient: sshClient,
+                        context: &context
+                    )
+                    await MainActor.run { self.gitLabInstallSteps[index].status = .completed(output) }
+                } catch {
+                    await MainActor.run {
+                        self.gitLabInstallSteps[index].status = .failed(error.localizedDescription)
+                        for i in (index + 1)..<self.gitLabInstallSteps.count {
+                            self.gitLabInstallSteps[i].status = .failed("已跳过")
+                        }
+                        self.gitLabErrorMessage = error.localizedDescription
+                        self.isInstallingGitLab = false
+                    }
+                    return
+                }
+            }
+
+            // Load status and persist instance
+            let manager = GitLabManager(now: { Date() })
+            let snapshot = try await manager.loadStatus(draft: self.gitLabDraft, profile: profile, sshClient: sshClient)
+            let instance = GitLabServiceInstance(
+                id: UUID(),
+                serverId: profile.id,
+                edition: self.gitLabDraft.edition,
+                externalURL: self.gitLabDraft.externalURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                packageName: self.gitLabDraft.edition.packageName,
+                installedVersion: snapshot.version,
+                status: snapshot.status,
+                webURL: snapshot.externalURL ?? self.gitLabDraft.externalURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+            try? repository.upsertGitLabServiceInstance(instance)
+
+            self.saveRemoteChangeLog(
+                repository: repository,
+                profile: profile,
+                targetType: "code_hosting",
+                targetId: instance.externalURL,
+                action: "install_gitlab",
+                beforeSnapshot: nil,
+                afterSnapshot: "url=\(instance.externalURL)\nversion=\(snapshot.version ?? "")\nstatus=\(snapshot.status)",
+                status: "success",
+                message: "Installed GitLab CE. Status: \(snapshot.status)."
+            )
+            await MainActor.run {
+                self.gitLabInstallResult = GitLabInstallResult(
+                    instance: instance,
+                    healthCheckOutput: snapshot.webReachable ? "reachable" : "not reachable yet",
+                    statusOutput: snapshot.status
+                )
+                self.gitLabServiceInstance = instance
+                self.gitLabStatusSnapshot = snapshot
+                self.gitLabActionMessage = "Installed GitLab CE. Open \(instance.externalURL) in a browser."
+                self.isInstallingGitLab = false
             }
         }
     }
